@@ -58,6 +58,19 @@ export const INDEX_HTML = /* html */ `<!doctype html>
   }
   .mlw-toast { animation: mlw-toast-in 220ms cubic-bezier(.2,.7,.3,1) both; }
   .mlw-toast.leaving { animation: mlw-toast-out 220ms ease-in both; }
+
+  /* Force every form-row control to exactly the same 40px box. Browser
+     defaults give <select>, <input>, and <button> different intrinsic
+     heights even with Tailwind's preflight — this overrides them. */
+  main input[type="text"],
+  main input[type="tel"],
+  main select,
+  main button.gold-btn {
+    height: 40px !important;
+    min-height: 40px !important;
+    box-sizing: border-box;
+    line-height: 1;
+  }
 </style>
 
 <!-- ============================================================ -->
@@ -213,7 +226,7 @@ export const INDEX_HTML = /* html */ `<!doctype html>
           <label class="inline-flex items-center gap-2 h-10 px-3 border border-border rounded-md text-sm">
             <input id="new-char-gm" type="checkbox" class="accent-gold" /> GM
           </label>
-          <button id="add-char" class="inline-flex items-center justify-center h-10 px-4 rounded-md bg-gold text-bg font-semibold leading-none border border-transparent hover:brightness-110 transition">Adicionar</button>
+          <button id="add-char" class="gold-btn block px-4 rounded-md bg-gold text-bg font-semibold text-center border border-transparent hover:brightness-110 transition">Adicionar</button>
         </div>
       </div>
     </div>
@@ -235,7 +248,7 @@ export const INDEX_HTML = /* html */ `<!doctype html>
           </select>
           <input id="sub-thr" placeholder="valor"
             class="h-10 bg-bg border border-border rounded-md px-3 outline-none focus:border-gold/60" />
-          <button id="add-sub" class="inline-flex items-center justify-center h-10 px-4 rounded-md bg-gold text-bg font-semibold leading-none border border-transparent hover:brightness-110 transition">Adicionar</button>
+          <button id="add-sub" class="gold-btn block px-4 rounded-md bg-gold text-bg font-semibold text-center border border-transparent hover:brightness-110 transition">Adicionar</button>
         </div>
         <details class="mt-3 text-sm">
           <summary class="cursor-pointer text-muted hover:text-goldsoft">O que vai em "valor"?</summary>
