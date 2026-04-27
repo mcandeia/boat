@@ -1,7 +1,7 @@
 import type { CharacterRow, Env, ProfileSnapshot, SubscriptionRow } from "./types";
 import { parseMap, scrapeMany } from "./scraper";
 import { now } from "./util";
-import { sendWhatsApp } from "./whatsapp";
+import { escHtml, sendTelegram } from "./telegram";
 
 // One pass:
 //   1. Pick every distinct character name that has at least one active sub.
@@ -27,17 +27,17 @@ export async function pollOnce(env: Env): Promise<{ scraped: number; fired: numb
 
   const snapshots = await scrapeMany(env, names);
 
-  // Pull all character rows for those names, plus their owners' WhatsApp.
+  // Pull all character rows for those names, plus their owners' Telegram chat_id.
   const placeholders = names.map(() => "?").join(",");
   const charsRes = await env.DB
     .prepare(
-      `SELECT c.*, u.whatsapp AS owner_whatsapp
+      `SELECT c.*, u.telegram_chat_id AS owner_chat_id
          FROM characters c
          JOIN users u ON u.id = c.user_id
         WHERE c.name IN (${placeholders})`,
     )
     .bind(...names)
-    .all<CharacterRow & { owner_whatsapp: string }>();
+    .all<CharacterRow & { owner_chat_id: number }>();
 
   const subsRes = await env.DB
     .prepare(
@@ -50,7 +50,7 @@ export async function pollOnce(env: Env): Promise<{ scraped: number; fired: numb
     .bind(...names)
     .all<SubscriptionRow>();
 
-  const charsById = new Map<number, CharacterRow & { owner_whatsapp: string }>();
+  const charsById = new Map<number, CharacterRow & { owner_chat_id: number }>();
   for (const c of charsRes.results ?? []) charsById.set(c.id, c);
 
   const subsByChar = new Map<number, SubscriptionRow[]>();
@@ -89,9 +89,9 @@ export async function pollOnce(env: Env): Promise<{ scraped: number; fired: numb
       if (!trigger) continue;
 
       const msg = formatMessage(char.name, sub, snap);
-      const sendRes = await sendWhatsApp(env, char.owner_whatsapp, msg);
+      const sendRes = await sendTelegram(env, char.owner_chat_id, msg);
       if (!sendRes.ok) {
-        console.log(`whatsapp send failed for sub ${sub.id}: ${sendRes.status} ${sendRes.body}`);
+        console.log(`telegram send failed for sub ${sub.id}: ${sendRes.status} ${sendRes.body}`);
         continue;
       }
       await env.DB
@@ -172,24 +172,29 @@ function evaluate(
   }
 }
 
+// HTML messages — Telegram parse_mode: "HTML". Use escHtml on user-supplied
+// fields (character name, threshold, scraped map string) to be safe.
 function formatMessage(
   name: string,
   sub: SubscriptionRow,
   snap: ProfileSnapshot,
 ): string {
+  const n = escHtml(name);
+  const thr = escHtml(sub.threshold ?? "");
+  const map = escHtml(snap.map ?? "");
   switch (sub.event_type) {
     case "level_gte":
-      return `🎯 ${name} reached level ${snap.level} (target ${sub.threshold}).`;
+      return `🎯 <b>${n}</b> chegou no nível <b>${snap.level}</b> (alvo ${thr}).`;
     case "map_eq":
-      return `📍 ${name} entered ${snap.map}.`;
+      return `📍 <b>${n}</b> entrou em <b>${map}</b>.`;
     case "coords_in":
-      return `📍 ${name} is at ${snap.map} (zone match: ${sub.threshold}).`;
+      return `📍 <b>${n}</b> está em <b>${map}</b> (zona ${thr}).`;
     case "status_eq":
-      return `🟢 ${name} is now ${snap.status}.`;
+      return `🟢 <b>${n}</b> agora está <b>${escHtml(snap.status ?? "")}</b>.`;
     case "gm_online":
-      return `🛡️ GM ${name} just came online.`;
+      return `🛡️ GM <b>${n}</b> acabou de ficar online.`;
     case "server_event":
-      return `📣 Server event: ${sub.threshold}.`;
+      return `📣 Evento do servidor: <b>${thr}</b>.`;
   }
 }
 

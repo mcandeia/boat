@@ -61,7 +61,7 @@ export const INDEX_HTML = /* html */ `<!doctype html>
       <p><b class="text-goldsoft">É de graça.</b> Não tem assinatura, não tem upsell, não tem propaganda. A ideia é só se divertir e ajudar a galera a acompanhar os personagens sem ficar dando F5 no site do servidor.</p>
       <p><b class="text-goldsoft">Todas as informações aqui são públicas.</b> O painel só lê o que já está aberto em <code class="text-xs bg-bg px-1.5 py-0.5 rounded">mupatos.com.br/site/profile/character/&lt;nome&gt;</code>. Nada de invadir conta, nada de senha, nada de informação privada — é o mesmo dado que qualquer um vê visitando a página do personagem.</p>
       <p><b class="text-goldsoft">Isso NÃO é um bot de jogo.</b> Não automatiza ações dentro do MU, não joga por você, não clica em nada no servidor. Só lê uma página pública e dispara um WhatsApp quando algo que <i>você cadastrou</i> acontece (ex.: seu char passou de nível 360, entrou no Stadium, etc.).</p>
-      <p><b class="text-goldsoft">Os alertas chegam por WhatsApp.</b> Pra entrar a gente te manda um código de 6 dígitos no zap — sem senha, sem cadastro de email. Seu número fica salvo só pra te avisar.</p>
+      <p><b class="text-goldsoft">Os alertas chegam pelo Telegram.</b> Pra entrar você só clica em <i>Conectar com Telegram</i> e aperta <i>Iniciar</i> no bot — sem senha, sem código pra digitar, sem cadastrar email ou telefone. O Telegram só passa pro bot um <i>chat_id</i> e seu nome de exibição.</p>
       <p><b class="text-goldsoft">Se bugar, a culpa é do daddy.</b> Reclama com ele no jogo. (Xibata, vai com Deus.)</p>
       <div class="border-t border-border pt-3 mt-3 text-xs text-muted leading-relaxed">
         <p><b class="text-slate-300">Aviso legal.</b> Este painel é uma iniciativa pessoal do jogador <span class="text-goldsoft">daddy</span>. A equipe do Mu Patos <b>não tem envolvimento, afiliação ou responsabilidade</b> sobre este site. É um projeto gratuito feito por um jogador, sem vínculo oficial com o servidor. Qualquer problema, suporte ou reclamação deve ser direcionado ao daddy — não ao staff do Mu Patos.</p>
@@ -86,28 +86,27 @@ export const INDEX_HTML = /* html */ `<!doctype html>
   </header>
 
   <!-- ============================================================ -->
-  <!-- LOGIN                                                        -->
+  <!-- LOGIN (Telegram deep-link)                                   -->
   <!-- ============================================================ -->
   <section id="login" class="hidden bg-panel border border-border rounded-xl p-5 mb-5">
     <h2 class="text-xs uppercase tracking-widest text-muted mb-3">Entrar</h2>
-    <p class="text-sm text-slate-400 mb-3">Te enviamos um código de 6 dígitos no seu WhatsApp.</p>
+    <p class="text-sm text-slate-400 mb-4">Conecte com Telegram em um clique. Você não precisa criar conta nem digitar nada.</p>
 
-    <label class="text-xs text-muted block mb-1.5" for="phone">Número de WhatsApp</label>
-    <div class="flex gap-2">
-      <div class="flex flex-1 min-w-0">
-        <span class="inline-flex items-center px-3 bg-bg border border-r-0 border-border rounded-l-md text-muted tabular-nums">+55</span>
-        <input id="phone" type="tel" inputmode="numeric" placeholder="(83) 91234-5678" autocomplete="tel" maxlength="16"
-          class="flex-1 min-w-0 bg-bg border border-border rounded-r-md px-3 py-2 outline-none focus:border-gold/60 text-slate-100" />
-      </div>
-      <button id="send-pin" class="px-4 py-2 rounded-md bg-gold text-bg font-semibold hover:brightness-110 transition">Enviar código</button>
-    </div>
+    <button id="connect-tg" class="w-full sm:w-auto px-5 py-3 rounded-md bg-[#229ED9] text-white font-semibold hover:brightness-110 transition flex items-center justify-center gap-2">
+      <svg viewBox="0 0 24 24" class="h-5 w-5" fill="currentColor"><path d="M9.78 18.65l.28-4.23 7.68-6.92c.34-.31-.07-.46-.52-.19L7.74 13.3 3.64 12c-.88-.25-.89-.86.2-1.3l15.97-6.16c.73-.33 1.43.18 1.15 1.3l-2.72 12.81c-.19.91-.74 1.13-1.5.71l-4.13-3.05-1.99 1.93c-.23.23-.42.42-.84.42z"/></svg>
+      <span>Conectar com Telegram</span>
+    </button>
 
-    <div id="login-step2" class="hidden mt-3">
-      <label class="text-xs text-muted block mb-1.5" for="pin">Código de 6 dígitos</label>
-      <div class="flex gap-2">
-        <input id="pin" type="text" inputmode="numeric" maxlength="6" pattern="\\d{6}"
-          class="flex-1 bg-bg border border-border rounded-md px-3 py-2 outline-none focus:border-gold/60 text-slate-100 tabular-nums tracking-widest" />
-        <button id="verify-pin" class="px-4 py-2 rounded-md bg-gold text-bg font-semibold hover:brightness-110 transition">Verificar</button>
+    <div id="login-waiting" class="hidden mt-4 p-3 rounded-md border border-border bg-bg">
+      <div class="flex items-center gap-3">
+        <svg class="animate-spin h-5 w-5 text-gold" viewBox="0 0 24 24" fill="none">
+          <circle cx="12" cy="12" r="10" stroke="currentColor" stroke-opacity="0.25" stroke-width="4"></circle>
+          <path d="M4 12a8 8 0 018-8" stroke="currentColor" stroke-width="4" stroke-linecap="round"></path>
+        </svg>
+        <div class="text-sm">
+          <div class="text-slate-200">Aguardando você apertar <b class="text-goldsoft">Iniciar</b> no bot…</div>
+          <div class="text-xs text-muted mt-0.5">Não abriu o Telegram? <a id="login-deeplink" target="_blank" rel="noopener" class="text-goldsoft underline">clique aqui</a>.</div>
+        </div>
       </div>
     </div>
 
@@ -137,32 +136,31 @@ export const INDEX_HTML = /* html */ `<!doctype html>
           <span class="text-xs text-muted">expandir</span>
         </summary>
         <div class="mt-4 pt-4 border-t border-border space-y-4 text-sm leading-relaxed text-slate-300">
-          <p>Como os alertas chegam pelo número do bot no WhatsApp, dá pra dar a esse contato um <b class="text-goldsoft">toque exclusivo</b> e prioridade alta — assim você sabe na hora que é um alerta de level e não outra mensagem qualquer.</p>
+          <p>O Telegram permite definir um <b class="text-goldsoft">som de notificação por chat</b> e prioridade alta. Configure no chat com o bot pra saber na hora que é um alerta de level.</p>
 
           <div>
-            <div class="font-semibold text-goldsoft mb-1">📱 Android (WhatsApp)</div>
+            <div class="font-semibold text-goldsoft mb-1">📱 Android (Telegram)</div>
             <ol class="list-decimal list-inside space-y-1 text-slate-300">
-              <li>Abra a conversa do bot no WhatsApp.</li>
-              <li>Toque no nome do contato no topo → <b>Notificações personalizadas</b>.</li>
-              <li>Ative <b>Usar notificações personalizadas</b>.</li>
-              <li>Em <b>Som da notificação</b>, escolha um toque exclusivo (ex.: "Bamboo" ou um MP3 customizado).</li>
-              <li>Ligue <b>Vibração: longa</b> e <b>Prioridade: alta</b>.</li>
-              <li>(Opcional) Marque a conversa como <b>Conversa prioritária</b> — segure a conversa na lista, toque no ícone de estrela. Aparece em cima de tudo, inclusive no modo Não Perturbe.</li>
+              <li>Abra o chat do bot no Telegram.</li>
+              <li>Toque no nome do bot no topo → <b>Notificações</b>.</li>
+              <li>Em <b>Som</b>, escolha um som exclusivo (pode importar um MP3).</li>
+              <li>Em <b>Importância</b>, marque <b>Alta</b> ou <b>Urgente</b> — alertas urgentes ignoram o modo silencioso.</li>
+              <li>Ligue a <b>Vibração</b> em <i>Longa</i>.</li>
+              <li>(Opcional) Fixe o chat no topo da lista (ícone de pino) pra encontrar fácil.</li>
             </ol>
           </div>
 
           <div>
-            <div class="font-semibold text-goldsoft mb-1">🍏 iPhone (WhatsApp)</div>
+            <div class="font-semibold text-goldsoft mb-1">🍏 iPhone (Telegram)</div>
             <ol class="list-decimal list-inside space-y-1 text-slate-300">
-              <li>Abra a conversa do bot.</li>
-              <li>Toque no nome do contato no topo → <b>Notificações personalizadas</b>.</li>
-              <li>Ative o switch e escolha um <b>Som</b> exclusivo.</li>
-              <li>Volte aos <b>Ajustes do iPhone</b> → <b>Foco</b> → seu Foco ativo (ex.: "Não perturbar") → <b>Pessoas</b> → adicione o contato do bot em <b>Permitir notificações de</b>.</li>
-              <li>Em <b>Ajustes do iPhone</b> → <b>Notificações</b> → <b>WhatsApp</b>, ative <b>Notificações Sensíveis ao Tempo</b>.</li>
+              <li>Abra o chat do bot.</li>
+              <li>Toque no nome no topo → <b>Notificações</b>.</li>
+              <li>Em <b>Som</b>, escolha um som exclusivo.</li>
+              <li>Em <b>Personalizar Notificações</b>, marque o som e ative o badge.</li>
+              <li>Volte aos <b>Ajustes do iPhone</b> → <b>Foco</b> → seu Foco ativo → <b>Pessoas</b> → adicione o bot em <b>Permitir notificações de</b>.</li>
+              <li>Em <b>Ajustes do iPhone</b> → <b>Notificações</b> → <b>Telegram</b>, ative <b>Notificações Sensíveis ao Tempo</b>.</li>
             </ol>
           </div>
-
-          <p class="text-xs text-muted">Dica: salve o número do bot na sua agenda com um nome claro (ex.: <code class="bg-bg px-1.5 py-0.5 rounded">MU Alerta</code>) antes de configurar — fica mais fácil achar e o nome aparece nas notificações.</p>
         </div>
       </details>
     </div>
@@ -246,24 +244,6 @@ $("consent-accept").onclick = () => {
 };
 $("show-consent").onclick = (e) => { e.preventDefault(); showConsent(); };
 
-// ---- Phone formatting ----
-// (83) 91234-5678 / (11) 3456-7890 — reformat on each keystroke. The worker's
-// normalizePhone() prepends "55" automatically when we send digits-only.
-function formatBrPhone(input) {
-  const d = (input || "").replace(/\\D+/g, "").slice(0, 11);
-  if (d.length === 0) return "";
-  if (d.length <= 2) return "(" + d;
-  const ddd = d.slice(0, 2);
-  const rest = d.slice(2);
-  if (rest.length === 0) return "(" + ddd + ")";
-  if (rest.length <= 4) return "(" + ddd + ") " + rest;
-  if (rest.length <= 8) return "(" + ddd + ") " + rest.slice(0, rest.length - 4) + "-" + rest.slice(rest.length - 4);
-  return "(" + ddd + ") " + rest.slice(0, 5) + "-" + rest.slice(5);
-}
-const phoneEl = $("phone");
-phoneEl.addEventListener("input", () => { phoneEl.value = formatBrPhone(phoneEl.value); });
-const phoneDigits = () => phoneEl.value.replace(/\\D+/g, "");
-
 // ---- API helper ----
 const fetchJSON = async (url, opts = {}) => {
   const r = await fetch(url, { credentials: "same-origin", headers: { "content-type": "application/json" }, ...opts });
@@ -304,7 +284,9 @@ async function refresh() {
 function renderDash() {
   $("login").classList.add("hidden");
   $("dash").classList.remove("hidden");
-  $("me-phone").textContent = state.user.whatsapp;
+  const u = state.user;
+  const display = u.first_name || (u.username ? "@" + u.username : "Telegram");
+  $("me-phone").textContent = display;
 
   const cl = $("char-list");
   cl.innerHTML = "";
@@ -399,39 +381,49 @@ function renderDash() {
 }
 
 // ---- Auth handlers ----
-$("send-pin").onclick = async (e) => {
-  const btn = e.currentTarget;
+// ---- Telegram deep-link login ----
+let pollHandle = null;
+async function startTelegramLogin() {
   const m = $("login-msg");
   m.textContent = "";
   m.className = "text-sm mt-3 min-h-[1.25rem]";
+
+  // 1. Mint a token + deeplink.
+  let data;
   try {
-    await withSpinner(btn, () =>
-      fetchJSON("/api/auth/request-pin", { method: "POST", body: JSON.stringify({ whatsapp: phoneDigits() }) }),
-    );
-    $("login-step2").classList.remove("hidden");
-    m.classList.add("text-ok");
-    m.textContent = "Código enviado. Verifique seu WhatsApp.";
+    data = await fetchJSON("/api/auth/telegram/start", { method: "POST" });
   } catch (err) {
     m.classList.add("text-danger");
     m.textContent = err.message;
+    return;
   }
-};
-$("verify-pin").onclick = async (e) => {
-  const btn = e.currentTarget;
-  const m = $("login-msg");
-  m.textContent = "";
-  m.className = "text-sm mt-3 min-h-[1.25rem]";
-  try {
-    const pin = $("pin").value.trim();
-    await withSpinner(btn, () =>
-      fetchJSON("/api/auth/verify-pin", { method: "POST", body: JSON.stringify({ whatsapp: phoneDigits(), pin }) }),
-    );
-    refresh();
-  } catch (err) {
-    m.classList.add("text-danger");
-    m.textContent = err.message;
-  }
-};
+
+  // 2. Open Telegram. Pop a new tab — user can also tap the fallback link.
+  $("login-deeplink").href = data.deeplink;
+  $("login-waiting").classList.remove("hidden");
+  window.open(data.deeplink, "_blank", "noopener");
+
+  // 3. Poll until redeemed (or expired/invalid).
+  if (pollHandle) clearInterval(pollHandle);
+  pollHandle = setInterval(async () => {
+    try {
+      const res = await fetch("/api/auth/telegram/status?token=" + encodeURIComponent(data.token), { credentials: "same-origin" });
+      const body = await res.json().catch(() => ({}));
+      if (res.status === 200 && body.ok) {
+        clearInterval(pollHandle); pollHandle = null;
+        refresh();
+        return;
+      }
+      if (res.status === 410 || res.status === 404) {
+        clearInterval(pollHandle); pollHandle = null;
+        $("login-waiting").classList.add("hidden");
+        m.classList.add("text-danger");
+        m.textContent = body.error || "login expirou — tente de novo";
+      }
+    } catch {}
+  }, 2000);
+}
+$("connect-tg").onclick = startTelegramLogin;
 $("logout").onclick = async () => {
   await fetchJSON("/api/auth/logout", { method: "POST" });
   location.reload();

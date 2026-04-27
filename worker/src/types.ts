@@ -5,20 +5,16 @@ export interface Env {
   BROWSER: BrowserWorker;
 
   PROFILE_BASE_URL: string;
-  PIN_TTL_SECONDS: string;
+  LOGIN_TOKEN_TTL_SECONDS: string;  // pending_logins TTL (deep-link auth)
   SESSION_TTL_DAYS: string;
   COOLDOWN_SECONDS: string;
   COOKIE_NAME: string;
+  TELEGRAM_BOT_USERNAME: string;    // e.g. "mu_patos_bot" — public, no @
 
   // Set with `wrangler secret put`
   SESSION_SECRET?: string;          // HMAC key for the session cookie
-
-  // Z-API (https://z-api.io) — pinned to a single instance, plain-text sends.
-  // Stub mode (logs to console) when ZAPI_INSTANCE_ID is unset.
-  ZAPI_BASE_URL?: string;           // default https://api.z-api.io
-  ZAPI_INSTANCE_ID?: string;        // per-instance id, in the URL
-  ZAPI_INSTANCE_TOKEN?: string;     // per-instance token, in the URL (secret)
-  ZAPI_CLIENT_TOKEN?: string;       // account-level Client-Token header (secret)
+  TELEGRAM_BOT_TOKEN?: string;      // BotFather token; stub mode if missing
+  TELEGRAM_WEBHOOK_SECRET?: string; // checked against X-Telegram-Bot-Api-Secret-Token
 }
 
 export type EventType =
@@ -31,8 +27,20 @@ export type EventType =
 
 export interface UserRow {
   id: number;
-  whatsapp: string;
+  telegram_chat_id: number;
+  telegram_username: string | null;
+  first_name: string | null;
   created_at: number;
+}
+
+export interface PendingLoginRow {
+  token: string;
+  created_at: number;
+  expires_at: number;
+  redeemed_at: number | null;
+  chat_id: number | null;
+  username: string | null;
+  first_name: string | null;
 }
 
 export interface CharacterRow {

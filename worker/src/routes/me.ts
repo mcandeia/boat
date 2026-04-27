@@ -3,7 +3,7 @@ import { bad, json } from "../util";
 
 export async function me(env: Env, userId: number): Promise<Response> {
   const user = await env.DB
-    .prepare("SELECT id, whatsapp, created_at FROM users WHERE id = ?")
+    .prepare("SELECT * FROM users WHERE id = ?")
     .bind(userId)
     .first<UserRow>();
   if (!user) return bad(401, "sessão inválida");
@@ -22,5 +22,13 @@ export async function me(env: Env, userId: number): Promise<Response> {
       .all<SubscriptionRow>()
   ).results ?? [];
 
-  return json({ user, characters, subscriptions });
+  return json({
+    user: {
+      id: user.id,
+      first_name: user.first_name,
+      username: user.telegram_username,
+    },
+    characters,
+    subscriptions,
+  });
 }

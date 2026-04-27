@@ -1,7 +1,7 @@
 import type { Env } from "./types";
 import { bad, json } from "./util";
 import { readSession } from "./session";
-import { logout, requestPin, verifyPin } from "./routes/auth";
+import { logout, pollTelegramLogin, startTelegramLogin } from "./routes/auth";
 import {
   createCharacter,
   deleteCharacter,
@@ -15,7 +15,9 @@ import {
   toggleSubscription,
 } from "./routes/subscriptions";
 import { me } from "./routes/me";
+import { telegramWebhook } from "./routes/telegram-webhook";
 import { pollOnce } from "./poll";
+import { setTelegramWebhook } from "./telegram";
 import { INDEX_HTML } from "./ui";
 
 export default {
@@ -33,9 +35,18 @@ export default {
       }
 
       // ---- public auth routes ----
-      if (pathname === "/api/auth/request-pin" && method === "POST") return await requestPin(env, req);
-      if (pathname === "/api/auth/verify-pin" && method === "POST") return await verifyPin(env, req);
+      if (pathname === "/api/auth/telegram/start" && method === "POST") {
+        return await startTelegramLogin(env);
+      }
+      if (pathname === "/api/auth/telegram/status" && method === "GET") {
+        return await pollTelegramLogin(env, url.searchParams.get("token") ?? "");
+      }
       if (pathname === "/api/auth/logout" && method === "POST") return logout(env);
+
+      // ---- Telegram webhook (public, secret-token guarded) ----
+      if (pathname === "/api/telegram/webhook" && method === "POST") {
+        return await telegramWebhook(env, req);
+      }
 
       // ---- everything below requires a session ----
       const sess = await readSession(env, cookie);
@@ -64,14 +75,21 @@ export default {
         return await toggleSubscription(env, userId, Number(subMatch[1]), req);
       }
 
-      // Manual cron trigger for testing — guarded by an admin secret.
-      if (pathname === "/admin/poll" && method === "POST") {
+      // ---- admin (Bearer SESSION_SECRET) ----
+      if (pathname.startsWith("/admin/")) {
         const auth = req.headers.get("authorization");
         if (!env.SESSION_SECRET || auth !== `Bearer ${env.SESSION_SECRET}`) {
           return bad(403, "proibido");
         }
-        const r = await pollOnce(env);
-        return json({ ok: true, ...r });
+        if (pathname === "/admin/poll" && method === "POST") {
+          const r = await pollOnce(env);
+          return json({ ok: true, ...r });
+        }
+        if (pathname === "/admin/telegram/set-webhook" && method === "POST") {
+          const webhookUrl = `${url.origin}/api/telegram/webhook`;
+          const r = await setTelegramWebhook(env, webhookUrl);
+          return json({ ok: r.ok, status: r.status, body: r.body, webhookUrl });
+        }
       }
 
       return bad(404, "rota não encontrada");

@@ -6,7 +6,6 @@ compatibility_flags = ["nodejs_compat"]
 # ---------------------------------------------------------------------------
 # Cloudflare Browser Rendering — needed because mupatos.com.br blocks
 # raw fetch() requests with a 403; only a real Chromium gets through.
-# Requires Workers Paid (Browser Rendering free tier is generous though).
 # ---------------------------------------------------------------------------
 
 browser = { binding = "BROWSER" }
@@ -19,25 +18,21 @@ browser = { binding = "BROWSER" }
 crons = ["*/5 * * * *"]
 
 # ---------------------------------------------------------------------------
-# Plain (non-secret) variables. Real secrets go in `wrangler secret put`.
+# Plain (non-secret) variables.
 # ---------------------------------------------------------------------------
 
 [vars]
-PROFILE_BASE_URL    = "https://mupatos.com.br/site/profile/character"
-PIN_TTL_SECONDS     = "600"        # 10 minutes
-SESSION_TTL_DAYS    = "30"
-COOLDOWN_SECONDS    = "21600"      # don't re-fire the same alert within 6h
-COOKIE_NAME         = "mlw_sess"
+PROFILE_BASE_URL         = "https://mupatos.com.br/site/profile/character"
+LOGIN_TOKEN_TTL_SECONDS  = "600"        # 10 minutes for deep-link auth
+SESSION_TTL_DAYS         = "30"
+COOLDOWN_SECONDS         = "21600"      # don't re-fire the same alert within 6h
+COOKIE_NAME              = "mlw_sess"
 
-# Z-API (WhatsApp). The instance id is in plain config; the per-instance
-# token and the account-level Client-Token are secrets, set as GitHub
-# Actions secrets and pushed by `cloudflare/wrangler-action` on deploy.
-ZAPI_BASE_URL    = "https://api.z-api.io"
-ZAPI_INSTANCE_ID = "3F24723A556D01145B1EC60C7A17E6CF"
+# Telegram. TELEGRAM_BOT_TOKEN + TELEGRAM_WEBHOOK_SECRET are GH Action secrets.
+TELEGRAM_BOT_USERNAME    = "mu_patos_bot"
 
 # ---------------------------------------------------------------------------
-# Storage. Top-level fields above must come before any [[section]] in TOML —
-# d1_databases is at the bottom on purpose.
+# Storage. Top-level fields above must come before any [[section]] in TOML.
 # ---------------------------------------------------------------------------
 
 [[d1_databases]]

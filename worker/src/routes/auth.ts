@@ -1,103 +1,87 @@
-import type { Env, UserRow } from "../types";
-import { bad, json, normalizePhone, now, randomPin, sha256Hex } from "../util";
+import type { Env, PendingLoginRow, UserRow } from "../types";
+import { bad, json, now } from "../util";
 import { createSession, setCookieHeader, clearCookieHeader } from "../session";
-import { sendWhatsApp } from "../whatsapp";
 
-const MAX_ATTEMPTS = 5;
-const RESEND_COOLDOWN = 30; // seconds between PIN resends
+// ---- Telegram deep-link auth ----
+//
+// Flow:
+//   1. Browser POSTs /api/auth/telegram/start. We mint a random token,
+//      insert a pending_logins row with TTL, return { token, deeplink }.
+//   2. Browser opens the deeplink (t.me/<bot>?start=<token>) — Telegram opens.
+//      User taps "Start". Telegram pushes /start <token> to our webhook.
+//   3. Webhook handler fills in chat_id + names, sets redeemed_at.
+//   4. Browser polls /api/auth/telegram/status?token=<token>. As soon as the
+//      row is redeemed, we upsert the user, issue a session cookie, and
+//      delete the pending row.
 
-export async function requestPin(env: Env, req: Request): Promise<Response> {
-  const body = await req.json().catch(() => ({})) as { whatsapp?: string };
-  const phone = normalizePhone(body.whatsapp ?? "");
-  if (!phone) return bad(400, "número de WhatsApp inválido");
+const TOKEN_BYTES = 16;
 
-  const ttl = Number(env.PIN_TTL_SECONDS || "600");
-  const t = now();
-
-  const existing = await env.DB
-    .prepare("SELECT resend_after FROM pins WHERE whatsapp = ?")
-    .bind(phone)
-    .first<{ resend_after: number }>();
-  if (existing && existing.resend_after > t) {
-    return bad(429, `aguarde ${existing.resend_after - t}s antes de pedir um novo código`);
-  }
-
-  const pin = randomPin();
-  const pinHash = await sha256Hex(pin);
-  const expiresAt = t + ttl;
-  const resendAfter = t + RESEND_COOLDOWN;
-
-  await env.DB
-    .prepare(
-      `INSERT INTO pins (whatsapp, pin_hash, expires_at, attempts, resend_after)
-       VALUES (?, ?, ?, 0, ?)
-       ON CONFLICT(whatsapp) DO UPDATE SET
-         pin_hash = excluded.pin_hash,
-         expires_at = excluded.expires_at,
-         attempts = 0,
-         resend_after = excluded.resend_after`,
-    )
-    .bind(phone, pinHash, expiresAt, resendAfter)
-    .run();
-
-  const send = await sendWhatsApp(
-    env,
-    phone,
-    `Seu código de acesso ao Painel do jogador Mu Patos é ${pin}. Expira em ${Math.round(ttl / 60)} minutos.`,
-  );
-  if (!send.ok) {
-    // 503 = our preflight detected the bot WhatsApp is disconnected; surface
-    // the message verbatim. Other failures get a generic message.
-    if (send.status === 503) return bad(503, send.body);
-    return bad(502, `falha ao enviar WhatsApp (${send.status})`);
-  }
-  return json({ ok: true, expires_in: ttl });
+function randomToken(): string {
+  const buf = crypto.getRandomValues(new Uint8Array(TOKEN_BYTES));
+  return [...buf].map((b) => b.toString(16).padStart(2, "0")).join("");
 }
 
-export async function verifyPin(env: Env, req: Request): Promise<Response> {
-  const body = await req.json().catch(() => ({})) as { whatsapp?: string; pin?: string };
-  const phone = normalizePhone(body.whatsapp ?? "");
-  const pin = (body.pin ?? "").trim();
-  if (!phone) return bad(400, "número de WhatsApp inválido");
-  if (!/^\d{6}$/.test(pin)) return bad(400, "o código deve ter 6 dígitos");
+export async function startTelegramLogin(env: Env): Promise<Response> {
+  const token = randomToken();
+  const t = now();
+  const ttl = Number(env.LOGIN_TOKEN_TTL_SECONDS || "600");
+  await env.DB
+    .prepare("INSERT INTO pending_logins (token, created_at, expires_at) VALUES (?, ?, ?)")
+    .bind(token, t, t + ttl)
+    .run();
+  const deeplink = `https://t.me/${env.TELEGRAM_BOT_USERNAME}?start=${token}`;
+  return json({ token, deeplink, expires_in: ttl });
+}
+
+export async function pollTelegramLogin(env: Env, token: string): Promise<Response> {
+  if (!/^[0-9a-f]{32}$/.test(token)) return bad(400, "token inválido");
 
   const row = await env.DB
-    .prepare("SELECT pin_hash, expires_at, attempts FROM pins WHERE whatsapp = ?")
-    .bind(phone)
-    .first<{ pin_hash: string; expires_at: number; attempts: number }>();
-  if (!row) return bad(400, "nenhum código pendente — peça um novo");
-  if (row.expires_at < now()) return bad(400, "código expirado — peça um novo");
-  if (row.attempts >= MAX_ATTEMPTS) return bad(429, "tentativas demais — peça um novo código");
+    .prepare("SELECT * FROM pending_logins WHERE token = ?")
+    .bind(token)
+    .first<PendingLoginRow>();
+  if (!row) return bad(404, "token não encontrado");
 
-  const submittedHash = await sha256Hex(pin);
-  if (submittedHash !== row.pin_hash) {
-    await env.DB
-      .prepare("UPDATE pins SET attempts = attempts + 1 WHERE whatsapp = ?")
-      .bind(phone)
-      .run();
-    return bad(400, "código incorreto");
+  if (row.expires_at < now()) {
+    await env.DB.prepare("DELETE FROM pending_logins WHERE token = ?").bind(token).run();
+    return bad(410, "token expirado — recomece o login");
   }
 
-  // Upsert user, then issue session.
+  if (row.redeemed_at == null || row.chat_id == null) {
+    return json({ pending: true });
+  }
+
+  // Upsert the user, issue a session cookie, and clean up the pending row.
   await env.DB
     .prepare(
-      `INSERT INTO users (whatsapp, created_at) VALUES (?, ?)
-       ON CONFLICT(whatsapp) DO NOTHING`,
+      `INSERT INTO users (telegram_chat_id, telegram_username, first_name, created_at)
+         VALUES (?, ?, ?, ?)
+       ON CONFLICT(telegram_chat_id) DO UPDATE SET
+         telegram_username = excluded.telegram_username,
+         first_name = excluded.first_name`,
     )
-    .bind(phone, now())
+    .bind(row.chat_id, row.username, row.first_name, now())
     .run();
+
   const user = await env.DB
-    .prepare("SELECT id, whatsapp, created_at FROM users WHERE whatsapp = ?")
-    .bind(phone)
+    .prepare("SELECT * FROM users WHERE telegram_chat_id = ?")
+    .bind(row.chat_id)
     .first<UserRow>();
   if (!user) return bad(500, "não foi possível carregar o usuário");
 
-  await env.DB.prepare("DELETE FROM pins WHERE whatsapp = ?").bind(phone).run();
+  await env.DB.prepare("DELETE FROM pending_logins WHERE token = ?").bind(token).run();
 
-  const token = await createSession(env, user.id);
+  const sessionToken = await createSession(env, user.id);
   return json(
-    { ok: true, user: { id: user.id, whatsapp: user.whatsapp } },
-    { headers: { "set-cookie": setCookieHeader(env, token) } },
+    {
+      ok: true,
+      user: {
+        id: user.id,
+        first_name: user.first_name,
+        username: user.telegram_username,
+      },
+    },
+    { headers: { "set-cookie": setCookieHeader(env, sessionToken) } },
   );
 }
 

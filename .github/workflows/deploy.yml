@@ -39,9 +39,9 @@ jobs:
           workingDirectory: worker
           command: d1 migrations apply mu-watcher --remote
 
-      # The `secrets:` block tells wrangler-action to push these as Worker
-      # secrets *before* deploying, sourced from the env: below. That way
-      # everything lives in GitHub Actions secrets — no `wrangler secret put`.
+      # Push secrets into the Worker, then deploy. wrangler-action takes the
+      # `secrets:` block, reads each name from the env: below, and runs
+      # `wrangler secret bulk` before the deploy command.
       - name: Deploy
         uses: cloudflare/wrangler-action@v3
         with:
@@ -51,9 +51,22 @@ jobs:
           command: deploy
           secrets: |
             SESSION_SECRET
-            ZAPI_INSTANCE_TOKEN
-            ZAPI_CLIENT_TOKEN
+            TELEGRAM_BOT_TOKEN
+            TELEGRAM_WEBHOOK_SECRET
         env:
           SESSION_SECRET: ${{ secrets.SESSION_SECRET }}
-          ZAPI_INSTANCE_TOKEN: ${{ secrets.ZAPI_INSTANCE_TOKEN }}
-          ZAPI_CLIENT_TOKEN: ${{ secrets.ZAPI_CLIENT_TOKEN }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_WEBHOOK_SECRET: ${{ secrets.TELEGRAM_WEBHOOK_SECRET }}
+
+      # Idempotent: tells Telegram to deliver bot updates to our worker URL.
+      # secret_token gets included in X-Telegram-Bot-Api-Secret-Token on every
+      # delivery; the webhook handler verifies it.
+      - name: Register Telegram webhook
+        run: |
+          curl -sS -X POST "https://api.telegram.org/bot${{ secrets.TELEGRAM_BOT_TOKEN }}/setWebhook" \
+            -H "content-type: application/json" \
+            -d '{
+              "url": "https://mu-level-watcher.mcandeia.workers.dev/api/telegram/webhook",
+              "secret_token": "${{ secrets.TELEGRAM_WEBHOOK_SECRET }}",
+              "allowed_updates": ["message"]
+            }' | jq -e '.ok == true'
