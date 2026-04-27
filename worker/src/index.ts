@@ -49,6 +49,17 @@ export default {
         return await telegramWebhook(env, req);
       }
 
+      // TEMP diagnostic — public, runs a Browser Rendering scrape on a
+      // hard-coded char and returns the raw snapshot. Remove once the
+      // scrape pipeline is verified end-to-end.
+      if (pathname === "/diag/scrape" && method === "GET") {
+        const name = url.searchParams.get("name") || "daddy";
+        const t0 = Date.now();
+        const { scrapeOne } = await import("./scraper");
+        const snap = await scrapeOne(env, name, { totalTimeoutMs: 25_000 });
+        return json({ name, took_ms: Date.now() - t0, snap });
+      }
+
       // ---- everything below requires a session ----
       const sess = await readSession(env, cookie);
       if (!sess) return bad(401, "você não está autenticado");
