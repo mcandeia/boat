@@ -49,6 +49,43 @@ export default {
         return await telegramWebhook(env, req);
       }
 
+      // TEMP diagnostic 2: plain fetch() with browser-like headers.
+      // mupatos.com.br is fronted by Cloudflare; CF-to-CF traffic might
+      // pass where curl-from-laptop gets 403. If this works, we can
+      // ditch Browser Rendering entirely.
+      if (pathname === "/diag/fetch" && method === "GET") {
+        const name = url.searchParams.get("name") || "daddy";
+        const target = `${env.PROFILE_BASE_URL}/${encodeURIComponent(name)}`;
+        const t0 = Date.now();
+        try {
+          const res = await fetch(target, {
+            headers: {
+              "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+              "accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
+              "accept-language": "pt-BR,pt;q=0.9,en;q=0.8",
+              "accept-encoding": "gzip, deflate, br",
+              "sec-fetch-dest": "document",
+              "sec-fetch-mode": "navigate",
+              "sec-fetch-site": "none",
+              "sec-fetch-user": "?1",
+              "upgrade-insecure-requests": "1",
+            },
+          });
+          const text = await res.text();
+          return json({
+            took_ms: Date.now() - t0,
+            status: res.status,
+            content_type: res.headers.get("content-type"),
+            length: text.length,
+            // Only useful if we got HTML — show the table area we'd parse.
+            has_profile_table: /<td[^>]*>\s*Personagem\s*<\/td>/i.test(text),
+            head: text.slice(0, 600),
+          });
+        } catch (err) {
+          return json({ error: (err as Error).message, took_ms: Date.now() - t0 });
+        }
+      }
+
       // TEMP diagnostic — runs Browser Rendering directly so we can see
       // any thrown error message verbatim instead of swallowing it.
       if (pathname === "/diag/scrape" && method === "GET") {
