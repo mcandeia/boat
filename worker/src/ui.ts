@@ -44,6 +44,22 @@ export const INDEX_HTML = /* html */ `<!doctype html>
 </head>
 <body class="text-slate-100 min-h-screen antialiased">
 
+<!-- Toast host. Stacks notifications top-right; each toast slides in and
+     auto-removes after a few seconds. -->
+<div id="toasts" class="fixed top-4 right-4 z-[60] flex flex-col items-end gap-2 pointer-events-none max-w-[calc(100%-2rem)]"></div>
+<style>
+  @keyframes mlw-toast-in {
+    from { transform: translateX(120%); opacity: 0; }
+    to   { transform: translateX(0);    opacity: 1; }
+  }
+  @keyframes mlw-toast-out {
+    from { transform: translateX(0);    opacity: 1; }
+    to   { transform: translateX(120%); opacity: 0; }
+  }
+  .mlw-toast { animation: mlw-toast-in 220ms cubic-bezier(.2,.7,.3,1) both; }
+  .mlw-toast.leaving { animation: mlw-toast-out 220ms ease-in both; }
+</style>
+
 <!-- ============================================================ -->
 <!-- CONSENT GATE                                                 -->
 <!-- ============================================================ -->
@@ -132,7 +148,6 @@ export const INDEX_HTML = /* html */ `<!doctype html>
       </div>
     </div>
 
-    <div id="login-msg" class="text-sm mt-3 min-h-[1.25rem]"></div>
   </section>
 
   <!-- ============================================================ -->
@@ -200,7 +215,6 @@ export const INDEX_HTML = /* html */ `<!doctype html>
           </label>
           <button id="add-char" class="h-10 px-4 rounded-md bg-gold text-bg font-semibold border border-transparent hover:brightness-110 transition">Adicionar</button>
         </div>
-        <div id="char-msg" class="text-sm text-danger mt-2 min-h-[1.25rem]"></div>
       </div>
     </div>
 
@@ -223,7 +237,6 @@ export const INDEX_HTML = /* html */ `<!doctype html>
             class="h-10 bg-bg border border-border rounded-md px-3 outline-none focus:border-gold/60" />
           <button id="add-sub" class="h-10 px-4 rounded-md bg-gold text-bg font-semibold border border-transparent hover:brightness-110 transition">Adicionar</button>
         </div>
-        <div id="sub-msg" class="text-sm text-danger mt-2 min-h-[1.25rem]"></div>
         <details class="mt-3 text-sm">
           <summary class="cursor-pointer text-muted hover:text-goldsoft">O que vai em "valor"?</summary>
           <ul class="mt-2 space-y-1 text-slate-300">
@@ -284,6 +297,31 @@ $("consent-accept").onclick = () => {
 $("consent-close").onclick = hideConsent;
 $("show-consent").onclick = (e) => { e.preventDefault(); showConsent(); };
 
+// ---- Toasts ----
+// kind: "ok" | "err" | "info" (default). Auto-dismiss after the ttl arg
+// (ms); the user can also click a toast to dismiss it.
+function toast(message, kind = "info", ttl = 4500) {
+  const host = $("toasts");
+  if (!host) return;
+  const el = document.createElement("div");
+  const palette = kind === "ok"
+    ? "bg-ok/15 border-ok/40 text-ok"
+    : kind === "err"
+    ? "bg-danger/15 border-danger/40 text-danger"
+    : "bg-panel border-border text-slate-200";
+  el.className =
+    "mlw-toast pointer-events-auto cursor-pointer min-w-[220px] max-w-sm border rounded-md px-3 py-2 text-sm shadow-lg backdrop-blur " + palette;
+  el.textContent = message;
+  const dismiss = () => {
+    if (el.classList.contains("leaving")) return;
+    el.classList.add("leaving");
+    setTimeout(() => el.remove(), 250);
+  };
+  el.onclick = dismiss;
+  host.appendChild(el);
+  if (ttl > 0) setTimeout(dismiss, ttl);
+}
+
 // ---- API helper ----
 const fetchJSON = async (url, opts = {}) => {
   const r = await fetch(url, { credentials: "same-origin", headers: { "content-type": "application/json" }, ...opts });
@@ -330,29 +368,53 @@ function relativeTime(unixSeconds) {
   if (diff < 86400) return Math.floor(diff / 3600) + "h atrás";
   return Math.floor(diff / 86400) + " d atrás";
 }
+function escapeHtml(s) {
+  return String(s).replace(/[&<>]/g, (c) => c === "&" ? "&amp;" : c === "<" ? "&lt;" : "&gt;");
+}
+function statRow(label, value) {
+  return '<div class="flex justify-between gap-3 py-1.5 border-b border-border/60 last:border-0">' +
+    '<span class="text-muted">' + escapeHtml(label) + '</span>' +
+    '<span class="text-slate-100 text-right">' + value + '</span>' +
+    '</div>';
+}
 function renderCharLeft(container, c) {
-  const tags = [];
-  if (c.class) tags.push(c.class);
-  if (typeof c.resets === "number") tags.push("R" + c.resets);
-  if (c.last_level != null) tags.push("Nv " + c.last_level);
-  if (c.last_map) tags.push(c.last_map);
-  if (c.is_gm) tags.push('<span class="px-2 py-0.5 rounded-full bg-gold/10 text-goldsoft text-xs border border-gold/20">GM</span>');
-  if (c.last_status) {
-    const cls = c.last_status === "Online"
-      ? 'bg-ok/10 text-ok border-ok/20'
-      : 'bg-border text-muted border-border';
-    tags.push('<span class="px-2 py-0.5 rounded-full ' + cls + ' text-xs border">' + c.last_status + '</span>');
+  const profileUrl = "https://mupatos.com.br/site/profile/character/" + encodeURIComponent(c.name);
+
+  // Loading state — first scrape hasn't landed yet.
+  if (c.last_checked_at == null) {
+    container.innerHTML =
+      '<a href="' + profileUrl + '" target="_blank" rel="noopener" class="font-semibold text-goldsoft text-base hover:underline">' + escapeHtml(c.name) + '</a>' +
+      '<div class="text-xs text-muted italic mt-1">carregando…</div>';
+    return;
   }
-  if (tags.length === 0 && c.last_checked_at == null) {
-    tags.push('<span class="text-muted italic">carregando…</span>');
-  }
+
+  const statusBadge = c.last_status
+    ? (c.last_status === "Online"
+        ? '<span class="px-2 py-0.5 rounded-full bg-ok/10 text-ok border border-ok/20 text-xs">Online</span>'
+        : '<span class="px-2 py-0.5 rounded-full bg-border text-muted border border-border text-xs">Offline</span>')
+    : '<span class="text-muted text-xs">—</span>';
+
+  const rows = [];
+  rows.push(statRow("Classe", c.class ? escapeHtml(c.class) : '<span class="text-muted">—</span>'));
+  rows.push(statRow("Resets", typeof c.resets === "number" ? String(c.resets) : '<span class="text-muted">—</span>'));
+  rows.push(statRow("Level", c.last_level != null ? '<b class="text-goldsoft">' + c.last_level + '</b>' : '<span class="text-muted">—</span>'));
+  rows.push(statRow("Mapa", c.last_map ? escapeHtml(c.last_map) : '<span class="text-muted">—</span>'));
+  rows.push(statRow("Situação", statusBadge));
+
   const checked = relativeTime(c.last_checked_at);
   const checkedLine = checked
-    ? '<div class="text-[11px] text-muted mt-1">atualizado ' + checked + '</div>'
+    ? '<div class="text-[11px] text-muted mt-2">atualizado ' + checked + '</div>'
     : '';
-  container.innerHTML = '<div class="font-semibold text-goldsoft">' + c.name + '</div>' +
-    '<div class="text-xs text-muted mt-0.5 flex flex-wrap gap-x-2 gap-y-1 items-center">' +
-    tags.join('<span class="text-border">·</span>') + '</div>' +
+  const gmTag = c.is_gm
+    ? ' <span class="ml-2 px-2 py-0.5 rounded-full bg-gold/10 text-goldsoft text-xs border border-gold/20 align-middle">GM</span>'
+    : '';
+
+  container.innerHTML =
+    '<div class="flex items-baseline gap-2 mb-2">' +
+      '<a href="' + profileUrl + '" target="_blank" rel="noopener" class="font-semibold text-goldsoft text-base hover:underline">' + escapeHtml(c.name) + '</a>' +
+      gmTag +
+    '</div>' +
+    '<div class="text-xs">' + rows.join("") + '</div>' +
     checkedLine;
 }
 
@@ -380,7 +442,7 @@ async function refreshCharacterRow(li, id, silent = false) {
       console.warn("refresh: scrape didn't complete for char", id);
     }
   } catch (e) {
-    if (!silent) alert(e.message);
+    if (!silent) toast(e.message, "err");
   } finally {
     if (btn) {
       btn.disabled = false;
@@ -404,10 +466,10 @@ function renderDash() {
   const stale = []; // chars that need a background refresh
   for (const c of state.characters) {
     const li = document.createElement("li");
-    li.className = "py-3 flex items-center justify-between gap-3";
+    li.className = "py-3 flex items-start justify-between gap-3";
     li.dataset.charId = c.id;
     const left = document.createElement("div");
-    left.className = "min-w-0";
+    left.className = "min-w-0 flex-1";
     renderCharLeft(left, c);
     const right = document.createElement("div");
     right.className = "flex items-center gap-2 shrink-0";
@@ -562,16 +624,11 @@ function makeOptionButton({ href, primary, icon, label, hint }) {
   return a;
 }
 async function startTelegramLogin() {
-  const m = $("login-msg");
-  m.textContent = "";
-  m.className = "text-sm mt-3 min-h-[1.25rem]";
-
   let data;
   try {
     data = await fetchJSON("/api/auth/telegram/start", { method: "POST" });
   } catch (err) {
-    m.classList.add("text-danger");
-    m.textContent = err.message;
+    toast(err.message, "err");
     return;
   }
 
@@ -621,8 +678,7 @@ async function startTelegramLogin() {
       if (res.status === 410 || res.status === 404) {
         clearInterval(pollHandle); pollHandle = null;
         $("login-waiting").classList.add("hidden");
-        m.classList.add("text-danger");
-        m.textContent = body.error || "login expirou — tente de novo";
+        toast(body.error || "login expirou — tente de novo", "err");
       }
     } catch {}
   }, 2000);
@@ -647,7 +703,6 @@ $("logout").onclick = async () => {
 // ---- Char + sub handlers ----
 $("add-char").onclick = async (e) => {
   const btn = e.currentTarget;
-  $("char-msg").textContent = "";
   try {
     const name = $("new-char").value.trim();
     const is_gm = $("new-char-gm").checked;
@@ -656,14 +711,14 @@ $("add-char").onclick = async (e) => {
     );
     $("new-char").value = "";
     $("new-char-gm").checked = false;
+    toast(name + " adicionado", "ok");
     refresh();
   } catch (err) {
-    $("char-msg").textContent = err.message;
+    toast(err.message, "err");
   }
 };
 $("add-sub").onclick = async (e) => {
   const btn = e.currentTarget;
-  $("sub-msg").textContent = "";
   try {
     const character_id = Number($("sub-char").value) || null;
     const event_type = $("sub-type").value;
@@ -672,9 +727,10 @@ $("add-sub").onclick = async (e) => {
       fetchJSON("/api/subscriptions", { method: "POST", body: JSON.stringify({ character_id, event_type, threshold }) }),
     );
     $("sub-thr").value = "";
+    toast("alerta criado", "ok");
     refresh();
   } catch (err) {
-    $("sub-msg").textContent = err.message;
+    toast(err.message, "err");
   }
 };
 
