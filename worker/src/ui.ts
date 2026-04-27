@@ -272,6 +272,21 @@ const fetchJSON = async (url, opts = {}) => {
   return body;
 };
 
+// Replace the button's label with a spinner while \`fn\` runs. Restores the
+// original markup whether \`fn\` resolves or throws.
+async function withSpinner(btn, fn) {
+  const original = btn.innerHTML;
+  const wasDisabled = btn.disabled;
+  btn.disabled = true;
+  btn.innerHTML = '<span class="inline-flex items-center gap-2"><svg class="animate-spin h-4 w-4" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="10" stroke="currentColor" stroke-opacity="0.25" stroke-width="4"></circle><path d="M4 12a8 8 0 018-8" stroke="currentColor" stroke-width="4" stroke-linecap="round"></path></svg><span>' + original + '</span></span>';
+  try {
+    return await fn();
+  } finally {
+    btn.disabled = wasDisabled;
+    btn.innerHTML = original;
+  }
+}
+
 // ---- App state ----
 let state = { user: null, characters: [], subscriptions: [] };
 
@@ -384,31 +399,37 @@ function renderDash() {
 }
 
 // ---- Auth handlers ----
-$("send-pin").onclick = async () => {
+$("send-pin").onclick = async (e) => {
+  const btn = e.currentTarget;
   const m = $("login-msg");
   m.textContent = "";
   m.className = "text-sm mt-3 min-h-[1.25rem]";
   try {
-    await fetchJSON("/api/auth/request-pin", { method: "POST", body: JSON.stringify({ whatsapp: phoneDigits() }) });
+    await withSpinner(btn, () =>
+      fetchJSON("/api/auth/request-pin", { method: "POST", body: JSON.stringify({ whatsapp: phoneDigits() }) }),
+    );
     $("login-step2").classList.remove("hidden");
     m.classList.add("text-ok");
     m.textContent = "Código enviado. Verifique seu WhatsApp.";
-  } catch (e) {
+  } catch (err) {
     m.classList.add("text-danger");
-    m.textContent = e.message;
+    m.textContent = err.message;
   }
 };
-$("verify-pin").onclick = async () => {
+$("verify-pin").onclick = async (e) => {
+  const btn = e.currentTarget;
   const m = $("login-msg");
   m.textContent = "";
   m.className = "text-sm mt-3 min-h-[1.25rem]";
   try {
     const pin = $("pin").value.trim();
-    await fetchJSON("/api/auth/verify-pin", { method: "POST", body: JSON.stringify({ whatsapp: phoneDigits(), pin }) });
+    await withSpinner(btn, () =>
+      fetchJSON("/api/auth/verify-pin", { method: "POST", body: JSON.stringify({ whatsapp: phoneDigits(), pin }) }),
+    );
     refresh();
-  } catch (e) {
+  } catch (err) {
     m.classList.add("text-danger");
-    m.textContent = e.message;
+    m.textContent = err.message;
   }
 };
 $("logout").onclick = async () => {
@@ -417,30 +438,36 @@ $("logout").onclick = async () => {
 };
 
 // ---- Char + sub handlers ----
-$("add-char").onclick = async () => {
+$("add-char").onclick = async (e) => {
+  const btn = e.currentTarget;
   $("char-msg").textContent = "";
   try {
     const name = $("new-char").value.trim();
     const is_gm = $("new-char-gm").checked;
-    await fetchJSON("/api/characters", { method: "POST", body: JSON.stringify({ name, is_gm }) });
+    await withSpinner(btn, () =>
+      fetchJSON("/api/characters", { method: "POST", body: JSON.stringify({ name, is_gm }) }),
+    );
     $("new-char").value = "";
     $("new-char-gm").checked = false;
     refresh();
-  } catch (e) {
-    $("char-msg").textContent = e.message;
+  } catch (err) {
+    $("char-msg").textContent = err.message;
   }
 };
-$("add-sub").onclick = async () => {
+$("add-sub").onclick = async (e) => {
+  const btn = e.currentTarget;
   $("sub-msg").textContent = "";
   try {
     const character_id = Number($("sub-char").value) || null;
     const event_type = $("sub-type").value;
     const threshold = $("sub-thr").value.trim() || undefined;
-    await fetchJSON("/api/subscriptions", { method: "POST", body: JSON.stringify({ character_id, event_type, threshold }) });
+    await withSpinner(btn, () =>
+      fetchJSON("/api/subscriptions", { method: "POST", body: JSON.stringify({ character_id, event_type, threshold }) }),
+    );
     $("sub-thr").value = "";
     refresh();
-  } catch (e) {
-    $("sub-msg").textContent = e.message;
+  } catch (err) {
+    $("sub-msg").textContent = err.message;
   }
 };
 

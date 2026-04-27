@@ -46,6 +46,9 @@ export async function requestPin(env: Env, req: Request): Promise<Response> {
     `Seu código de acesso ao Painel do jogador Mu Patos é ${pin}. Expira em ${Math.round(ttl / 60)} minutos.`,
   );
   if (!send.ok) {
+    // 503 = our preflight detected the bot WhatsApp is disconnected; surface
+    // the message verbatim. Other failures get a generic message.
+    if (send.status === 503) return bad(503, send.body);
     return bad(502, `falha ao enviar WhatsApp (${send.status})`);
   }
   return json({ ok: true, expires_in: ttl });
