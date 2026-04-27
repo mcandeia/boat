@@ -194,11 +194,11 @@ export const INDEX_HTML = /* html */ `<!doctype html>
         <label class="text-xs text-muted block mb-1.5" for="new-char">Cadastrar um personagem</label>
         <div class="flex gap-2 flex-wrap">
           <input id="new-char" placeholder="nome do personagem (ex.: daddy)"
-            class="flex-1 min-w-[180px] bg-bg border border-border rounded-md px-3 py-2 outline-none focus:border-gold/60" />
-          <label class="inline-flex items-center gap-2 px-3 border border-border rounded-md text-sm">
+            class="flex-1 min-w-[180px] h-10 bg-bg border border-border rounded-md px-3 outline-none focus:border-gold/60" />
+          <label class="inline-flex items-center gap-2 h-10 px-3 border border-border rounded-md text-sm">
             <input id="new-char-gm" type="checkbox" class="accent-gold" /> GM
           </label>
-          <button id="add-char" class="px-4 py-2 rounded-md bg-gold text-bg font-semibold hover:brightness-110 transition">Adicionar</button>
+          <button id="add-char" class="h-10 px-4 rounded-md bg-gold text-bg font-semibold border border-transparent hover:brightness-110 transition">Adicionar</button>
         </div>
         <div id="char-msg" class="text-sm text-danger mt-2 min-h-[1.25rem]"></div>
       </div>
@@ -210,8 +210,8 @@ export const INDEX_HTML = /* html */ `<!doctype html>
       <div class="mt-4 pt-4 border-t border-border">
         <label class="text-xs text-muted block mb-1.5">Adicionar um alerta</label>
         <div class="grid gap-2 sm:grid-cols-[1fr_1.4fr_1fr_auto]">
-          <select id="sub-char" class="bg-bg border border-border rounded-md px-3 py-2 outline-none focus:border-gold/60"></select>
-          <select id="sub-type" class="bg-bg border border-border rounded-md px-3 py-2 outline-none focus:border-gold/60">
+          <select id="sub-char" class="h-10 bg-bg border border-border rounded-md px-3 outline-none focus:border-gold/60"></select>
+          <select id="sub-type" class="h-10 bg-bg border border-border rounded-md px-3 outline-none focus:border-gold/60">
             <option value="level_gte">Nível atingido (≥)</option>
             <option value="map_eq">Entrou no mapa</option>
             <option value="coords_in">Entrou em zona de coordenadas</option>
@@ -220,8 +220,8 @@ export const INDEX_HTML = /* html */ `<!doctype html>
             <option value="server_event">Evento do servidor (em breve)</option>
           </select>
           <input id="sub-thr" placeholder="valor"
-            class="bg-bg border border-border rounded-md px-3 py-2 outline-none focus:border-gold/60" />
-          <button id="add-sub" class="px-4 py-2 rounded-md bg-gold text-bg font-semibold hover:brightness-110 transition">Adicionar</button>
+            class="h-10 bg-bg border border-border rounded-md px-3 outline-none focus:border-gold/60" />
+          <button id="add-sub" class="h-10 px-4 rounded-md bg-gold text-bg font-semibold border border-transparent hover:brightness-110 transition">Adicionar</button>
         </div>
         <div id="sub-msg" class="text-sm text-danger mt-2 min-h-[1.25rem]"></div>
         <details class="mt-3 text-sm">

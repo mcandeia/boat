@@ -4,23 +4,23 @@ import { now } from "./util";
 import { sendTelegram } from "./telegram";
 import { formatAlert } from "./messages";
 
-// One pass:
+// One pass (10-minute cron):
 //   1. Pick every distinct character name that has at least one active sub.
 //   2. Scrape them all in one Browser Rendering session.
 //   3. For each character row, evaluate every active subscription against the
-//      previous snapshot vs the new one, fire WhatsApp alerts, set cooldowns.
+//      previous snapshot vs the new one, fire Telegram alerts, set cooldowns.
 //   4. Persist the new snapshot.
+//
+// Flat 10-minute cadence regardless of online/offline. Simpler than the old
+// adaptive logic and predictable for users ("every char checked every 10 min").
 export async function pollOnce(env: Env): Promise<{ scraped: number; fired: number }> {
-  const t0 = now();
   const distinctNames = await env.DB
     .prepare(
       `SELECT DISTINCT c.name
          FROM characters c
          JOIN subscriptions s
-           ON s.character_id = c.id AND s.active = 1
-        WHERE c.next_check_at <= ?`,
+           ON s.character_id = c.id AND s.active = 1`,
     )
-    .bind(t0)
     .all<{ name: string }>();
 
   const names = (distinctNames.results ?? []).map((r) => r.name);
@@ -105,12 +105,6 @@ export async function pollOnce(env: Env): Promise<{ scraped: number; fired: numb
       fired++;
     }
 
-    // Adaptive cadence: offline chars don't move much — wait an hour before
-    // burning Browser Rendering quota on them. Online chars get the normal
-    // ~10 minute cadence (slightly under the cron interval so a 5-minute
-    // cron always finds them due).
-    const nextCheck = t + (snap.status === "Offline" ? 3600 : 600);
-
     await env.DB
       .prepare(
         `UPDATE characters
@@ -119,11 +113,10 @@ export async function pollOnce(env: Env): Promise<{ scraped: number; fired: numb
                 last_level = COALESCE(?, last_level),
                 last_map = COALESCE(?, last_map),
                 last_status = COALESCE(?, last_status),
-                last_checked_at = ?,
-                next_check_at = ?
+                last_checked_at = ?
           WHERE name = ?`,
       )
-      .bind(snap.class, snap.resets, snap.level, snap.map, snap.status, t, nextCheck, char.name)
+      .bind(snap.class, snap.resets, snap.level, snap.map, snap.status, t, char.name)
       .run();
   }
 
