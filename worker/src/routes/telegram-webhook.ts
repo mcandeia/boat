@@ -75,11 +75,13 @@ export async function telegramWebhook(env: Env, req: Request): Promise<Response>
       `✅ Conectado! Volte para o site — o painel já liberou.\n\nDaqui pra frente, é por aqui que vão chegar os alertas.`,
     );
   } else {
-    // Plain /start without a token. Greet the user.
+    // Plain /start without a token. Greet the user. Panel URL comes from the
+    // incoming request so it tracks whatever name the worker deploys under.
+    const panelUrl = new URL(req.url).origin;
     await sendTelegram(
       env,
       chat.id,
-      `<b>Painel do jogador Mu Patos</b>\n\nEsse bot manda alertas dos seus chars (level, mapa, online/offline). Pra começar, abra <a href="https://mu-level-watcher.mcandeia.workers.dev/">o painel</a> e clique em <b>Conectar com Telegram</b>.`,
+      `<b>Painel do jogador Mu Patos</b>\n\nEsse bot manda alertas dos seus chars (level, mapa, online/offline). Pra começar, abra <a href="${panelUrl}/">o painel</a> e clique em <b>Conectar com Telegram</b>.`,
     );
   }
 

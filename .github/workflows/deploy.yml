@@ -66,7 +66,7 @@ jobs:
           curl -sS -X POST "https://api.telegram.org/bot${{ secrets.TELEGRAM_BOT_TOKEN }}/setWebhook" \
             -H "content-type: application/json" \
             -d '{
-              "url": "https://mu-level-watcher.mcandeia.workers.dev/api/telegram/webhook",
+              "url": "https://mu-patos.mcandeia.workers.dev/api/telegram/webhook",
               "secret_token": "${{ secrets.TELEGRAM_WEBHOOK_SECRET }}",
               "allowed_updates": ["message"]
             }' | jq -e '.ok == true'

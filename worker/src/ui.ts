@@ -48,7 +48,8 @@ export const INDEX_HTML = /* html */ `<!doctype html>
 <!-- CONSENT GATE                                                 -->
 <!-- ============================================================ -->
 <section id="consent" class="hidden fixed inset-0 z-50 bg-bg/95 backdrop-blur flex items-center justify-center p-4">
-  <div class="max-w-xl w-full bg-panel border border-border rounded-xl shadow-glow p-6">
+  <div class="max-w-xl w-full bg-panel border border-border rounded-xl shadow-glow p-6 relative">
+    <button id="consent-close" class="hidden absolute top-3 right-3 h-8 w-8 rounded-md hover:bg-bg text-muted hover:text-slate-100 flex items-center justify-center text-lg" aria-label="Fechar">×</button>
     <div class="flex items-center gap-3 mb-3">
       <div class="h-10 w-10 rounded-lg bg-gold/15 border border-gold/30 flex items-center justify-center text-gold text-xl">⚔️</div>
       <div>
@@ -97,15 +98,41 @@ export const INDEX_HTML = /* html */ `<!doctype html>
       <span>Conectar com Telegram</span>
     </button>
 
-    <div id="login-waiting" class="hidden mt-4 p-3 rounded-md border border-border bg-bg">
+    <div id="login-waiting" class="hidden mt-4 p-4 rounded-md border border-border bg-bg space-y-4">
       <div class="flex items-center gap-3">
-        <svg class="animate-spin h-5 w-5 text-gold" viewBox="0 0 24 24" fill="none">
+        <svg class="animate-spin h-5 w-5 text-gold shrink-0" viewBox="0 0 24 24" fill="none">
           <circle cx="12" cy="12" r="10" stroke="currentColor" stroke-opacity="0.25" stroke-width="4"></circle>
           <path d="M4 12a8 8 0 018-8" stroke="currentColor" stroke-width="4" stroke-linecap="round"></path>
         </svg>
         <div class="text-sm">
           <div class="text-slate-200">Aguardando você apertar <b class="text-goldsoft">Iniciar</b> no bot…</div>
-          <div class="text-xs text-muted mt-0.5">Não abriu o Telegram? <a id="login-deeplink" target="_blank" rel="noopener" class="text-goldsoft underline">clique aqui</a>.</div>
+          <div class="text-xs text-muted mt-0.5">Use uma das opções abaixo. Vai liberar sozinho assim que você clicar Iniciar.</div>
+        </div>
+      </div>
+
+      <div class="grid sm:grid-cols-2 gap-3">
+        <a id="login-deeplink" target="_blank" rel="noopener"
+          class="flex items-center justify-center gap-2 px-3 py-2 rounded-md bg-[#229ED9] text-white text-sm font-semibold hover:brightness-110">
+          <span>📱</span><span>Abrir no app do Telegram</span>
+        </a>
+        <a id="login-weblink" target="_blank" rel="noopener"
+          class="flex items-center justify-center gap-2 px-3 py-2 rounded-md border border-border text-sm hover:bg-panel">
+          <span>🌐</span><span>Abrir no Telegram Web</span>
+        </a>
+      </div>
+
+      <div class="border-t border-border pt-3">
+        <div class="text-xs text-muted mb-2">Ou abra esse link em qualquer device com Telegram:</div>
+        <div class="flex gap-2">
+          <input id="login-link-text" readonly class="flex-1 min-w-0 bg-panel border border-border rounded-md px-2 py-1.5 text-xs text-slate-300 font-mono" />
+          <button id="login-copy" class="px-3 py-1.5 rounded-md border border-border text-sm hover:bg-panel">Copiar</button>
+        </div>
+      </div>
+
+      <div class="border-t border-border pt-3">
+        <div class="text-xs text-muted mb-2">Sem Telegram ainda? Escaneie esse QR com a câmera do celular:</div>
+        <div class="flex justify-center">
+          <img id="login-qr" alt="QR pra abrir no Telegram" class="rounded-md bg-white p-2" width="160" height="160" />
         </div>
       </div>
     </div>
@@ -222,11 +249,22 @@ export const INDEX_HTML = /* html */ `<!doctype html>
 const $ = (id) => document.getElementById(id);
 
 // ---- Consent gate ----
+// First-visit gate: must scroll to the end before "Aceitar" lights up.
+// Subsequent visits via "sobre / política": informational only — the close
+// button (and Aceitar) are always available.
 const CONSENT_KEY = "mlw.consent.v1";
+function alreadyConsented() { return !!localStorage.getItem(CONSENT_KEY); }
 function showConsent() {
   $("consent").classList.remove("hidden");
-  $("consent-accept").disabled = true;
-  $("consent-hint").textContent = "Role até o final";
+  if (alreadyConsented()) {
+    $("consent-accept").disabled = false;
+    $("consent-hint").textContent = "Já aceito";
+    $("consent-close").classList.remove("hidden");
+  } else {
+    $("consent-accept").disabled = true;
+    $("consent-hint").textContent = "Role até o final";
+    $("consent-close").classList.add("hidden");
+  }
 }
 function hideConsent() { $("consent").classList.add("hidden"); }
 
@@ -242,6 +280,7 @@ $("consent-accept").onclick = () => {
   localStorage.setItem(CONSENT_KEY, "1");
   hideConsent();
 };
+$("consent-close").onclick = hideConsent;
 $("show-consent").onclick = (e) => { e.preventDefault(); showConsent(); };
 
 // ---- API helper ----
@@ -382,13 +421,23 @@ function renderDash() {
 
 // ---- Auth handlers ----
 // ---- Telegram deep-link login ----
+// We don't auto-open the deeplink — some browsers (Chrome on macOS without
+// Telegram Desktop) try the tg:// scheme and fail with "scheme has no
+// registered handler." Instead we surface multiple ways to reach the bot
+// (app, web, copy, QR) and poll for the webhook to redeem the token.
 let pollHandle = null;
+function buildWebLink(botUsername, token) {
+  // Telegram Web doesn't accept ?start= directly, but it does honour the
+  // tgaddr query that mirrors the tg:// resolve URL. This opens the bot
+  // chat with the start parameter prefilled inside web.telegram.org.
+  const tg = "tg://resolve?domain=" + encodeURIComponent(botUsername) + "&start=" + encodeURIComponent(token);
+  return "https://web.telegram.org/k/?tgaddr=" + encodeURIComponent(tg);
+}
 async function startTelegramLogin() {
   const m = $("login-msg");
   m.textContent = "";
   m.className = "text-sm mt-3 min-h-[1.25rem]";
 
-  // 1. Mint a token + deeplink.
   let data;
   try {
     data = await fetchJSON("/api/auth/telegram/start", { method: "POST" });
@@ -398,12 +447,15 @@ async function startTelegramLogin() {
     return;
   }
 
-  // 2. Open Telegram. Pop a new tab — user can also tap the fallback link.
+  // Wire the four ways to reach the bot.
+  const botFromLink = (data.deeplink.match(/t\\.me\\/([^?]+)/) || [])[1] || "mu_patos_bot";
   $("login-deeplink").href = data.deeplink;
+  $("login-weblink").href = buildWebLink(botFromLink, data.token);
+  $("login-link-text").value = data.deeplink;
+  $("login-qr").src = "https://api.qrserver.com/v1/create-qr-code/?size=160x160&data=" + encodeURIComponent(data.deeplink);
   $("login-waiting").classList.remove("hidden");
-  window.open(data.deeplink, "_blank", "noopener");
 
-  // 3. Poll until redeemed (or expired/invalid).
+  // Poll until the webhook redeems the token, or it expires.
   if (pollHandle) clearInterval(pollHandle);
   pollHandle = setInterval(async () => {
     try {
@@ -424,6 +476,17 @@ async function startTelegramLogin() {
   }, 2000);
 }
 $("connect-tg").onclick = startTelegramLogin;
+$("login-copy").onclick = async () => {
+  const el = $("login-link-text");
+  try {
+    await navigator.clipboard.writeText(el.value);
+    $("login-copy").textContent = "Copiado ✓";
+    setTimeout(() => { $("login-copy").textContent = "Copiar"; }, 1500);
+  } catch {
+    el.select();
+    document.execCommand && document.execCommand("copy");
+  }
+};
 $("logout").onclick = async () => {
   await fetchJSON("/api/auth/logout", { method: "POST" });
   location.reload();

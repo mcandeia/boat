@@ -1,4 +1,4 @@
-name = "mu-level-watcher"
+name = "mu-patos"
 main = "src/index.ts"
 compatibility_date = "2026-04-01"
 compatibility_flags = ["nodejs_compat"]
