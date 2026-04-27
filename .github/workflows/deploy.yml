@@ -49,11 +49,11 @@ jobs:
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           workingDirectory: worker
           command: deploy
-          # ZAPI_CLIENT_TOKEN is opt-in (Z-API Account Security feature). If
-          # you enable it, add it as a GH secret and a line in this list.
           secrets: |
             SESSION_SECRET
             ZAPI_INSTANCE_TOKEN
+            ZAPI_CLIENT_TOKEN
         env:
           SESSION_SECRET: ${{ secrets.SESSION_SECRET }}
           ZAPI_INSTANCE_TOKEN: ${{ secrets.ZAPI_INSTANCE_TOKEN }}
+          ZAPI_CLIENT_TOKEN: ${{ secrets.ZAPI_CLIENT_TOKEN }}
