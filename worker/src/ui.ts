@@ -61,14 +61,13 @@ export const INDEX_HTML = /* html */ `<!doctype html>
       <p>Antes de entrar, dá uma lida rapidinho — é importante:</p>
       <p><b class="text-goldsoft">É de graça.</b> Não tem assinatura, não tem upsell, não tem propaganda. A ideia é só se divertir e ajudar a galera a acompanhar os personagens sem ficar dando F5 no site do servidor.</p>
       <p><b class="text-goldsoft">Todas as informações aqui são públicas.</b> O painel só lê o que já está aberto em <code class="text-xs bg-bg px-1.5 py-0.5 rounded">mupatos.com.br/site/profile/character/&lt;nome&gt;</code>. Nada de invadir conta, nada de senha, nada de informação privada — é o mesmo dado que qualquer um vê visitando a página do personagem.</p>
-      <p><b class="text-goldsoft">Isso NÃO é um bot de jogo.</b> Não automatiza ações dentro do MU, não joga por você, não clica em nada no servidor. Só lê uma página pública e dispara um WhatsApp quando algo que <i>você cadastrou</i> acontece (ex.: seu char passou de nível 360, entrou no Stadium, etc.).</p>
+      <p><b class="text-goldsoft">Isso NÃO é um bot de jogo.</b> Não automatiza ações dentro do MU, não joga por você, não clica em nada no servidor. Só lê uma página pública e dispara uma mensagem no Telegram quando algo que <i>você cadastrou</i> acontece (ex.: seu char passou de nível 360, entrou no Stadium, etc.).</p>
       <p><b class="text-goldsoft">Os alertas chegam pelo Telegram.</b> Pra entrar você só clica em <i>Conectar com Telegram</i> e aperta <i>Iniciar</i> no bot — sem senha, sem código pra digitar, sem cadastrar email ou telefone. O Telegram só passa pro bot um <i>chat_id</i> e seu nome de exibição.</p>
       <p><b class="text-goldsoft">Se bugar, a culpa é do daddy.</b> Reclama com ele no jogo. (Xibata, vai com Deus.)</p>
       <div class="border-t border-border pt-3 mt-3 text-xs text-muted leading-relaxed">
         <p><b class="text-slate-300">Aviso legal.</b> Este painel é uma iniciativa pessoal do jogador <span class="text-goldsoft">daddy</span>. A equipe do Mu Patos <b>não tem envolvimento, afiliação ou responsabilidade</b> sobre este site. É um projeto gratuito feito por um jogador, sem vínculo oficial com o servidor. Qualquer problema, suporte ou reclamação deve ser direcionado ao daddy — não ao staff do Mu Patos.</p>
       </div>
       <p class="text-muted text-xs pt-2">Role até o final pra liberar o botão.</p>
-      <div id="consent-bottom" class="h-1"></div>
     </div>
     <div class="mt-4 flex items-center gap-3">
       <button id="consent-accept" disabled class="flex-1 px-4 py-2.5 rounded-md bg-gold text-bg font-semibold disabled:bg-border disabled:text-muted disabled:cursor-not-allowed transition">Aceitar e continuar</button>
@@ -81,7 +80,7 @@ export const INDEX_HTML = /* html */ `<!doctype html>
   <header class="mb-8 flex items-end justify-between gap-4 flex-wrap">
     <div>
       <h1 class="brand text-2xl md:text-3xl text-goldsoft">Painel do jogador Mu Patos</h1>
-      <div class="text-sm text-muted mt-1">by daddy · alertas no WhatsApp pra eventos do seu char</div>
+      <div class="text-sm text-muted mt-1">by daddy · alertas no Telegram pra eventos do seu char</div>
     </div>
     <a href="#" id="show-consent" class="text-xs text-muted hover:text-goldsoft underline underline-offset-4">sobre / política</a>
   </header>
@@ -250,32 +249,38 @@ const $ = (id) => document.getElementById(id);
 
 // ---- Consent gate ----
 // First-visit gate: must scroll to the end before "Aceitar" lights up.
-// Subsequent visits via "sobre / política": informational only — the close
-// button (and Aceitar) are always available.
+// Subsequent visits via "sobre / política": informational only — close
+// button + Aceitar are always available.
 const CONSENT_KEY = "mlw.consent.v1";
+const SCROLL_TOLERANCE_PX = 16;
 function alreadyConsented() { return !!localStorage.getItem(CONSENT_KEY); }
+function unlockConsent() {
+  $("consent-accept").disabled = false;
+  $("consent-hint").textContent = "Liberado ✓";
+}
+function checkConsentScroll() {
+  const el = $("consent-scroll");
+  // If the content fits without scrolling, treat as already-at-bottom.
+  const atBottom = el.scrollHeight - el.scrollTop - el.clientHeight <= SCROLL_TOLERANCE_PX;
+  if (atBottom) unlockConsent();
+}
 function showConsent() {
   $("consent").classList.remove("hidden");
   if (alreadyConsented()) {
-    $("consent-accept").disabled = false;
+    unlockConsent();
     $("consent-hint").textContent = "Já aceito";
     $("consent-close").classList.remove("hidden");
   } else {
     $("consent-accept").disabled = true;
     $("consent-hint").textContent = "Role até o final";
     $("consent-close").classList.add("hidden");
+    // If the content already fits in the box, the user has nothing to scroll.
+    requestAnimationFrame(checkConsentScroll);
   }
 }
 function hideConsent() { $("consent").classList.add("hidden"); }
 
-const obs = new IntersectionObserver((entries) => {
-  if (entries.some((e) => e.isIntersecting)) {
-    $("consent-accept").disabled = false;
-    $("consent-hint").textContent = "Liberado ✓";
-  }
-}, { root: $("consent-scroll"), threshold: 1.0 });
-obs.observe($("consent-bottom"));
-
+$("consent-scroll").addEventListener("scroll", checkConsentScroll);
 $("consent-accept").onclick = () => {
   localStorage.setItem(CONSENT_KEY, "1");
   hideConsent();
