@@ -321,6 +321,15 @@ async function refresh() {
   }
 }
 
+function relativeTime(unixSeconds) {
+  if (!unixSeconds) return null;
+  const diff = Math.floor(Date.now() / 1000) - unixSeconds;
+  if (diff < 30) return "agora";
+  if (diff < 60) return diff + "s atrás";
+  if (diff < 3600) return Math.floor(diff / 60) + " min atrás";
+  if (diff < 86400) return Math.floor(diff / 3600) + "h atrás";
+  return Math.floor(diff / 86400) + " d atrás";
+}
 function renderCharLeft(container, c) {
   const tags = [];
   if (c.class) tags.push(c.class);
@@ -337,9 +346,14 @@ function renderCharLeft(container, c) {
   if (tags.length === 0 && c.last_checked_at == null) {
     tags.push('<span class="text-muted italic">carregando…</span>');
   }
+  const checked = relativeTime(c.last_checked_at);
+  const checkedLine = checked
+    ? '<div class="text-[11px] text-muted mt-1">atualizado ' + checked + '</div>'
+    : '';
   container.innerHTML = '<div class="font-semibold text-goldsoft">' + c.name + '</div>' +
     '<div class="text-xs text-muted mt-0.5 flex flex-wrap gap-x-2 gap-y-1 items-center">' +
-    tags.join('<span class="text-border">·</span>') + '</div>';
+    tags.join('<span class="text-border">·</span>') + '</div>' +
+    checkedLine;
 }
 
 // Per-char on-demand refresh. Called by the ↻ button and by the lazy
@@ -443,13 +457,15 @@ function renderDash() {
   if (state.subscriptions.length === 0) {
     sl.innerHTML = '<li class="py-3 text-muted text-sm">Nenhum alerta ainda.</li>';
   }
-  const charById = Object.fromEntries(state.characters.map((c) => [c.id, c.name]));
+  const charById = Object.fromEntries(state.characters.map((c) => [c.id, c]));
+  const now = Math.floor(Date.now() / 1000);
   for (const s of state.subscriptions) {
     const li = document.createElement("li");
     li.className = "py-3 flex items-center justify-between gap-3";
     const left = document.createElement("div");
     left.className = "min-w-0";
-    const charName = s.character_id ? charById[s.character_id] || ("#" + s.character_id) : "(servidor)";
+    const linkedChar = s.character_id ? charById[s.character_id] : null;
+    const charName = linkedChar ? linkedChar.name : (s.character_id ? "#" + s.character_id : "(servidor)");
     let label = "";
     if (s.event_type === "level_gte") label = charName + ' — nível ≥ <b class="text-goldsoft">' + s.threshold + '</b>';
     else if (s.event_type === "map_eq") label = charName + ' — entra em <b class="text-goldsoft">' + s.threshold + '</b>';
@@ -457,10 +473,36 @@ function renderDash() {
     else if (s.event_type === "status_eq") label = charName + ' — fica <b class="text-goldsoft">' + s.threshold + '</b>';
     else if (s.event_type === "gm_online") label = "GM " + charName + " — online";
     else if (s.event_type === "server_event") label = "evento do servidor: " + s.threshold;
-    const status = s.active
+    const activeBadge = s.active
       ? '<span class="px-2 py-0.5 rounded-full bg-ok/10 text-ok border border-ok/20 text-xs">ativo</span>'
       : '<span class="px-2 py-0.5 rounded-full bg-border text-muted border border-border text-xs">pausado</span>';
-    left.innerHTML = '<div class="text-sm">' + label + '</div><div class="mt-1">' + status + '</div>';
+
+    // Last result badge:
+    //   - cooldown_until > now -> "em cooldown"
+    //   - last_fired_at present -> "disparou há X"
+    //   - else -> "ainda não disparou"
+    let resultBadge;
+    if (s.cooldown_until && s.cooldown_until > now) {
+      const remaining = relativeTime(now * 2 - s.cooldown_until); // hack: format the diff
+      resultBadge = '<span class="px-2 py-0.5 rounded-full bg-gold/10 text-goldsoft border border-gold/20 text-xs">disparou recentemente · cooldown</span>';
+    } else if (s.last_fired_at) {
+      resultBadge = '<span class="px-2 py-0.5 rounded-full bg-ok/10 text-ok border border-ok/20 text-xs">disparou ' + relativeTime(s.last_fired_at) + '</span>';
+    } else {
+      resultBadge = '<span class="px-2 py-0.5 rounded-full bg-border text-muted border border-border text-xs">ainda não disparou</span>';
+    }
+
+    const meta = [];
+    meta.push("criado " + (relativeTime(s.created_at) || "—"));
+    if (linkedChar && linkedChar.last_checked_at) {
+      meta.push("último check " + relativeTime(linkedChar.last_checked_at));
+    } else if (s.character_id) {
+      meta.push("ainda não checado");
+    }
+
+    left.innerHTML =
+      '<div class="text-sm">' + label + '</div>' +
+      '<div class="mt-1.5 flex flex-wrap gap-1.5 items-center">' + activeBadge + resultBadge + '</div>' +
+      '<div class="text-[11px] text-muted mt-1">' + meta.join(' · ') + '</div>';
     const right = document.createElement("div");
     right.className = "flex gap-2 shrink-0";
     const toggle = document.createElement("button");
