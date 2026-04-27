@@ -12,9 +12,14 @@ export interface Env {
 
   // Set with `wrangler secret put`
   SESSION_SECRET?: string;          // HMAC key for the session cookie
-  WHATSAPP_API_URL?: string;        // overrides the [vars] placeholder
-  WHATSAPP_API_TOKEN?: string;      // bearer token for the bot
-  WHATSAPP_FROM?: string;           // optional sender id, if the bot needs it
+
+  // Kapso WhatsApp provider. If KAPSO_API_KEY is unset the app stubs sends
+  // (logs them) so the rest of the flow works without WhatsApp wired up.
+  KAPSO_API_KEY?: string;
+  KAPSO_PHONE_NUMBER_ID?: string;   // path param on the send endpoint
+  KAPSO_BASE_URL?: string;          // override; default is api.kapso.ai
+  KAPSO_TEMPLATE_NAME?: string;     // approved template, default "mu_alert"
+  KAPSO_TEMPLATE_LANG?: string;     // BCP-47 code, default "pt_BR"
 }
 
 export type EventType =

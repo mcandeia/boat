@@ -33,9 +33,13 @@ crons = ["*/5 * * * *"]
 # ---------------------------------------------------------------------------
 
 [vars]
-PROFILE_BASE_URL = "https://mupatos.com.br/site/profile/character"
-PIN_TTL_SECONDS  = "600"        # 10 minutes
-SESSION_TTL_DAYS = "30"
-COOLDOWN_SECONDS = "21600"      # don't re-fire the same alert within 6h
-WHATSAPP_API_URL = "https://placeholder.invalid/send"  # replace via secret/var
-COOKIE_NAME      = "mlw_sess"
+PROFILE_BASE_URL    = "https://mupatos.com.br/site/profile/character"
+PIN_TTL_SECONDS     = "600"        # 10 minutes
+SESSION_TTL_DAYS    = "30"
+COOLDOWN_SECONDS    = "21600"      # don't re-fire the same alert within 6h
+COOKIE_NAME         = "mlw_sess"
+
+# Kapso (WhatsApp) — the API key + phone number id go in `wrangler secret`.
+KAPSO_BASE_URL      = "https://api.kapso.ai/meta/whatsapp/v24.0"
+KAPSO_TEMPLATE_NAME = "mu_alert"
+KAPSO_TEMPLATE_LANG = "pt_BR"

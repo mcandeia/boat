@@ -32,11 +32,18 @@ npx wrangler d1 migrations apply mu-watcher --remote
 # Strong random for session HMAC.
 openssl rand -hex 32 | npx wrangler secret put SESSION_SECRET
 
-# WhatsApp bot — placeholder until your bot is ready.
-echo "https://your-bot/send"      | npx wrangler secret put WHATSAPP_API_URL
-echo "your-bot-bearer-token"      | npx wrangler secret put WHATSAPP_API_TOKEN
-# Optional sender id, only if your bot needs one:
-# echo "5583..." | npx wrangler secret put WHATSAPP_FROM
+# WhatsApp via Kapso (https://kapso.ai) — free plan includes a managed bot
+# number, so you don't need to expose your personal number.
+#   1. Sign up at kapso.ai and finish onboarding (Meta Business Account
+#      created/linked, managed phone number provisioned).
+#   2. Create a UTILITY template:
+#         name:     mu_alert
+#         language: pt_BR (or en_US — must match KAPSO_TEMPLATE_LANG)
+#         body:     [MU Watcher] {{1}}
+#      Wait for Meta to approve it (usually minutes).
+#   3. Grab the project API key and the phone_number_id of your managed number.
+echo "kpso_..."                   | npx wrangler secret put KAPSO_API_KEY
+echo "1234567890"                 | npx wrangler secret put KAPSO_PHONE_NUMBER_ID
 ```
 
 Browser Rendering needs to be enabled on the account
@@ -50,8 +57,8 @@ npx wrangler dev
 # open http://localhost:8787
 ```
 
-In dev with `WHATSAPP_API_TOKEN` unset, PINs are printed to the wrangler
-log instead of being sent — copy the 6-digit code from there.
+In dev with `KAPSO_API_KEY` unset, PINs are printed to the wrangler log
+instead of being sent — copy the 6-digit code from there.
 
 ## Deploy
 
@@ -80,12 +87,25 @@ Every fire sets a 6h cooldown so a flapping value can't spam. The check is
 edge-triggered too: `level_gte 360` only fires on the level 359 → 360
 crossing, not every poll while ≥ 360.
 
-## Plugging in your WhatsApp bot
+## How WhatsApp sends actually work
 
-`src/whatsapp.ts` POSTs JSON `{to, message}` with a Bearer token. If your
-bot uses a different shape (e.g. WhatsApp Cloud API, Twilio, Z-API),
-edit just that file — the rest of the code calls `sendWhatsApp(env, to, msg)`
-and doesn't care.
+Every outbound message goes through the Kapso send endpoint as the
+`mu_alert` template (or whatever you set `KAPSO_TEMPLATE_NAME` to) with the
+alert body as `{{1}}`. Free-form text would only work inside Meta's 24h
+"customer service window", which we can't rely on for proactive alerts —
+hence the template.
+
+If you want to swap providers later (Twilio, Evolution API, Z-API, etc.),
+edit only `src/whatsapp.ts` — the rest of the code calls
+`sendWhatsApp(env, to, msg)` and doesn't care.
+
+### Costs
+
+Kapso's free plan: 2,000 messages/month + 1 managed number. Beyond that
+plan tiers exist. **Meta bills separately** per delivered template (utility
+category in Brazil ≈ R$0.04 / msg as of writing). For personal +
+small-friend-group scale this is pennies/month, but it's not literally
+zero.
 
 ## Things deliberately deferred
 
