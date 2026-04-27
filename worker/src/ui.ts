@@ -213,7 +213,7 @@ export const INDEX_HTML = /* html */ `<!doctype html>
           <label class="inline-flex items-center gap-2 h-10 px-3 border border-border rounded-md text-sm">
             <input id="new-char-gm" type="checkbox" class="accent-gold" /> GM
           </label>
-          <button id="add-char" class="h-10 px-4 rounded-md bg-gold text-bg font-semibold border border-transparent hover:brightness-110 transition">Adicionar</button>
+          <button id="add-char" class="inline-flex items-center justify-center h-10 px-4 rounded-md bg-gold text-bg font-semibold leading-none border border-transparent hover:brightness-110 transition">Adicionar</button>
         </div>
       </div>
     </div>
@@ -235,7 +235,7 @@ export const INDEX_HTML = /* html */ `<!doctype html>
           </select>
           <input id="sub-thr" placeholder="valor"
             class="h-10 bg-bg border border-border rounded-md px-3 outline-none focus:border-gold/60" />
-          <button id="add-sub" class="h-10 px-4 rounded-md bg-gold text-bg font-semibold border border-transparent hover:brightness-110 transition">Adicionar</button>
+          <button id="add-sub" class="inline-flex items-center justify-center h-10 px-4 rounded-md bg-gold text-bg font-semibold leading-none border border-transparent hover:brightness-110 transition">Adicionar</button>
         </div>
         <details class="mt-3 text-sm">
           <summary class="cursor-pointer text-muted hover:text-goldsoft">O que vai em "valor"?</summary>
