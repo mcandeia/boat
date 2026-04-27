@@ -1,22 +1,22 @@
 import type { Env } from "./types";
 
-// Kapso (https://kapso.ai) sits on top of the official Meta WhatsApp Cloud API
-// and provides a managed bot number on the free plan, so this app doesn't need
-// the operator's personal WhatsApp number.
+// Kapso (https://kapso.ai) wraps the official Meta WhatsApp Cloud API.
 //
-// Outbound messages to a recipient who hasn't messaged the bot in the last 24h
-// MUST be a pre-approved template — that's a Meta rule, not a Kapso one. The
-// recommended setup is one generic utility template, e.g.:
+// Two modes, controlled by KAPSO_MODE:
+//   - "sandbox"   plain-text sends. Sandbox numbers reject templates and only
+//                 reach a single pre-activated recipient (the one who texted
+//                 the activation code to the sandbox bot). Use this to wire
+//                 up + smoke-test against your own WhatsApp.
+//   - any other   production WABA. Sends go as a pre-approved utility template
+//                 so they work outside Meta's 24h customer-service window.
+//                 Recommended template:
+//                     name:     mu_alert
+//                     language: pt_BR
+//                     category: UTILITY
+//                     body:     [MU Watcher] {{1}}
 //
-//   Name:     mu_alert
-//   Language: pt_BR
-//   Category: UTILITY
-//   Body:     [MU Watcher] {{1}}
-//
-// We send every message through this template with `{{1}}` = the alert text.
-//
-// If KAPSO_API_KEY is unset, sends are stubbed (logged) so dev works without
-// any WhatsApp wiring.
+// If KAPSO_API_KEY is unset, sends are stubbed (logged) so the rest of the
+// app still works during development.
 export async function sendWhatsApp(
   env: Env,
   to: string,
@@ -29,25 +29,32 @@ export async function sendWhatsApp(
 
   const base = (env.KAPSO_BASE_URL || "https://api.kapso.ai/meta/whatsapp/v24.0").replace(/\/+$/, "");
   const url = `${base}/${env.KAPSO_PHONE_NUMBER_ID}/messages`;
-  const templateName = env.KAPSO_TEMPLATE_NAME || "mu_alert";
-  const templateLang = env.KAPSO_TEMPLATE_LANG || "pt_BR";
+  const isSandbox = (env.KAPSO_MODE ?? "").toLowerCase() === "sandbox";
 
-  const payload = {
-    messaging_product: "whatsapp",
-    recipient_type: "individual",
-    to,
-    type: "template",
-    template: {
-      name: templateName,
-      language: { code: templateLang },
-      components: [
-        {
-          type: "body",
-          parameters: [{ type: "text", text: truncateForTemplate(message) }],
+  const payload = isSandbox
+    ? {
+        messaging_product: "whatsapp",
+        recipient_type: "individual",
+        to,
+        type: "text",
+        text: { body: clip(message, 4000) },
+      }
+    : {
+        messaging_product: "whatsapp",
+        recipient_type: "individual",
+        to,
+        type: "template",
+        template: {
+          name: env.KAPSO_TEMPLATE_NAME || "mu_alert",
+          language: { code: env.KAPSO_TEMPLATE_LANG || "pt_BR" },
+          components: [
+            {
+              type: "body",
+              parameters: [{ type: "text", text: clip(message.replace(/\s+/g, " "), 1000) }],
+            },
+          ],
         },
-      ],
-    },
-  };
+      };
 
   const res = await fetch(url, {
     method: "POST",
@@ -61,8 +68,7 @@ export async function sendWhatsApp(
   return { ok: res.ok, status: res.status, body };
 }
 
-// WhatsApp template body parameters have a 1024-char limit and cannot contain
-// newlines/tabs. Strip them and clip — alerts are short anyway.
-function truncateForTemplate(s: string): string {
-  return s.replace(/\s+/g, " ").trim().slice(0, 1000);
+function clip(s: string, max: number): string {
+  return s.length <= max ? s : s.slice(0, max);
 }
+

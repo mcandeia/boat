@@ -32,18 +32,32 @@ npx wrangler d1 migrations apply mu-watcher --remote
 # Strong random for session HMAC.
 openssl rand -hex 32 | npx wrangler secret put SESSION_SECRET
 
-# WhatsApp via Kapso (https://kapso.ai) — free plan includes a managed bot
-# number, so you don't need to expose your personal number.
-#   1. Sign up at kapso.ai and finish onboarding (Meta Business Account
-#      created/linked, managed phone number provisioned).
-#   2. Create a UTILITY template:
-#         name:     mu_alert
-#         language: pt_BR (or en_US — must match KAPSO_TEMPLATE_LANG)
-#         body:     [MU Watcher] {{1}}
-#      Wait for Meta to approve it (usually minutes).
-#   3. Grab the project API key and the phone_number_id of your managed number.
-echo "kpso_..."                   | npx wrangler secret put KAPSO_API_KEY
-echo "1234567890"                 | npx wrangler secret put KAPSO_PHONE_NUMBER_ID
+# WhatsApp via Kapso (https://kapso.ai). The free plan includes a managed
+# bot number so you don't expose your personal one.
+#
+# Two phases:
+#
+#   A) Sandbox (testing — what `wrangler.toml` defaults to)
+#      Sandbox can only message ONE recipient who first texts an activation
+#      code to the sandbox bot. Use it to verify the loop with your own
+#      number before opening to friends.
+#        1. In the Kapso dashboard open the sandbox section, copy the
+#           activation phrase, send it from your WhatsApp to the sandbox
+#           number to "register" yourself as the test recipient.
+#        2. Drop your project API key into the secret store:
+#               echo "kpso_..." | npx wrangler secret put KAPSO_API_KEY
+#        3. KAPSO_PHONE_NUMBER_ID is already set in wrangler.toml.
+#
+#   B) Production (friends)
+#      Upgrade to a real production number on Kapso (still free plan).
+#      Then create a UTILITY template:
+#            name:     mu_alert  (= KAPSO_TEMPLATE_NAME)
+#            language: pt_BR     (= KAPSO_TEMPLATE_LANG)
+#            body:     [MU Watcher] {{1}}
+#      Wait for Meta to approve it. Then flip mode + phone id:
+#            KAPSO_MODE=production
+#            KAPSO_PHONE_NUMBER_ID=<your production number id>
+#      and `wrangler deploy`.
 ```
 
 Browser Rendering needs to be enabled on the account

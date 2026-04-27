@@ -20,6 +20,7 @@ export interface Env {
   KAPSO_BASE_URL?: string;          // override; default is api.kapso.ai
   KAPSO_TEMPLATE_NAME?: string;     // approved template, default "mu_alert"
   KAPSO_TEMPLATE_LANG?: string;     // BCP-47 code, default "pt_BR"
+  KAPSO_MODE?: string;              // "sandbox" -> plain text; anything else -> template
 }
 
 export type EventType =
