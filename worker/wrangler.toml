@@ -1,21 +1,16 @@
 name = "mu-patos"
 main = "src/index.ts"
 compatibility_date = "2026-04-01"
-compatibility_flags = ["nodejs_compat"]
+
+# Plain fetch() with the right Chrome client-hint headers gets through
+# mupatos.com.br's bot guard, so we no longer need Browser Rendering.
 
 # ---------------------------------------------------------------------------
-# Cloudflare Browser Rendering — needed because mupatos.com.br blocks
-# raw fetch() requests with a 403; only a real Chromium gets through.
-# ---------------------------------------------------------------------------
-
-browser = { binding = "BROWSER" }
-
-# ---------------------------------------------------------------------------
-# Cron — poll every 5 minutes.
+# Cron — poll every minute. Plain fetch() is cheap; no quota worries.
 # ---------------------------------------------------------------------------
 
 [triggers]
-crons = ["*/10 * * * *"]
+crons = ["* * * * *"]
 
 # ---------------------------------------------------------------------------
 # Plain (non-secret) variables.

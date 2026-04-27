@@ -1,8 +1,5 @@
-import type { BrowserWorker } from "@cloudflare/puppeteer";
-
 export interface Env {
   DB: D1Database;
-  BROWSER: BrowserWorker;
 
   PROFILE_BASE_URL: string;
   LOGIN_TOKEN_TTL_SECONDS: string;  // pending_logins TTL (deep-link auth)

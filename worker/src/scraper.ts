@@ -1,12 +1,27 @@
-import puppeteer from "@cloudflare/puppeteer";
 import type { Env, ProfileSnapshot } from "./types";
 
-// mupatos.com.br is fronted by LiteSpeed AI guard which 403s plain fetch().
-// Cloudflare Browser Rendering gives us a real Chromium session that passes.
-//
-// We open one browser per scrape pass, scrape every requested character on the
-// same page (sequentially, reusing the page context), then close it. That keeps
-// the cron job under a few seconds and conserves the Browser Rendering budget.
+// mupatos.com.br is fronted by Cloudflare/LiteSpeed and 403s most clients,
+// but we discovered it accepts requests that include the modern Chrome
+// client-hint headers (sec-ch-ua*, sec-fetch-*) — even from CF Workers.
+// So we just use plain fetch() with a complete browser-shaped header set.
+// No Browser Rendering, no quota worries, ~2 s per scrape.
+
+const BROWSER_HEADERS: Record<string, string> = {
+  "user-agent":
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+  "accept":
+    "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
+  "accept-language": "pt-BR,pt;q=0.9,en;q=0.8",
+  "accept-encoding": "gzip, deflate, br",
+  "sec-ch-ua": '"Chromium";v="124", "Not-A.Brand";v="99"',
+  "sec-ch-ua-mobile": "?0",
+  "sec-ch-ua-platform": '"macOS"',
+  "sec-fetch-dest": "document",
+  "sec-fetch-mode": "navigate",
+  "sec-fetch-site": "none",
+  "sec-fetch-user": "?1",
+  "upgrade-insecure-requests": "1",
+};
 
 export async function scrapeMany(
   env: Env,
@@ -16,48 +31,31 @@ export async function scrapeMany(
   const result = new Map<string, ProfileSnapshot>();
   if (names.length === 0) return result;
 
-  const totalTimeoutMs = options.totalTimeoutMs ?? 25_000;
-  const work = (async () => {
-    let browser: Awaited<ReturnType<typeof puppeteer.launch>> | null = null;
+  // Per-character timeout — small enough that the total pass stays bounded
+  // even with several characters. We run them sequentially; concurrent
+  // fetch() to the same origin would be polite-by-default but we keep it
+  // simple.
+  const perCharTimeoutMs = Math.min(options.totalTimeoutMs ?? 25_000, 15_000);
+
+  for (const name of names) {
+    const url = `${env.PROFILE_BASE_URL}/${encodeURIComponent(name)}`;
     try {
-      browser = await puppeteer.launch(env.BROWSER);
-      const page = await browser.newPage();
-      await page.setUserAgent(
-        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
-      );
-      await page.setViewport({ width: 1280, height: 800 });
-
-      for (const name of names) {
-        const url = `${env.PROFILE_BASE_URL}/${encodeURIComponent(name)}`;
-        try {
-          await page.goto(url, { waitUntil: "domcontentloaded", timeout: 20_000 });
-          const html = await page.content();
-          result.set(name, parseProfile(html, name));
-        } catch (err) {
-          console.log(`scrape error for ${name}: ${(err as Error).message}`);
-          // leave empty snapshot — scraped:false signals undetermined to caller
-        }
+      const ctrl = new AbortController();
+      const t = setTimeout(() => ctrl.abort(), perCharTimeoutMs);
+      const res = await fetch(url, { headers: BROWSER_HEADERS, signal: ctrl.signal });
+      clearTimeout(t);
+      if (!res.ok) {
+        console.log(`scrape ${name}: HTTP ${res.status}`);
+        result.set(name, emptySnapshot(name));
+        continue;
       }
+      const html = await res.text();
+      result.set(name, parseProfile(html, name));
     } catch (err) {
-      // Anything from launch / cold-start protocol timeout / quota exhaustion
-      // ends up here. Don't propagate — the caller treats missing entries as
-      // "didn't scrape" and falls back gracefully.
-      console.log(`browser launch failed: ${(err as Error).message}`);
-    } finally {
-      if (browser) await browser.close().catch(() => {});
+      console.log(`scrape ${name} failed: ${(err as Error).message}`);
+      result.set(name, emptySnapshot(name));
     }
-  })();
-
-  // Wall-clock budget for the whole scrape pass. If we blow through it,
-  // resolve early and let the caller fall back — partial results (if any)
-  // stay in `result`.
-  await Promise.race([
-    work,
-    new Promise<void>((resolve) => setTimeout(() => {
-      console.log(`scrape pass timed out after ${totalTimeoutMs}ms (names=${names.join(",")})`);
-      resolve();
-    }, totalTimeoutMs)),
-  ]);
+  }
   return result;
 }
 
@@ -87,7 +85,6 @@ function emptySnapshot(name: string): ProfileSnapshot {
 }
 
 // "Stadium (47/35)" -> { name: "Stadium", x: 47, y: 35 }
-// "Stadium" (no coords) -> { name: "Stadium", x: null, y: null }
 export function parseMap(s: string | null): { name: string | null; x: number | null; y: number | null } {
   if (!s) return { name: null, x: null, y: null };
   const coord = s.match(/\((\d+)\s*\/\s*(\d+)\)/);
@@ -105,7 +102,7 @@ export function parseMap(s: string | null): { name: string | null; x: number | n
 //   <tr><td>Mapa</td><td>Stadium  (47/35)</td></tr>
 //   <tr><td>Situação</td><td><span class="text-success">Online</span></td></tr>
 //
-// "exists" is true if we found at least one of the labelled rows; non-existent
+// "exists" is true if we found at least one labelled row; non-existent
 // names render a different page (no profile table).
 export function parseProfile(html: string, name: string): ProfileSnapshot {
   const snap: ProfileSnapshot = {
@@ -119,14 +116,13 @@ export function parseProfile(html: string, name: string): ProfileSnapshot {
     mapY: null,
     status: null,
     exists: false,
-    scraped: true,             // we got HTML; only `exists` decides whether the char is real
+    scraped: true,
   };
 
   const get = (label: RegExp): string | null => {
     const re = new RegExp(`<td[^>]*>\\s*${label.source}\\s*</td>\\s*<td[^>]*>([\\s\\S]*?)</td>`, "i");
     const m = html.match(re);
     if (!m) return null;
-    // Strip nested HTML tags and collapse whitespace.
     const text = m[1].replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
     return text || null;
   };
@@ -160,4 +156,3 @@ function parseIntOrNull(s: string): number | null {
   const m = s.match(/\d+/);
   return m ? Number(m[0]) : null;
 }
-
