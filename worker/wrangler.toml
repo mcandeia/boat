@@ -44,4 +44,4 @@ COOKIE_NAME         = "mlw_sess"
 #   echo "..." | npx wrangler secret put ZAPI_INSTANCE_TOKEN
 #   echo "..." | npx wrangler secret put ZAPI_CLIENT_TOKEN
 ZAPI_BASE_URL    = "https://api.z-api.io"
-ZAPI_INSTANCE_ID = "REPLACE_WITH_INSTANCE_ID"
+ZAPI_INSTANCE_ID = "3F24723A556D01145B1EC60C7A17E6CF"
