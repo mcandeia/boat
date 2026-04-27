@@ -234,33 +234,26 @@ export const INDEX_HTML = /* html */ `<!doctype html>
     <div class="bg-panel border border-border rounded-xl p-5">
       <h2 class="text-xs uppercase tracking-widest text-muted mb-3">Alertas</h2>
       <ul id="sub-list" class="divide-y divide-border"></ul>
-      <div class="mt-4 pt-4 border-t border-border">
-        <label class="text-xs text-muted block mb-1.5">Adicionar um alerta</label>
-        <div class="grid gap-2 sm:grid-cols-[1fr_1.4fr_1fr_auto]">
-          <select id="sub-char" class="h-10 bg-bg border border-border rounded-md px-3 outline-none focus:border-gold/60"></select>
-          <select id="sub-type" class="h-10 bg-bg border border-border rounded-md px-3 outline-none focus:border-gold/60">
-            <option value="level_gte">Nível atingido (≥)</option>
-            <option value="map_eq">Entrou no mapa</option>
-            <option value="coords_in">Entrou em zona de coordenadas</option>
-            <option value="status_eq">Online / offline</option>
-            <option value="gm_online">GM online (este personagem)</option>
-            <option value="server_event">Evento do servidor (em breve)</option>
-          </select>
-          <input id="sub-thr" placeholder="valor"
-            class="h-10 bg-bg border border-border rounded-md px-3 outline-none focus:border-gold/60" />
-          <button id="add-sub" class="gold-btn block px-4 rounded-md bg-gold text-bg font-semibold text-center border border-transparent hover:brightness-110 transition">Adicionar</button>
+      <div class="mt-4 pt-4 border-t border-border space-y-3">
+        <label class="text-xs text-muted block">Adicionar um alerta</label>
+        <div class="grid gap-2 sm:grid-cols-2">
+          <div>
+            <label class="text-[11px] text-muted block mb-1">Personagem</label>
+            <select id="sub-char" class="w-full bg-bg border border-border rounded-md px-3 outline-none focus:border-gold/60"></select>
+          </div>
+          <div>
+            <label class="text-[11px] text-muted block mb-1">Tipo de alerta</label>
+            <select id="sub-type" class="w-full bg-bg border border-border rounded-md px-3 outline-none focus:border-gold/60">
+              <option value="level_gte">Nível atingido (≥)</option>
+              <option value="map_eq">Entrou no mapa</option>
+              <option value="status_eq">Online / offline</option>
+              <option value="gm_online">GM online (este personagem)</option>
+              <option value="server_event" disabled>Evento do servidor (em breve)</option>
+            </select>
+          </div>
         </div>
-        <details class="mt-3 text-sm">
-          <summary class="cursor-pointer text-muted hover:text-goldsoft">O que vai em "valor"?</summary>
-          <ul class="mt-2 space-y-1 text-slate-300">
-            <li><b class="text-goldsoft">Nível atingido:</b> um número, ex.: <code class="bg-bg px-1.5 py-0.5 rounded text-xs">360</code></li>
-            <li><b class="text-goldsoft">Entrou no mapa:</b> nome do mapa, ex.: <code class="bg-bg px-1.5 py-0.5 rounded text-xs">Stadium</code></li>
-            <li><b class="text-goldsoft">Entrou em zona de coordenadas:</b> <code class="bg-bg px-1.5 py-0.5 rounded text-xs">Mapa:x1-x2:y1-y2</code>, ex.: <code class="bg-bg px-1.5 py-0.5 rounded text-xs">Stadium:60-90:80-100</code> pra detectar respawn em área segura</li>
-            <li><b class="text-goldsoft">Online / offline:</b> <code class="bg-bg px-1.5 py-0.5 rounded text-xs">Online</code> ou <code class="bg-bg px-1.5 py-0.5 rounded text-xs">Offline</code></li>
-            <li><b class="text-goldsoft">GM online:</b> deixe em branco</li>
-            <li><b class="text-goldsoft">Evento do servidor:</b> ainda não conectado a uma fonte</li>
-          </ul>
-        </details>
+        <div id="sub-fields"></div>
+        <button id="add-sub" class="gold-btn block px-5 rounded-md bg-gold text-bg font-semibold text-center border border-transparent hover:brightness-110 transition">Adicionar alerta</button>
       </div>
     </div>
   </section>
@@ -730,16 +723,100 @@ $("add-char").onclick = async (e) => {
     toast(err.message, "err");
   }
 };
+// ---- Subscription form: per-type fields ----
+//
+// We render a different mini-form for each event type so the user doesn't
+// have to memorize threshold formats. On submit we read those fields and
+// build the (event_type, threshold) tuple expected by the API. Note: the
+// "Entrou no mapa" option can produce two different server-side event
+// types — plain map_eq if coords are blank, or coords_in (with the
+// Map:x1-x2:y1-y2 threshold) if the user filled the optional coord box.
+
+const subTypeEl = $("sub-type");
+const subFieldsEl = $("sub-fields");
+
+const ctrlClass = "h-10 w-full bg-bg border border-border rounded-md px-3 outline-none focus:border-gold/60";
+
+function renderSubFields() {
+  const t = subTypeEl.value;
+  let html = "";
+  if (t === "level_gte") {
+    html = '<label class="text-[11px] text-muted block mb-1">Nível alvo (≥)</label>' +
+      '<input id="sf-level" type="number" min="1" max="1000" placeholder="ex.: 360" class="' + ctrlClass + '" />';
+  } else if (t === "map_eq") {
+    html =
+      '<label class="text-[11px] text-muted block mb-1">Nome do mapa</label>' +
+      '<input id="sf-map" type="text" placeholder="ex.: Stadium" class="' + ctrlClass + '" />' +
+      '<details class="mt-2 text-sm">' +
+        '<summary class="cursor-pointer text-muted hover:text-goldsoft">Filtrar por coordenadas (opcional)</summary>' +
+        '<div class="mt-2 grid grid-cols-2 sm:grid-cols-4 gap-2">' +
+          '<div><label class="text-[11px] text-muted block mb-1">X mínimo</label><input id="sf-x1" type="number" min="0" max="255" placeholder="60" class="' + ctrlClass + '" /></div>' +
+          '<div><label class="text-[11px] text-muted block mb-1">X máximo</label><input id="sf-x2" type="number" min="0" max="255" placeholder="90" class="' + ctrlClass + '" /></div>' +
+          '<div><label class="text-[11px] text-muted block mb-1">Y mínimo</label><input id="sf-y1" type="number" min="0" max="255" placeholder="80" class="' + ctrlClass + '" /></div>' +
+          '<div><label class="text-[11px] text-muted block mb-1">Y máximo</label><input id="sf-y2" type="number" min="0" max="255" placeholder="100" class="' + ctrlClass + '" /></div>' +
+        '</div>' +
+        '<div class="text-[11px] text-muted mt-2">Para uma posição exata, use o mesmo número em mín e máx (ex.: respawn de Stadium num pixel específico).</div>' +
+      '</details>';
+  } else if (t === "status_eq") {
+    html =
+      '<label class="text-[11px] text-muted block mb-1">Quando o personagem ficar…</label>' +
+      '<select id="sf-status" class="' + ctrlClass + '">' +
+        '<option value="Online">Online</option>' +
+        '<option value="Offline">Offline</option>' +
+      '</select>';
+  } else if (t === "gm_online") {
+    html = '<div class="text-xs text-muted bg-bg border border-border rounded-md px-3 py-2">Sem campos extras. O personagem precisa estar marcado como <b class="text-goldsoft">GM</b> na lista de personagens.</div>';
+  } else if (t === "server_event") {
+    html = '<div class="text-xs text-muted bg-bg border border-border rounded-md px-3 py-2">Evento do servidor ainda não está conectado a uma fonte. Em breve.</div>';
+  }
+  subFieldsEl.innerHTML = html;
+}
+subTypeEl.addEventListener("change", renderSubFields);
+renderSubFields();
+
+function readSubFormPayload() {
+  const character_id = Number($("sub-char").value) || null;
+  const t = subTypeEl.value;
+  if (t === "level_gte") {
+    const v = ($("sf-level").value || "").trim();
+    if (!v) throw new Error("informe o nível");
+    return { character_id, event_type: "level_gte", threshold: v };
+  }
+  if (t === "map_eq") {
+    const map = ($("sf-map").value || "").trim();
+    if (!map) throw new Error("informe o mapa");
+    const x1 = ($("sf-x1") || {}).value, x2 = ($("sf-x2") || {}).value;
+    const y1 = ($("sf-y1") || {}).value, y2 = ($("sf-y2") || {}).value;
+    const anyCoord = [x1, x2, y1, y2].some((v) => (v ?? "").toString().trim() !== "");
+    if (anyCoord) {
+      if ([x1, x2, y1, y2].some((v) => (v ?? "").toString().trim() === "")) {
+        throw new Error("preencha os 4 valores de coordenadas (ou deixe os 4 em branco)");
+      }
+      return {
+        character_id,
+        event_type: "coords_in",
+        threshold: map + ":" + x1 + "-" + x2 + ":" + y1 + "-" + y2,
+      };
+    }
+    return { character_id, event_type: "map_eq", threshold: map };
+  }
+  if (t === "status_eq") {
+    return { character_id, event_type: "status_eq", threshold: $("sf-status").value };
+  }
+  if (t === "gm_online") {
+    return { character_id, event_type: "gm_online" };
+  }
+  throw new Error("evento do servidor ainda não disponível");
+}
+
 $("add-sub").onclick = async (e) => {
   const btn = e.currentTarget;
   try {
-    const character_id = Number($("sub-char").value) || null;
-    const event_type = $("sub-type").value;
-    const threshold = $("sub-thr").value.trim() || undefined;
+    const payload = readSubFormPayload();
     await withSpinner(btn, () =>
-      fetchJSON("/api/subscriptions", { method: "POST", body: JSON.stringify({ character_id, event_type, threshold }) }),
+      fetchJSON("/api/subscriptions", { method: "POST", body: JSON.stringify(payload) }),
     );
-    $("sub-thr").value = "";
+    renderSubFields();   // resets the dynamic inputs to their empty state
     toast("alerta criado", "ok");
     refresh();
   } catch (err) {
