@@ -7,6 +7,7 @@ import {
   deleteCharacter,
   listCharacters,
   lookupCharacter,
+  refreshCharacter,
 } from "./routes/characters";
 import {
   createSubscription,
@@ -60,9 +61,13 @@ export default {
       if (pathname === "/api/characters/lookup" && method === "GET") {
         return await lookupCharacter(env, url.searchParams.get("name") ?? "");
       }
-      const charDelete = pathname.match(/^\/api\/characters\/(\d+)$/);
-      if (charDelete && method === "DELETE") {
-        return await deleteCharacter(env, userId, Number(charDelete[1]));
+      const charById = pathname.match(/^\/api\/characters\/(\d+)$/);
+      if (charById && method === "DELETE") {
+        return await deleteCharacter(env, userId, Number(charById[1]));
+      }
+      const charRefresh = pathname.match(/^\/api\/characters\/(\d+)\/refresh$/);
+      if (charRefresh && method === "POST") {
+        return await refreshCharacter(env, userId, Number(charRefresh[1]));
       }
 
       if (pathname === "/api/subscriptions" && method === "GET") return await listSubscriptions(env, userId);

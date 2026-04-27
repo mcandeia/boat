@@ -321,6 +321,60 @@ async function refresh() {
   }
 }
 
+function renderCharLeft(container, c) {
+  const tags = [];
+  if (c.class) tags.push(c.class);
+  if (typeof c.resets === "number") tags.push("R" + c.resets);
+  if (c.last_level != null) tags.push("Nv " + c.last_level);
+  if (c.last_map) tags.push(c.last_map);
+  if (c.is_gm) tags.push('<span class="px-2 py-0.5 rounded-full bg-gold/10 text-goldsoft text-xs border border-gold/20">GM</span>');
+  if (c.last_status) {
+    const cls = c.last_status === "Online"
+      ? 'bg-ok/10 text-ok border-ok/20'
+      : 'bg-border text-muted border-border';
+    tags.push('<span class="px-2 py-0.5 rounded-full ' + cls + ' text-xs border">' + c.last_status + '</span>');
+  }
+  if (tags.length === 0 && c.last_checked_at == null) {
+    tags.push('<span class="text-muted italic">carregando…</span>');
+  }
+  container.innerHTML = '<div class="font-semibold text-goldsoft">' + c.name + '</div>' +
+    '<div class="text-xs text-muted mt-0.5 flex flex-wrap gap-x-2 gap-y-1 items-center">' +
+    tags.join('<span class="text-border">·</span>') + '</div>';
+}
+
+// Per-char on-demand refresh. Called by the ↻ button and by the lazy
+// auto-refresh for chars with no last_checked_at. Updates the row in place
+// when done.
+async function refreshCharacterRow(li, id, silent = false) {
+  const left = li.querySelector("div");
+  const btn = li.querySelector("button[title='Atualizar dados']");
+  const originalBtnHtml = btn ? btn.innerHTML : null;
+  if (btn) {
+    btn.disabled = true;
+    btn.innerHTML = '<svg class="animate-spin h-3.5 w-3.5" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="10" stroke="currentColor" stroke-opacity="0.25" stroke-width="4"></circle><path d="M4 12a8 8 0 018-8" stroke="currentColor" stroke-width="4" stroke-linecap="round"></path></svg>';
+  }
+  try {
+    const res = await fetchJSON("/api/characters/" + id + "/refresh", { method: "POST" });
+    if (res.character) {
+      // Patch local state and re-render this row.
+      const idx = state.characters.findIndex((c) => c.id === id);
+      if (idx >= 0) state.characters[idx] = res.character;
+      renderCharLeft(left, res.character);
+    }
+    if (!silent && res.scraped === false) {
+      // Browser Rendering didn't come up — be transparent rather than silent.
+      console.warn("refresh: scrape didn't complete for char", id);
+    }
+  } catch (e) {
+    if (!silent) alert(e.message);
+  } finally {
+    if (btn) {
+      btn.disabled = false;
+      btn.innerHTML = originalBtnHtml;
+    }
+  }
+}
+
 function renderDash() {
   $("login").classList.add("hidden");
   $("dash").classList.remove("hidden");
@@ -333,36 +387,47 @@ function renderDash() {
   if (state.characters.length === 0) {
     cl.innerHTML = '<li class="py-3 text-muted text-sm">Nenhum personagem ainda. Adicione um abaixo.</li>';
   }
+  const stale = []; // chars that need a background refresh
   for (const c of state.characters) {
     const li = document.createElement("li");
     li.className = "py-3 flex items-center justify-between gap-3";
+    li.dataset.charId = c.id;
     const left = document.createElement("div");
     left.className = "min-w-0";
-    const tags = [];
-    if (c.class) tags.push(c.class);
-    if (typeof c.resets === "number") tags.push("R" + c.resets);
-    if (c.last_level != null) tags.push("Nv " + c.last_level);
-    if (c.last_map) tags.push(c.last_map);
-    if (c.is_gm) tags.push('<span class="px-2 py-0.5 rounded-full bg-gold/10 text-goldsoft text-xs border border-gold/20">GM</span>');
-    if (c.last_status) {
-      const cls = c.last_status === "Online"
-        ? 'bg-ok/10 text-ok border-ok/20'
-        : 'bg-border text-muted border-border';
-      tags.push('<span class="px-2 py-0.5 rounded-full ' + cls + ' text-xs border">' + c.last_status + '</span>');
-    }
-    left.innerHTML = '<div class="font-semibold text-goldsoft">' + c.name + '</div><div class="text-xs text-muted mt-0.5 flex flex-wrap gap-x-2 gap-y-1">' + tags.join('<span class="text-border">·</span>') + '</div>';
+    renderCharLeft(left, c);
+    const right = document.createElement("div");
+    right.className = "flex items-center gap-2 shrink-0";
+    const refreshBtn = document.createElement("button");
+    refreshBtn.className = "h-8 w-8 rounded-md border border-border text-sm hover:bg-bg transition flex items-center justify-center";
+    refreshBtn.title = "Atualizar dados";
+    refreshBtn.innerHTML = "↻";
+    refreshBtn.onclick = () => refreshCharacterRow(li, c.id);
     const del = document.createElement("button");
-    del.className = "px-3 py-1.5 rounded-md border border-border text-danger text-sm hover:bg-bg transition shrink-0";
+    del.className = "px-3 py-1.5 rounded-md border border-border text-danger text-sm hover:bg-bg transition";
     del.textContent = "Remover";
     del.onclick = async () => {
       if (!confirm("Remover " + c.name + "? Os alertas dele também serão excluídos.")) return;
       await fetchJSON("/api/characters/" + c.id, { method: "DELETE" });
       refresh();
     };
+    right.appendChild(refreshBtn);
+    right.appendChild(del);
     li.appendChild(left);
-    li.appendChild(del);
+    li.appendChild(right);
     cl.appendChild(li);
+    if (c.last_checked_at == null) stale.push(c.id);
   }
+
+  // Lazy-fill: any char that's never been scraped (added during a Browser
+  // Rendering cold-start, e.g.) gets refreshed in the background, sequentially
+  // so we don't fan out browsers.
+  (async () => {
+    for (const id of stale) {
+      const li = cl.querySelector('li[data-char-id="' + id + '"]');
+      if (!li) continue;
+      await refreshCharacterRow(li, id, /*silent*/ true);
+    }
+  })();
 
   const sel = $("sub-char");
   sel.innerHTML = "";

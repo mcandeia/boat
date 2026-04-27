@@ -82,3 +82,45 @@ export async function deleteCharacter(env: Env, userId: number, id: number): Pro
   if (r.meta.changes === 0) return bad(404, "não encontrado");
   return json({ ok: true });
 }
+
+// On-demand re-scrape for a single character. Used by the dashboard to fill
+// in stats lazily after a slow add, or when the user taps "Atualizar".
+// Returns the freshly stored row so the UI can redraw.
+export async function refreshCharacter(env: Env, userId: number, id: number): Promise<Response> {
+  const owned = await env.DB
+    .prepare("SELECT * FROM characters WHERE id = ? AND user_id = ?")
+    .bind(id, userId)
+    .first<CharacterRow>();
+  if (!owned) return bad(404, "não encontrado");
+
+  const snap = await scrapeOne(env, owned.name, { totalTimeoutMs: 12_000 });
+  if (!snap.scraped) {
+    return json({ scraped: false, character: owned });
+  }
+  if (!snap.exists) {
+    // Char vanished from the server (renamed, deleted). Don't touch the row;
+    // just tell the caller.
+    return json({ scraped: true, exists: false, character: owned });
+  }
+
+  const t = now();
+  await env.DB
+    .prepare(
+      `UPDATE characters
+          SET class = COALESCE(?, class),
+              resets = COALESCE(?, resets),
+              last_level = COALESCE(?, last_level),
+              last_map = COALESCE(?, last_map),
+              last_status = COALESCE(?, last_status),
+              last_checked_at = ?
+        WHERE id = ?`,
+    )
+    .bind(snap.class, snap.resets, snap.level, snap.map, snap.status, t, id)
+    .run();
+
+  const updated = await env.DB
+    .prepare("SELECT * FROM characters WHERE id = ?")
+    .bind(id)
+    .first<CharacterRow>();
+  return json({ scraped: true, exists: true, character: updated });
+}

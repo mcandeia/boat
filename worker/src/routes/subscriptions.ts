@@ -1,5 +1,8 @@
-import type { CharacterRow, Env, EventType, SubscriptionRow } from "../types";
+import type { CharacterRow, Env, EventType, ProfileSnapshot, SubscriptionRow, UserRow } from "../types";
 import { bad, json, now } from "../util";
+import { currentlyMatches, formatAlert } from "../messages";
+import { parseMap } from "../scraper";
+import { sendTelegram } from "../telegram";
 
 const EVENT_TYPES: ReadonlySet<EventType> = new Set([
   "level_gte",
@@ -83,7 +86,77 @@ export async function createSubscription(env: Env, userId: number, req: Request)
     )
     .bind(userId, characterId, eventType, threshold, t)
     .run();
-  return json({ ok: true, id: r.meta.last_row_id });
+
+  // If the alert's condition already holds with the data we have on file,
+  // fire one notification immediately. Makes brand-new subs feel responsive
+  // (otherwise the edge-trigger means an already-true state never alerts).
+  // Then set cooldown so the cron won't re-fire on the next tick.
+  const subId = r.meta.last_row_id;
+  await maybeFireOnCreate(env, userId, Number(subId), {
+    user_id: userId,
+    character_id: characterId,
+    event_type: eventType,
+    threshold,
+    active: 1,
+    cooldown_until: 0,
+    last_fired_at: null,
+    created_at: t,
+    id: Number(subId),
+  });
+
+  return json({ ok: true, id: subId });
+}
+
+async function maybeFireOnCreate(
+  env: Env,
+  userId: number,
+  subId: number,
+  sub: SubscriptionRow,
+): Promise<void> {
+  if (!sub.character_id) return;             // server_event only
+
+  const char = await env.DB
+    .prepare("SELECT * FROM characters WHERE id = ? AND user_id = ?")
+    .bind(sub.character_id, userId)
+    .first<CharacterRow>();
+  if (!char || char.last_checked_at == null) return;   // never scraped, nothing to evaluate
+
+  const parsed = parseMap(char.last_map);
+  const snap: ProfileSnapshot = {
+    name: char.name,
+    class: char.class,
+    resets: char.resets,
+    level: char.last_level,
+    map: char.last_map,
+    mapName: parsed.name,
+    mapX: parsed.x,
+    mapY: parsed.y,
+    status: char.last_status as "Online" | "Offline" | null,
+    exists: true,
+    scraped: true,
+  };
+
+  if (!currentlyMatches(sub, snap, !!char.is_gm)) return;
+
+  const owner = await env.DB
+    .prepare("SELECT telegram_chat_id FROM users WHERE id = ?")
+    .bind(userId)
+    .first<Pick<UserRow, "telegram_chat_id">>();
+  if (!owner) return;
+
+  const msg = formatAlert(char.name, sub, snap);
+  const send = await sendTelegram(env, owner.telegram_chat_id, msg);
+  if (!send.ok) {
+    console.log(`fire-on-create send failed for sub ${subId}: ${send.status} ${send.body}`);
+    return;
+  }
+
+  const t = now();
+  const cooldown = Number(env.COOLDOWN_SECONDS || "21600");
+  await env.DB
+    .prepare("UPDATE subscriptions SET cooldown_until = ?, last_fired_at = ? WHERE id = ?")
+    .bind(t + cooldown, t, subId)
+    .run();
 }
 
 export async function deleteSubscription(env: Env, userId: number, id: number): Promise<Response> {
