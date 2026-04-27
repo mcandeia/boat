@@ -6,7 +6,7 @@ export async function me(env: Env, userId: number): Promise<Response> {
     .prepare("SELECT id, whatsapp, created_at FROM users WHERE id = ?")
     .bind(userId)
     .first<UserRow>();
-  if (!user) return bad(401, "no user");
+  if (!user) return bad(401, "sessão inválida");
 
   const characters = (
     await env.DB

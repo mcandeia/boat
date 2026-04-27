@@ -39,7 +39,7 @@ export default {
 
       // ---- everything below requires a session ----
       const sess = await readSession(env, cookie);
-      if (!sess) return bad(401, "not signed in");
+      if (!sess) return bad(401, "você não está autenticado");
       const userId = sess.userId;
 
       if (pathname === "/api/me" && method === "GET") return await me(env, userId);
@@ -68,13 +68,13 @@ export default {
       if (pathname === "/admin/poll" && method === "POST") {
         const auth = req.headers.get("authorization");
         if (!env.SESSION_SECRET || auth !== `Bearer ${env.SESSION_SECRET}`) {
-          return bad(403, "forbidden");
+          return bad(403, "proibido");
         }
         const r = await pollOnce(env);
         return json({ ok: true, ...r });
       }
 
-      return bad(404, "not found");
+      return bad(404, "rota não encontrada");
     } catch (err) {
       console.error("unhandled", err);
       return bad(500, (err as Error).message);

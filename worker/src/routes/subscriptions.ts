@@ -27,7 +27,7 @@ export async function createSubscription(env: Env, userId: number, req: Request)
     threshold?: string;
   };
   const eventType = body.event_type as EventType;
-  if (!EVENT_TYPES.has(eventType)) return bad(400, "invalid event_type");
+  if (!EVENT_TYPES.has(eventType)) return bad(400, "tipo de evento inválido");
 
   // Validate threshold per event type, and verify char ownership when used.
   let threshold: string | null = (body.threshold ?? "").trim() || null;
@@ -35,31 +35,31 @@ export async function createSubscription(env: Env, userId: number, req: Request)
 
   if (eventType === "level_gte") {
     const n = Number(threshold);
-    if (!Number.isInteger(n) || n < 1 || n > 1000) return bad(400, "level threshold must be 1..1000");
+    if (!Number.isInteger(n) || n < 1 || n > 1000) return bad(400, "nível alvo deve estar entre 1 e 1000");
     threshold = String(n);
-    if (!characterId) return bad(400, "character_id required");
+    if (!characterId) return bad(400, "selecione um personagem");
   } else if (eventType === "map_eq") {
-    if (!threshold) return bad(400, "map name required");
-    if (!characterId) return bad(400, "character_id required");
+    if (!threshold) return bad(400, "nome do mapa obrigatório");
+    if (!characterId) return bad(400, "selecione um personagem");
   } else if (eventType === "coords_in") {
     if (!threshold || !COORDS_RE.test(threshold)) {
-      return bad(400, "threshold must be like 'Stadium:60-90:80-100'");
+      return bad(400, "use o formato 'Stadium:60-90:80-100'");
     }
     const [, , x1s, x2s, y1s, y2s] = threshold.match(/^([^:]+):(\d+)-(\d+):(\d+)-(\d+)$/)!;
     if (Number(x1s) > Number(x2s) || Number(y1s) > Number(y2s)) {
-      return bad(400, "coord range must be low-high");
+      return bad(400, "intervalo de coordenadas deve ser do menor para o maior");
     }
-    if (!characterId) return bad(400, "character_id required");
+    if (!characterId) return bad(400, "selecione um personagem");
   } else if (eventType === "status_eq") {
     const v = (threshold ?? "").toLowerCase();
-    if (v !== "online" && v !== "offline") return bad(400, "status must be Online or Offline");
+    if (v !== "online" && v !== "offline") return bad(400, "status deve ser Online ou Offline");
     threshold = v === "online" ? "Online" : "Offline";
-    if (!characterId) return bad(400, "character_id required");
+    if (!characterId) return bad(400, "selecione um personagem");
   } else if (eventType === "gm_online") {
     threshold = null;
-    if (!characterId) return bad(400, "character_id required");
+    if (!characterId) return bad(400, "selecione um personagem");
   } else if (eventType === "server_event") {
-    if (!threshold) return bad(400, "event name required");
+    if (!threshold) return bad(400, "nome do evento obrigatório");
     characterId = null;
   }
 
@@ -68,9 +68,9 @@ export async function createSubscription(env: Env, userId: number, req: Request)
       .prepare("SELECT id, is_gm FROM characters WHERE id = ? AND user_id = ?")
       .bind(characterId, userId)
       .first<Pick<CharacterRow, "id" | "is_gm">>();
-    if (!owned) return bad(404, "character not found");
+    if (!owned) return bad(404, "personagem não encontrado");
     if (eventType === "gm_online" && !owned.is_gm) {
-      return bad(400, "character is not flagged as GM");
+      return bad(400, "personagem não está marcado como GM");
     }
   }
 
@@ -91,17 +91,17 @@ export async function deleteSubscription(env: Env, userId: number, id: number): 
     .prepare("DELETE FROM subscriptions WHERE id = ? AND user_id = ?")
     .bind(id, userId)
     .run();
-  if (r.meta.changes === 0) return bad(404, "not found");
+  if (r.meta.changes === 0) return bad(404, "não encontrado");
   return json({ ok: true });
 }
 
 export async function toggleSubscription(env: Env, userId: number, id: number, req: Request): Promise<Response> {
   const body = (await req.json().catch(() => ({}))) as { active?: boolean };
-  if (typeof body.active !== "boolean") return bad(400, "active boolean required");
+  if (typeof body.active !== "boolean") return bad(400, "campo 'active' obrigatório");
   const r = await env.DB
     .prepare("UPDATE subscriptions SET active = ? WHERE id = ? AND user_id = ?")
     .bind(body.active ? 1 : 0, id, userId)
     .run();
-  if (r.meta.changes === 0) return bad(404, "not found");
+  if (r.meta.changes === 0) return bad(404, "não encontrado");
   return json({ ok: true });
 }

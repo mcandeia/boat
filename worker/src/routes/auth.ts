@@ -9,7 +9,7 @@ const RESEND_COOLDOWN = 30; // seconds between PIN resends
 export async function requestPin(env: Env, req: Request): Promise<Response> {
   const body = await req.json().catch(() => ({})) as { whatsapp?: string };
   const phone = normalizePhone(body.whatsapp ?? "");
-  if (!phone) return bad(400, "invalid whatsapp number");
+  if (!phone) return bad(400, "número de WhatsApp inválido");
 
   const ttl = Number(env.PIN_TTL_SECONDS || "600");
   const t = now();
@@ -19,7 +19,7 @@ export async function requestPin(env: Env, req: Request): Promise<Response> {
     .bind(phone)
     .first<{ resend_after: number }>();
   if (existing && existing.resend_after > t) {
-    return bad(429, `wait ${existing.resend_after - t}s before requesting a new pin`);
+    return bad(429, `aguarde ${existing.resend_after - t}s antes de pedir um novo código`);
   }
 
   const pin = randomPin();
@@ -43,10 +43,10 @@ export async function requestPin(env: Env, req: Request): Promise<Response> {
   const send = await sendWhatsApp(
     env,
     phone,
-    `Your MU Level Watcher login code is ${pin}. Expires in ${Math.round(ttl / 60)} minutes.`,
+    `Seu código de acesso ao Painel do jogador Mu Patos é ${pin}. Expira em ${Math.round(ttl / 60)} minutos.`,
   );
   if (!send.ok) {
-    return bad(502, `whatsapp send failed: ${send.status}`);
+    return bad(502, `falha ao enviar WhatsApp (${send.status})`);
   }
   return json({ ok: true, expires_in: ttl });
 }
@@ -55,16 +55,16 @@ export async function verifyPin(env: Env, req: Request): Promise<Response> {
   const body = await req.json().catch(() => ({})) as { whatsapp?: string; pin?: string };
   const phone = normalizePhone(body.whatsapp ?? "");
   const pin = (body.pin ?? "").trim();
-  if (!phone) return bad(400, "invalid whatsapp number");
-  if (!/^\d{6}$/.test(pin)) return bad(400, "pin must be 6 digits");
+  if (!phone) return bad(400, "número de WhatsApp inválido");
+  if (!/^\d{6}$/.test(pin)) return bad(400, "o código deve ter 6 dígitos");
 
   const row = await env.DB
     .prepare("SELECT pin_hash, expires_at, attempts FROM pins WHERE whatsapp = ?")
     .bind(phone)
     .first<{ pin_hash: string; expires_at: number; attempts: number }>();
-  if (!row) return bad(400, "no pending pin — request a new one");
-  if (row.expires_at < now()) return bad(400, "pin expired — request a new one");
-  if (row.attempts >= MAX_ATTEMPTS) return bad(429, "too many attempts — request a new pin");
+  if (!row) return bad(400, "nenhum código pendente — peça um novo");
+  if (row.expires_at < now()) return bad(400, "código expirado — peça um novo");
+  if (row.attempts >= MAX_ATTEMPTS) return bad(429, "tentativas demais — peça um novo código");
 
   const submittedHash = await sha256Hex(pin);
   if (submittedHash !== row.pin_hash) {
@@ -72,7 +72,7 @@ export async function verifyPin(env: Env, req: Request): Promise<Response> {
       .prepare("UPDATE pins SET attempts = attempts + 1 WHERE whatsapp = ?")
       .bind(phone)
       .run();
-    return bad(400, "wrong pin");
+    return bad(400, "código incorreto");
   }
 
   // Upsert user, then issue session.
@@ -87,7 +87,7 @@ export async function verifyPin(env: Env, req: Request): Promise<Response> {
     .prepare("SELECT id, whatsapp, created_at FROM users WHERE whatsapp = ?")
     .bind(phone)
     .first<UserRow>();
-  if (!user) return bad(500, "could not load user");
+  if (!user) return bad(500, "não foi possível carregar o usuário");
 
   await env.DB.prepare("DELETE FROM pins WHERE whatsapp = ?").bind(phone).run();
 
