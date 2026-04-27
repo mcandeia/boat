@@ -1,0 +1,41 @@
+name = "mu-level-watcher"
+main = "src/index.ts"
+compatibility_date = "2026-04-01"
+compatibility_flags = ["nodejs_compat"]
+
+# ---------------------------------------------------------------------------
+# Storage
+# ---------------------------------------------------------------------------
+
+[[d1_databases]]
+binding = "DB"
+database_name = "mu-watcher"
+database_id = "REPLACE_WITH_D1_ID"           # `wrangler d1 create mu-watcher`
+migrations_dir = "migrations"
+
+# ---------------------------------------------------------------------------
+# Cloudflare Browser Rendering — needed because mupatos.com.br blocks
+# raw fetch() requests with a 403; only a real Chromium gets through.
+# Requires Workers Paid (Browser Rendering free tier is generous though).
+# ---------------------------------------------------------------------------
+
+browser = { binding = "BROWSER" }
+
+# ---------------------------------------------------------------------------
+# Cron — poll every 5 minutes.
+# ---------------------------------------------------------------------------
+
+[triggers]
+crons = ["*/5 * * * *"]
+
+# ---------------------------------------------------------------------------
+# Plain (non-secret) variables. Real secrets go in `wrangler secret put`.
+# ---------------------------------------------------------------------------
+
+[vars]
+PROFILE_BASE_URL = "https://mupatos.com.br/site/profile/character"
+PIN_TTL_SECONDS  = "600"        # 10 minutes
+SESSION_TTL_DAYS = "30"
+COOLDOWN_SECONDS = "21600"      # don't re-fire the same alert within 6h
+WHATSAPP_API_URL = "https://placeholder.invalid/send"  # replace via secret/var
+COOKIE_NAME      = "mlw_sess"
