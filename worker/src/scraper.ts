@@ -11,37 +11,56 @@ import type { Env, ProfileSnapshot } from "./types";
 export async function scrapeMany(
   env: Env,
   names: string[],
+  options: { totalTimeoutMs?: number } = {},
 ): Promise<Map<string, ProfileSnapshot>> {
   const result = new Map<string, ProfileSnapshot>();
   if (names.length === 0) return result;
 
-  const browser = await puppeteer.launch(env.BROWSER);
-  try {
-    const page = await browser.newPage();
-    await page.setUserAgent(
-      "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
-    );
-    await page.setViewport({ width: 1280, height: 800 });
+  const totalTimeoutMs = options.totalTimeoutMs ?? 25_000;
+  const work = (async () => {
+    const browser = await puppeteer.launch(env.BROWSER);
+    try {
+      const page = await browser.newPage();
+      await page.setUserAgent(
+        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+      );
+      await page.setViewport({ width: 1280, height: 800 });
 
-    for (const name of names) {
-      const url = `${env.PROFILE_BASE_URL}/${encodeURIComponent(name)}`;
-      try {
-        await page.goto(url, { waitUntil: "domcontentloaded", timeout: 30_000 });
-        const html = await page.content();
-        result.set(name, parseProfile(html, name));
-      } catch (err) {
-        console.log(`scrape error for ${name}: ${(err as Error).message}`);
-        result.set(name, emptySnapshot(name));
+      for (const name of names) {
+        const url = `${env.PROFILE_BASE_URL}/${encodeURIComponent(name)}`;
+        try {
+          await page.goto(url, { waitUntil: "domcontentloaded", timeout: 20_000 });
+          const html = await page.content();
+          result.set(name, parseProfile(html, name));
+        } catch (err) {
+          console.log(`scrape error for ${name}: ${(err as Error).message}`);
+          result.set(name, emptySnapshot(name));
+        }
       }
+    } finally {
+      await browser.close().catch(() => {});
     }
-  } finally {
-    await browser.close().catch(() => {});
-  }
+  })();
+
+  // Wall-clock budget for the whole scrape pass. If we blow through it (cold
+  // Browser Rendering, Mu Patos slow, etc.), bail and let the caller fall back
+  // to whatever default they want — partial results stay in `result`.
+  await Promise.race([
+    work,
+    new Promise<void>((resolve) => setTimeout(() => {
+      console.log(`scrape pass timed out after ${totalTimeoutMs}ms (names=${names.join(",")})`);
+      resolve();
+    }, totalTimeoutMs)),
+  ]);
   return result;
 }
 
-export async function scrapeOne(env: Env, name: string): Promise<ProfileSnapshot> {
-  const map = await scrapeMany(env, [name]);
+export async function scrapeOne(
+  env: Env,
+  name: string,
+  options: { totalTimeoutMs?: number } = {},
+): Promise<ProfileSnapshot> {
+  const map = await scrapeMany(env, [name], options);
   return map.get(name) ?? emptySnapshot(name);
 }
 
@@ -57,6 +76,7 @@ function emptySnapshot(name: string): ProfileSnapshot {
     mapY: null,
     status: null,
     exists: false,
+    scraped: false,
   };
 }
 
@@ -93,6 +113,7 @@ export function parseProfile(html: string, name: string): ProfileSnapshot {
     mapY: null,
     status: null,
     exists: false,
+    scraped: true,             // we got HTML; only `exists` decides whether the char is real
   };
 
   const get = (label: RegExp): string | null => {

@@ -80,5 +80,11 @@ export interface ProfileSnapshot {
   mapX: number | null;
   mapY: number | null;
   status: "Online" | "Offline" | null;
+  // True iff we successfully fetched HTML and parsed a profile table. Used
+  // to distinguish "char definitely doesn't exist" from "we couldn't scrape
+  // right now."
   exists: boolean;
+  // True iff the scrape actually completed (timeout/error makes this false
+  // even when exists is also false — caller can fall back gracefully).
+  scraped: boolean;
 }

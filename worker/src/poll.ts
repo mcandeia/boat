@@ -81,6 +81,7 @@ export async function pollOnce(env: Env): Promise<{ scraped: number; fired: numb
       mapY: prevMap.y,
       status: char.last_status as "Online" | "Offline" | null,
       exists: true,
+      scraped: true,
     };
 
     for (const sub of subsByChar.get(char.id) ?? []) {

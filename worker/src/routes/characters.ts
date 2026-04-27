@@ -22,9 +22,10 @@ export async function listCharacters(env: Env, userId: number): Promise<Response
 export async function lookupCharacter(env: Env, name: string): Promise<Response> {
   if (!VALID_NAME.test(name)) return bad(400, INVALID_NAME);
   if (BLOCKED_NAMES.has(name.toLowerCase())) return bad(403, BLOCKED_MESSAGE);
-  const snap = await scrapeOne(env, name);
-  if (!snap.exists) return json({ exists: false });
-  return json({ exists: true, snapshot: snap });
+  const snap = await scrapeOne(env, name, { totalTimeoutMs: 12_000 });
+  if (!snap.scraped) return json({ scraped: false });
+  if (!snap.exists) return json({ scraped: true, exists: false });
+  return json({ scraped: true, exists: true, snapshot: snap });
 }
 
 export async function createCharacter(env: Env, userId: number, req: Request): Promise<Response> {
@@ -39,8 +40,14 @@ export async function createCharacter(env: Env, userId: number, req: Request): P
     .first<{ id: number }>();
   if (dup) return bad(409, "personagem já cadastrado");
 
-  const snap = await scrapeOne(env, name);
-  if (!snap.exists) return bad(404, "personagem não encontrado no Mu Patos");
+  // Best-effort scrape with a tight budget. If it succeeds we prefill the
+  // row; if it times out we register the char anyway and let the cron's
+  // next pass fill in stats. Only a *successful* scrape that found no
+  // profile table blocks creation.
+  const snap = await scrapeOne(env, name, { totalTimeoutMs: 12_000 });
+  if (snap.scraped && !snap.exists) {
+    return bad(404, "personagem não encontrado no Mu Patos");
+  }
 
   const t = now();
   const result = await env.DB
@@ -58,7 +65,7 @@ export async function createCharacter(env: Env, userId: number, req: Request): P
       snap.level,
       snap.map,
       snap.status,
-      t,
+      snap.exists ? t : null,
       t,
     )
     .run();
