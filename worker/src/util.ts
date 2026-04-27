@@ -14,10 +14,14 @@ export function bad(status: number, msg: string): Response {
   return json({ error: msg }, { status });
 }
 
-// Strip everything except digits — phone numbers are stored as digits-only E.164.
+// Strip everything except digits — phone numbers are stored as digits-only
+// E.164. Brazilian default: 10- or 11-digit input (DDD + local) gets a "55"
+// prefix automatically, so users can type "83988462698" instead of
+// "5583988462698".
 export function normalizePhone(input: string): string | null {
-  const digits = (input ?? "").replace(/\D+/g, "");
-  if (digits.length < 10 || digits.length > 15) return null;
+  let digits = (input ?? "").replace(/\D+/g, "");
+  if (digits.length === 10 || digits.length === 11) digits = "55" + digits;
+  if (digits.length < 11 || digits.length > 15) return null;
   return digits;
 }
 
