@@ -1,0 +1,59 @@
+name: Deploy Worker
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "worker/**"
+      - ".github/workflows/deploy.yml"
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      deployments: write
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: worker/package-lock.json
+
+      - name: Install
+        run: cd worker && npm install --no-audit --no-fund
+
+      - name: Typecheck
+        run: cd worker && npx tsc --noEmit
+
+      # D1 migrations are idempotent and safe to re-run on every deploy.
+      - name: Apply D1 migrations
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          workingDirectory: worker
+          command: d1 migrations apply mu-watcher --remote
+
+      # The `secrets:` block tells wrangler-action to push these as Worker
+      # secrets *before* deploying, sourced from the env: below. That way
+      # everything lives in GitHub Actions secrets — no `wrangler secret put`.
+      - name: Deploy
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          workingDirectory: worker
+          command: deploy
+          secrets: |
+            SESSION_SECRET
+            ZAPI_INSTANCE_TOKEN
+            ZAPI_CLIENT_TOKEN
+        env:
+          SESSION_SECRET: ${{ secrets.SESSION_SECRET }}
+          ZAPI_INSTANCE_TOKEN: ${{ secrets.ZAPI_INSTANCE_TOKEN }}
+          ZAPI_CLIENT_TOKEN: ${{ secrets.ZAPI_CLIENT_TOKEN }}
