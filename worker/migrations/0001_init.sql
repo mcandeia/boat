@@ -33,11 +33,12 @@ CREATE INDEX idx_characters_name ON characters(name);
 
 -- Subscription = "notify me when this character/event meets condition".
 -- event_type values:
---   level_gte        threshold = "360"           character_id required
---   map_eq           threshold = "Stadium"       character_id required
---   status_eq        threshold = "Online"        character_id required
---   gm_online        threshold = NULL            character_id required (must be a GM char)
---   server_event     threshold = "Chaos Castle"  character_id NULL (placeholder; needs source)
+--   level_gte        threshold = "360"                 character_id required
+--   map_eq           threshold = "Stadium"             character_id required
+--   coords_in        threshold = "Stadium:60-90:80-100" character_id required (entered box)
+--   status_eq        threshold = "Online"              character_id required
+--   gm_online        threshold = NULL                  character_id required (must be a GM char)
+--   server_event     threshold = "Chaos Castle"        character_id NULL (placeholder; needs source)
 CREATE TABLE subscriptions (
   id              INTEGER PRIMARY KEY AUTOINCREMENT,
   user_id         INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,

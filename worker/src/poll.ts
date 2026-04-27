@@ -1,5 +1,5 @@
 import type { CharacterRow, Env, ProfileSnapshot, SubscriptionRow } from "./types";
-import { mapNameOnly, scrapeMany } from "./scraper";
+import { parseMap, scrapeMany } from "./scraper";
 import { now } from "./util";
 import { sendWhatsApp } from "./whatsapp";
 
@@ -66,12 +66,16 @@ export async function pollOnce(env: Env): Promise<{ scraped: number; fired: numb
     const snap = snapshots.get(char.name);
     if (!snap || !snap.exists) continue;
 
+    const prevMap = parseMap(char.last_map);
     const prev: ProfileSnapshot = {
       name: char.name,
       class: char.class,
       resets: char.resets,
       level: char.last_level,
       map: char.last_map,
+      mapName: prevMap.name,
+      mapX: prevMap.x,
+      mapY: prevMap.y,
       status: char.last_status as "Online" | "Offline" | null,
       exists: true,
     };
@@ -134,9 +138,14 @@ function evaluate(
     case "map_eq": {
       const want = (sub.threshold ?? "").toLowerCase();
       if (!want) return false;
-      const prevMap = (mapNameOnly(prev.map) ?? "").toLowerCase();
-      const nextMap = (mapNameOnly(next.map) ?? "").toLowerCase();
-      return nextMap === want && prevMap !== want;
+      const p = (prev.mapName ?? "").toLowerCase();
+      const n = (next.mapName ?? "").toLowerCase();
+      return n === want && p !== want;
+    }
+    case "coords_in": {
+      const box = parseCoordsBox(sub.threshold);
+      if (!box) return false;
+      return inBox(next, box) && !inBox(prev, box);
     }
     case "status_eq": {
       const want = sub.threshold;
@@ -163,6 +172,8 @@ function formatMessage(
       return `🎯 ${name} reached level ${snap.level} (target ${sub.threshold}).`;
     case "map_eq":
       return `📍 ${name} entered ${snap.map}.`;
+    case "coords_in":
+      return `📍 ${name} is at ${snap.map} (zone match: ${sub.threshold}).`;
     case "status_eq":
       return `🟢 ${name} is now ${snap.status}.`;
     case "gm_online":
@@ -170,4 +181,28 @@ function formatMessage(
     case "server_event":
       return `📣 Server event: ${sub.threshold}.`;
   }
+}
+
+// "Stadium:60-90:80-100" -> {map, x1, x2, y1, y2}
+export function parseCoordsBox(
+  threshold: string | null,
+): { map: string; x1: number; x2: number; y1: number; y2: number } | null {
+  if (!threshold) return null;
+  const m = threshold.match(/^([^:]+):(\d+)-(\d+):(\d+)-(\d+)$/);
+  if (!m) return null;
+  const x1 = Number(m[2]);
+  const x2 = Number(m[3]);
+  const y1 = Number(m[4]);
+  const y2 = Number(m[5]);
+  if (x1 > x2 || y1 > y2) return null;
+  return { map: m[1].trim(), x1, x2, y1, y2 };
+}
+
+function inBox(
+  snap: ProfileSnapshot,
+  box: { map: string; x1: number; x2: number; y1: number; y2: number },
+): boolean {
+  if (!snap.mapName || snap.mapX == null || snap.mapY == null) return false;
+  if (snap.mapName.toLowerCase() !== box.map.toLowerCase()) return false;
+  return snap.mapX >= box.x1 && snap.mapX <= box.x2 && snap.mapY >= box.y1 && snap.mapY <= box.y2;
 }

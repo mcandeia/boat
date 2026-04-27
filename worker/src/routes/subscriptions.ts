@@ -4,10 +4,13 @@ import { bad, json, now } from "../util";
 const EVENT_TYPES: ReadonlySet<EventType> = new Set([
   "level_gte",
   "map_eq",
+  "coords_in",
   "status_eq",
   "gm_online",
   "server_event",
 ]);
+
+const COORDS_RE = /^[A-Za-z][A-Za-z0-9 _-]{0,30}:\d{1,3}-\d{1,3}:\d{1,3}-\d{1,3}$/;
 
 export async function listSubscriptions(env: Env, userId: number): Promise<Response> {
   const rows = await env.DB
@@ -37,6 +40,15 @@ export async function createSubscription(env: Env, userId: number, req: Request)
     if (!characterId) return bad(400, "character_id required");
   } else if (eventType === "map_eq") {
     if (!threshold) return bad(400, "map name required");
+    if (!characterId) return bad(400, "character_id required");
+  } else if (eventType === "coords_in") {
+    if (!threshold || !COORDS_RE.test(threshold)) {
+      return bad(400, "threshold must be like 'Stadium:60-90:80-100'");
+    }
+    const [, , x1s, x2s, y1s, y2s] = threshold.match(/^([^:]+):(\d+)-(\d+):(\d+)-(\d+)$/)!;
+    if (Number(x1s) > Number(x2s) || Number(y1s) > Number(y2s)) {
+      return bad(400, "coord range must be low-high");
+    }
     if (!characterId) return bad(400, "character_id required");
   } else if (eventType === "status_eq") {
     const v = (threshold ?? "").toLowerCase();

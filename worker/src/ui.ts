@@ -110,6 +110,7 @@ export const INDEX_HTML = /* html */ `<!doctype html>
         <select id="sub-type">
           <option value="level_gte">Level reached (≥)</option>
           <option value="map_eq">Entered map</option>
+          <option value="coords_in">Entered coord box (e.g. safe spawn)</option>
           <option value="status_eq">Online / offline</option>
           <option value="gm_online">GM online (this char)</option>
           <option value="server_event">Server event (placeholder)</option>
@@ -122,6 +123,7 @@ export const INDEX_HTML = /* html */ `<!doctype html>
         <ul style="margin-top:6px">
           <li><b>Level reached:</b> a number, e.g. <code>360</code></li>
           <li><b>Entered map:</b> a map name, e.g. <code>Stadium</code></li>
+          <li><b>Entered coord box:</b> <code>Map:x1-x2:y1-y2</code>, e.g. <code>Stadium:60-90:80-100</code> for a safe-spawn ping</li>
           <li><b>Online / offline:</b> <code>Online</code> or <code>Offline</code></li>
           <li><b>GM online:</b> leave blank</li>
           <li><b>Server event:</b> event name, e.g. <code>Chaos Castle</code> (not wired up yet)</li>
@@ -214,6 +216,7 @@ function renderDash() {
     let label = "";
     if (s.event_type === "level_gte") label = charName + " — level ≥ " + s.threshold;
     else if (s.event_type === "map_eq") label = charName + " — enters " + s.threshold;
+    else if (s.event_type === "coords_in") label = charName + " — enters zone " + s.threshold;
     else if (s.event_type === "status_eq") label = charName + " — goes " + s.threshold;
     else if (s.event_type === "gm_online") label = "GM " + charName + " — online";
     else if (s.event_type === "server_event") label = "server event: " + s.threshold;

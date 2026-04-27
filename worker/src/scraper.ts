@@ -46,7 +46,29 @@ export async function scrapeOne(env: Env, name: string): Promise<ProfileSnapshot
 }
 
 function emptySnapshot(name: string): ProfileSnapshot {
-  return { name, class: null, resets: null, level: null, map: null, status: null, exists: false };
+  return {
+    name,
+    class: null,
+    resets: null,
+    level: null,
+    map: null,
+    mapName: null,
+    mapX: null,
+    mapY: null,
+    status: null,
+    exists: false,
+  };
+}
+
+// "Stadium (47/35)" -> { name: "Stadium", x: 47, y: 35 }
+// "Stadium" (no coords) -> { name: "Stadium", x: null, y: null }
+export function parseMap(s: string | null): { name: string | null; x: number | null; y: number | null } {
+  if (!s) return { name: null, x: null, y: null };
+  const coord = s.match(/\((\d+)\s*\/\s*(\d+)\)/);
+  const x = coord ? Number(coord[1]) : null;
+  const y = coord ? Number(coord[2]) : null;
+  const name = s.replace(/\([^)]*\)/, "").trim() || null;
+  return { name, x, y };
 }
 
 // The page emits a single <table class="table table-striped"> with rows like:
@@ -66,6 +88,9 @@ export function parseProfile(html: string, name: string): ProfileSnapshot {
     resets: null,
     level: null,
     map: null,
+    mapName: null,
+    mapX: null,
+    mapY: null,
     status: null,
     exists: false,
   };
@@ -88,7 +113,13 @@ export function parseProfile(html: string, name: string): ProfileSnapshot {
   if (cls) snap.class = cls;
   if (resets) snap.resets = parseIntOrNull(resets);
   if (level) snap.level = parseIntOrNull(level);
-  if (map) snap.map = map;
+  if (map) {
+    snap.map = map;
+    const parsed = parseMap(map);
+    snap.mapName = parsed.name;
+    snap.mapX = parsed.x;
+    snap.mapY = parsed.y;
+  }
   if (status) {
     const lower = status.toLowerCase();
     snap.status = lower.startsWith("on") ? "Online" : lower.startsWith("off") ? "Offline" : null;
@@ -103,9 +134,3 @@ function parseIntOrNull(s: string): number | null {
   return m ? Number(m[0]) : null;
 }
 
-// Just the map name without the coordinates: "Stadium (47/35)" -> "Stadium".
-export function mapNameOnly(map: string | null): string | null {
-  if (!map) return null;
-  const cut = map.indexOf("(");
-  return (cut === -1 ? map : map.slice(0, cut)).trim();
-}

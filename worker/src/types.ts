@@ -20,6 +20,7 @@ export interface Env {
 export type EventType =
   | "level_gte"
   | "map_eq"
+  | "coords_in"
   | "status_eq"
   | "gm_online"
   | "server_event";
@@ -61,7 +62,10 @@ export interface ProfileSnapshot {
   class: string | null;
   resets: number | null;
   level: number | null;
-  map: string | null;          // e.g. "Stadium (47/35)"
+  map: string | null;          // full string as scraped, e.g. "Stadium (47/35)"
+  mapName: string | null;      // "Stadium"
+  mapX: number | null;
+  mapY: number | null;
   status: "Online" | "Offline" | null;
   exists: boolean;
 }
