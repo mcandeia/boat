@@ -13,6 +13,15 @@ compatibility_date = "2026-04-01"
 crons = ["* * * * *"]
 
 # ---------------------------------------------------------------------------
+# Observability — surfaces console.log + errors + cron runs in the
+# Cloudflare dashboard ("Workers & Pages > mu-patos > Logs"). Replaces
+# the need for `wrangler tail` for after-the-fact diagnosis.
+# ---------------------------------------------------------------------------
+
+[observability]
+enabled = true
+
+# ---------------------------------------------------------------------------
 # Plain (non-secret) variables.
 # ---------------------------------------------------------------------------
 

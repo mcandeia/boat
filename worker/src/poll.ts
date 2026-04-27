@@ -91,11 +91,13 @@ export async function pollOnce(env: Env): Promise<{ scraped: number; fired: numb
       if (!trigger) continue;
 
       const msg = formatAlert(char.name, sub, snap);
+      console.log(`fire sub=${sub.id} type=${sub.event_type} char=${char.name} chat=${char.owner_chat_id} prevLevel=${prev.level} nextLevel=${snap.level} prevStatus=${prev.status} nextStatus=${snap.status}`);
       const sendRes = await sendTelegram(env, char.owner_chat_id, msg);
       if (!sendRes.ok) {
-        console.log(`telegram send failed for sub ${sub.id}: ${sendRes.status} ${sendRes.body}`);
+        console.log(`telegram send FAILED sub=${sub.id} status=${sendRes.status} body=${sendRes.body}`);
         continue;
       }
+      console.log(`telegram send OK sub=${sub.id}`);
       await env.DB
         .prepare(
           "UPDATE subscriptions SET cooldown_until = ?, last_fired_at = ? WHERE id = ?",

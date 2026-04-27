@@ -1,0 +1,25 @@
+🛡️ Painel Mu Patos — alertas no Telegram (de graça)
+
+Fiz um painelzinho que manda mensagem no seu Telegram quando algo acontece com seu char: passou de nível, entrou no Stadium, ficou online/offline, etc. Em vez de ficar dando F5 na página do servidor.
+
+🔗 https://mu-patos.mcandeia.workers.dev
+
+O que dá pra fazer:
+🎯 Avisar quando passar de um nível X
+📍 Avisar quando entrar em qualquer mapa
+📍 Avisar quando spawnar em área segura (Stadium etc) — útil pra saber se morreu
+🟢 Online / Offline
+🛡️ GM online
+
+Não é bot de jogo. Não automatiza nada dentro do MU, não joga por você, não clica em nada no servidor. Só lê o que já é público em mupatos.com.br/site/profile/character/<nome>. Não pega senha, email, nada privado.
+
+Como usar (2 min):
+1. Abrir o link
+2. Clicar em "Conectar com Telegram" e apertar INICIAR no bot (sem senha, sem cadastro)
+3. Cadastrar o char e criar os alertas
+
+Aviso: é projeto pessoal meu (daddy). NÃO tem vínculo com o staff do Mu Patos — se bugar, fala comigo, não com a equipe do servidor.
+
+É de graça, sem propaganda. Bom MU 🐤⚔️
+
+— daddy
