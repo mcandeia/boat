@@ -32,32 +32,18 @@ npx wrangler d1 migrations apply mu-watcher --remote
 # Strong random for session HMAC.
 openssl rand -hex 32 | npx wrangler secret put SESSION_SECRET
 
-# WhatsApp via Kapso (https://kapso.ai). The free plan includes a managed
-# bot number so you don't expose your personal one.
-#
-# Two phases:
-#
-#   A) Sandbox (testing — what `wrangler.toml` defaults to)
-#      Sandbox can only message ONE recipient who first texts an activation
-#      code to the sandbox bot. Use it to verify the loop with your own
-#      number before opening to friends.
-#        1. In the Kapso dashboard open the sandbox section, copy the
-#           activation phrase, send it from your WhatsApp to the sandbox
-#           number to "register" yourself as the test recipient.
-#        2. Drop your project API key into the secret store:
-#               echo "kpso_..." | npx wrangler secret put KAPSO_API_KEY
-#        3. KAPSO_PHONE_NUMBER_ID is already set in wrangler.toml.
-#
-#   B) Production (friends)
-#      Upgrade to a real production number on Kapso (still free plan).
-#      Then create a UTILITY template:
-#            name:     mu_alert  (= KAPSO_TEMPLATE_NAME)
-#            language: pt_BR     (= KAPSO_TEMPLATE_LANG)
-#            body:     [MU Watcher] {{1}}
-#      Wait for Meta to approve it. Then flip mode + phone id:
-#            KAPSO_MODE=production
-#            KAPSO_PHONE_NUMBER_ID=<your production number id>
-#      and `wrangler deploy`.
+# WhatsApp via Z-API (https://z-api.io).
+#   1. Get a Brazilian SIM (or eSIM) registered to a phone of your choice
+#      and install WhatsApp on that line.
+#   2. Sign up at z-api.io, create an instance, scan its QR with the bot
+#      WhatsApp's "Linked Devices."
+#   3. From the Z-API dashboard, grab:
+#        - the instance ID (goes in wrangler.toml as ZAPI_INSTANCE_ID)
+#        - the instance token
+#        - your account-level Client-Token (Account Security Token)
+echo "REPLACE_WITH_INSTANCE_TOKEN" | npx wrangler secret put ZAPI_INSTANCE_TOKEN
+echo "REPLACE_WITH_CLIENT_TOKEN"   | npx wrangler secret put ZAPI_CLIENT_TOKEN
+# Then edit ZAPI_INSTANCE_ID in wrangler.toml.
 ```
 
 Browser Rendering needs to be enabled on the account
@@ -71,7 +57,7 @@ npx wrangler dev
 # open http://localhost:8787
 ```
 
-In dev with `KAPSO_API_KEY` unset, PINs are printed to the wrangler log
+In dev with the Z-API secrets unset, PINs are printed to the wrangler log
 instead of being sent — copy the 6-digit code from there.
 
 ## Deploy
@@ -103,23 +89,23 @@ crossing, not every poll while ≥ 360.
 
 ## How WhatsApp sends actually work
 
-Every outbound message goes through the Kapso send endpoint as the
-`mu_alert` template (or whatever you set `KAPSO_TEMPLATE_NAME` to) with the
-alert body as `{{1}}`. Free-form text would only work inside Meta's 24h
-"customer service window", which we can't rely on for proactive alerts —
-hence the template.
+Every outbound message goes through Z-API's `send-text` endpoint as plain
+text — Z-API uses the WhatsApp Web protocol so there's no template
+approval and no 24h customer-service window.
 
-If you want to swap providers later (Twilio, Evolution API, Z-API, etc.),
-edit only `src/whatsapp.ts` — the rest of the code calls
-`sendWhatsApp(env, to, msg)` and doesn't care.
+If you swap providers later, edit only `src/whatsapp.ts` — the rest of
+the code calls `sendWhatsApp(env, to, msg)` and doesn't care.
 
-### Costs
+### Operational notes
 
-Kapso's free plan: 2,000 messages/month + 1 managed number. Beyond that
-plan tiers exist. **Meta bills separately** per delivered template (utility
-category in Brazil ≈ R$0.04 / msg as of writing). For personal +
-small-friend-group scale this is pennies/month, but it's not literally
-zero.
+- The bot's number must keep WhatsApp linked to Z-API. The phone holding
+  the SIM only needs to come online roughly every 14 days to keep the
+  multi-device session alive.
+- Z-API charges a monthly fee per instance; check their site for current
+  pricing. There's no per-message Meta fee since this isn't the official
+  Cloud API.
+- Risk: Z-API uses unofficial WhatsApp Web protocol, so Meta can ban the
+  number if usage looks abusive. Personal-scale alerts are normally fine.
 
 ## Things deliberately deferred
 

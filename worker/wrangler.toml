@@ -39,12 +39,9 @@ SESSION_TTL_DAYS    = "30"
 COOLDOWN_SECONDS    = "21600"      # don't re-fire the same alert within 6h
 COOKIE_NAME         = "mlw_sess"
 
-# Kapso (WhatsApp). KAPSO_API_KEY goes in `wrangler secret`; the rest is
-# config. KAPSO_MODE = "sandbox" sends plain text (Kapso sandbox can't do
-# templates and only reaches a single pre-activated recipient). Switch to
-# "production" once you upgrade off sandbox.
-KAPSO_BASE_URL         = "https://api.kapso.ai/meta/whatsapp/v24.0"
-KAPSO_PHONE_NUMBER_ID  = "597907523413541"
-KAPSO_MODE             = "sandbox"
-KAPSO_TEMPLATE_NAME    = "mu_alert"
-KAPSO_TEMPLATE_LANG    = "pt_BR"
+# Z-API (WhatsApp). The instance id is in plain config; the per-instance
+# token and the account-level Client-Token are secrets:
+#   echo "..." | npx wrangler secret put ZAPI_INSTANCE_TOKEN
+#   echo "..." | npx wrangler secret put ZAPI_CLIENT_TOKEN
+ZAPI_BASE_URL    = "https://api.z-api.io"
+ZAPI_INSTANCE_ID = "REPLACE_WITH_INSTANCE_ID"
