@@ -18,8 +18,9 @@ export async function scrapeMany(
 
   const totalTimeoutMs = options.totalTimeoutMs ?? 25_000;
   const work = (async () => {
-    const browser = await puppeteer.launch(env.BROWSER);
+    let browser: Awaited<ReturnType<typeof puppeteer.launch>> | null = null;
     try {
+      browser = await puppeteer.launch(env.BROWSER);
       const page = await browser.newPage();
       await page.setUserAgent(
         "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
@@ -34,17 +35,22 @@ export async function scrapeMany(
           result.set(name, parseProfile(html, name));
         } catch (err) {
           console.log(`scrape error for ${name}: ${(err as Error).message}`);
-          result.set(name, emptySnapshot(name));
+          // leave empty snapshot — scraped:false signals undetermined to caller
         }
       }
+    } catch (err) {
+      // Anything from launch / cold-start protocol timeout / quota exhaustion
+      // ends up here. Don't propagate — the caller treats missing entries as
+      // "didn't scrape" and falls back gracefully.
+      console.log(`browser launch failed: ${(err as Error).message}`);
     } finally {
-      await browser.close().catch(() => {});
+      if (browser) await browser.close().catch(() => {});
     }
   })();
 
-  // Wall-clock budget for the whole scrape pass. If we blow through it (cold
-  // Browser Rendering, Mu Patos slow, etc.), bail and let the caller fall back
-  // to whatever default they want — partial results stay in `result`.
+  // Wall-clock budget for the whole scrape pass. If we blow through it,
+  // resolve early and let the caller fall back — partial results (if any)
+  // stay in `result`.
   await Promise.race([
     work,
     new Promise<void>((resolve) => setTimeout(() => {
