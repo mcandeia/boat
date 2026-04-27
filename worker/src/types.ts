@@ -46,6 +46,7 @@ export interface CharacterRow {
   last_map: string | null;
   last_status: string | null;
   last_checked_at: number | null;
+  next_check_at: number;
   created_at: number;
 }
 

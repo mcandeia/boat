@@ -10,13 +10,16 @@ import { sendWhatsApp } from "./whatsapp";
 //      previous snapshot vs the new one, fire WhatsApp alerts, set cooldowns.
 //   4. Persist the new snapshot.
 export async function pollOnce(env: Env): Promise<{ scraped: number; fired: number }> {
+  const t0 = now();
   const distinctNames = await env.DB
     .prepare(
       `SELECT DISTINCT c.name
          FROM characters c
          JOIN subscriptions s
-           ON s.character_id = c.id AND s.active = 1`,
+           ON s.character_id = c.id AND s.active = 1
+        WHERE c.next_check_at <= ?`,
     )
+    .bind(t0)
     .all<{ name: string }>();
 
   const names = (distinctNames.results ?? []).map((r) => r.name);
@@ -100,6 +103,12 @@ export async function pollOnce(env: Env): Promise<{ scraped: number; fired: numb
       fired++;
     }
 
+    // Adaptive cadence: offline chars don't move much — wait an hour before
+    // burning Browser Rendering quota on them. Online chars get the normal
+    // ~10 minute cadence (slightly under the cron interval so a 5-minute
+    // cron always finds them due).
+    const nextCheck = t + (snap.status === "Offline" ? 3600 : 600);
+
     await env.DB
       .prepare(
         `UPDATE characters
@@ -108,10 +117,11 @@ export async function pollOnce(env: Env): Promise<{ scraped: number; fired: numb
                 last_level = COALESCE(?, last_level),
                 last_map = COALESCE(?, last_map),
                 last_status = COALESCE(?, last_status),
-                last_checked_at = ?
+                last_checked_at = ?,
+                next_check_at = ?
           WHERE name = ?`,
       )
-      .bind(snap.class, snap.resets, snap.level, snap.map, snap.status, t, char.name)
+      .bind(snap.class, snap.resets, snap.level, snap.map, snap.status, t, nextCheck, char.name)
       .run();
   }
 

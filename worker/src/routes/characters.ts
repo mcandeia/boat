@@ -4,6 +4,10 @@ import { scrapeOne } from "../scraper";
 
 const VALID_NAME = /^[A-Za-z0-9_-]{1,15}$/;
 
+// Personal-grudge denylist. Case-insensitive exact match.
+const BLOCKED_NAMES = new Set(["xibata"]);
+const BLOCKED_MESSAGE = "Gosta de me matar né? agora vai ficar sem o bot 😘";
+
 export async function listCharacters(env: Env, userId: number): Promise<Response> {
   const rows = await env.DB
     .prepare("SELECT * FROM characters WHERE user_id = ? ORDER BY name COLLATE NOCASE")
@@ -16,6 +20,7 @@ export async function listCharacters(env: Env, userId: number): Promise<Response
 // stats. Doesn't write to the DB — used by the "Add character" form.
 export async function lookupCharacter(env: Env, name: string): Promise<Response> {
   if (!VALID_NAME.test(name)) return bad(400, "invalid character name");
+  if (BLOCKED_NAMES.has(name.toLowerCase())) return bad(403, BLOCKED_MESSAGE);
   const snap = await scrapeOne(env, name);
   if (!snap.exists) return json({ exists: false });
   return json({ exists: true, snapshot: snap });
@@ -25,6 +30,7 @@ export async function createCharacter(env: Env, userId: number, req: Request): P
   const body = await req.json().catch(() => ({})) as { name?: string; is_gm?: boolean };
   const name = (body.name ?? "").trim();
   if (!VALID_NAME.test(name)) return bad(400, "invalid character name");
+  if (BLOCKED_NAMES.has(name.toLowerCase())) return bad(403, BLOCKED_MESSAGE);
 
   const dup = await env.DB
     .prepare("SELECT id FROM characters WHERE user_id = ? AND name = ?")
