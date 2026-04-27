@@ -49,15 +49,32 @@ export default {
         return await telegramWebhook(env, req);
       }
 
-      // TEMP diagnostic — public, runs a Browser Rendering scrape on a
-      // hard-coded char and returns the raw snapshot. Remove once the
-      // scrape pipeline is verified end-to-end.
+      // TEMP diagnostic — runs Browser Rendering directly so we can see
+      // any thrown error message verbatim instead of swallowing it.
       if (pathname === "/diag/scrape" && method === "GET") {
         const name = url.searchParams.get("name") || "daddy";
         const t0 = Date.now();
-        const { scrapeOne } = await import("./scraper");
-        const snap = await scrapeOne(env, name, { totalTimeoutMs: 25_000 });
-        return json({ name, took_ms: Date.now() - t0, snap });
+        const out: Record<string, unknown> = { name, took_ms: 0 };
+        try {
+          const puppeteer = (await import("@cloudflare/puppeteer")).default;
+          const browser = await puppeteer.launch(env.BROWSER);
+          out.launchedAt = Date.now() - t0;
+          try {
+            const page = await browser.newPage();
+            await page.goto(`${env.PROFILE_BASE_URL}/${encodeURIComponent(name)}`, { waitUntil: "domcontentloaded", timeout: 20_000 });
+            const html = await page.content();
+            out.htmlLength = html.length;
+            out.htmlHead = html.slice(0, 400);
+          } finally {
+            await browser.close().catch(() => {});
+          }
+        } catch (err) {
+          out.error = (err as Error).message;
+          out.errorName = (err as Error).name;
+          out.errorStack = (err as Error).stack?.split("\n").slice(0, 5).join("\n");
+        }
+        out.took_ms = Date.now() - t0;
+        return json(out);
       }
 
       // ---- everything below requires a session ----
