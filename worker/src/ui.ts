@@ -98,26 +98,22 @@ export const INDEX_HTML = /* html */ `<!doctype html>
     </button>
 
     <div id="login-waiting" class="hidden mt-4 p-4 rounded-md border border-border bg-bg space-y-4">
-      <div class="flex items-center gap-3">
-        <svg class="animate-spin h-5 w-5 text-gold shrink-0" viewBox="0 0 24 24" fill="none">
+      <ol class="text-sm text-slate-300 space-y-1.5 list-decimal list-inside">
+        <li>Abra o Telegram com uma das opções abaixo.</li>
+        <li>No chat com o bot, toque em <b class="text-goldsoft">INICIAR</b> (ou <i>START</i>).</li>
+        <li>Volta pra cá — vai liberar sozinho.</li>
+      </ol>
+
+      <div class="flex items-center gap-2 text-xs text-muted">
+        <svg class="animate-spin h-4 w-4 text-gold" viewBox="0 0 24 24" fill="none">
           <circle cx="12" cy="12" r="10" stroke="currentColor" stroke-opacity="0.25" stroke-width="4"></circle>
           <path d="M4 12a8 8 0 018-8" stroke="currentColor" stroke-width="4" stroke-linecap="round"></path>
         </svg>
-        <div class="text-sm">
-          <div class="text-slate-200">Aguardando você apertar <b class="text-goldsoft">Iniciar</b> no bot…</div>
-          <div class="text-xs text-muted mt-0.5">Use uma das opções abaixo. Vai liberar sozinho assim que você clicar Iniciar.</div>
-        </div>
+        <span>Aguardando…</span>
       </div>
 
-      <div class="grid sm:grid-cols-2 gap-3">
-        <a id="login-deeplink" target="_blank" rel="noopener"
-          class="flex items-center justify-center gap-2 px-3 py-2 rounded-md bg-[#229ED9] text-white text-sm font-semibold hover:brightness-110">
-          <span>📱</span><span>Abrir no app do Telegram</span>
-        </a>
-        <a id="login-weblink" target="_blank" rel="noopener"
-          class="flex items-center justify-center gap-2 px-3 py-2 rounded-md border border-border text-sm hover:bg-panel">
-          <span>🌐</span><span>Abrir no Telegram Web</span>
-        </a>
+      <div id="login-options" class="grid sm:grid-cols-2 gap-3">
+        <!-- Order is set by JS based on mobile vs desktop. -->
       </div>
 
       <div class="border-t border-border pt-3">
@@ -129,7 +125,7 @@ export const INDEX_HTML = /* html */ `<!doctype html>
       </div>
 
       <div class="border-t border-border pt-3">
-        <div class="text-xs text-muted mb-2">Sem Telegram ainda? Escaneie esse QR com a câmera do celular:</div>
+        <div class="text-xs text-muted mb-2">Tem Telegram só no celular? Escaneie esse QR:</div>
         <div class="flex justify-center">
           <img id="login-qr" alt="QR pra abrir no Telegram" class="rounded-md bg-white p-2" width="160" height="160" />
         </div>
@@ -438,6 +434,26 @@ function buildWebLink(botUsername, token) {
   const tg = "tg://resolve?domain=" + encodeURIComponent(botUsername) + "&start=" + encodeURIComponent(token);
   return "https://web.telegram.org/k/?tgaddr=" + encodeURIComponent(tg);
 }
+function isMobile() {
+  // navigator.userAgentData is the modern API; userAgent string is the
+  // fallback. Either way, conservative — anything that isn't clearly mobile
+  // is treated as desktop, which means Web gets recommended.
+  if (navigator.userAgentData?.mobile) return true;
+  return /android|iphone|ipad|ipod|opera mini|iemobile/i.test(navigator.userAgent);
+}
+function makeOptionButton({ href, primary, icon, label, hint }) {
+  const a = document.createElement("a");
+  a.href = href;
+  a.target = "_blank";
+  a.rel = "noopener";
+  a.className = primary
+    ? "flex flex-col items-center justify-center gap-1 px-3 py-3 rounded-md bg-[#229ED9] text-white text-sm font-semibold hover:brightness-110"
+    : "flex flex-col items-center justify-center gap-1 px-3 py-3 rounded-md border border-border text-sm hover:bg-panel";
+  a.innerHTML =
+    '<div class="flex items-center gap-2"><span>' + icon + '</span><span>' + label + '</span></div>' +
+    '<div class="text-xs ' + (primary ? "text-white/80" : "text-muted") + '">' + hint + '</div>';
+  return a;
+}
 async function startTelegramLogin() {
   const m = $("login-msg");
   m.textContent = "";
@@ -452,10 +468,34 @@ async function startTelegramLogin() {
     return;
   }
 
-  // Wire the four ways to reach the bot.
+  // Build the option buttons. Primary (highlighted) is whichever is most
+  // likely to work on the user's device.
   const botFromLink = (data.deeplink.match(/t\\.me\\/([^?]+)/) || [])[1] || "mu_patos_bot";
-  $("login-deeplink").href = data.deeplink;
-  $("login-weblink").href = buildWebLink(botFromLink, data.token);
+  const webLink = buildWebLink(botFromLink, data.token);
+  const appBtn = makeOptionButton({
+    href: data.deeplink,
+    primary: isMobile(),
+    icon: "📱",
+    label: "Abrir no app do Telegram",
+    hint: "(precisa ter o Telegram instalado)",
+  });
+  const webBtn = makeOptionButton({
+    href: webLink,
+    primary: !isMobile(),
+    icon: "🌐",
+    label: "Abrir no Telegram Web",
+    hint: "(funciona no navegador, sem instalar nada)",
+  });
+  const opts = $("login-options");
+  opts.innerHTML = "";
+  if (isMobile()) {
+    opts.appendChild(appBtn);
+    opts.appendChild(webBtn);
+  } else {
+    opts.appendChild(webBtn);
+    opts.appendChild(appBtn);
+  }
+
   $("login-link-text").value = data.deeplink;
   $("login-qr").src = "https://api.qrserver.com/v1/create-qr-code/?size=160x160&data=" + encodeURIComponent(data.deeplink);
   $("login-waiting").classList.remove("hidden");
