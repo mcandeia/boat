@@ -17,7 +17,7 @@ export async function listCharacters(env: Env, userId: number): Promise<Response
 // stats. Doesn't write to the DB — used by the "Add character" form.
 export async function lookupCharacter(env: Env, name: string): Promise<Response> {
   if (!VALID_NAME.test(name)) return bad(400, INVALID_NAME);
-  const snap = await scrapeOne(env, name, { totalTimeoutMs: 12_000 });
+  const snap = await scrapeOne(env, name, { totalTimeoutMs: 25_000 });
   if (!snap.scraped) return json({ scraped: false });
   if (!snap.exists) return json({ scraped: true, exists: false });
   return json({ scraped: true, exists: true, snapshot: snap });
@@ -38,7 +38,7 @@ export async function createCharacter(env: Env, userId: number, req: Request): P
   // row; if it times out we register the char anyway and let the cron's
   // next pass fill in stats. Only a *successful* scrape that found no
   // profile table blocks creation.
-  const snap = await scrapeOne(env, name, { totalTimeoutMs: 12_000 });
+  const snap = await scrapeOne(env, name, { totalTimeoutMs: 25_000 });
   if (snap.scraped && !snap.exists) {
     return bad(404, "personagem não encontrado no Mu Patos");
   }
@@ -87,7 +87,7 @@ export async function refreshCharacter(env: Env, userId: number, id: number): Pr
     .first<CharacterRow>();
   if (!owned) return bad(404, "não encontrado");
 
-  const snap = await scrapeOne(env, owned.name, { totalTimeoutMs: 12_000 });
+  const snap = await scrapeOne(env, owned.name, { totalTimeoutMs: 25_000 });
   if (!snap.scraped) {
     return json({ scraped: false, character: owned });
   }
