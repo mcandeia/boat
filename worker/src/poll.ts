@@ -3,6 +3,7 @@ import { parseMap, scrapeMany } from "./scraper";
 import { now } from "./util";
 import { sendTelegram } from "./telegram";
 import { formatAlert } from "./messages";
+import { classCodeFor, fetchRankings, findRank, type RankingMap } from "./rankings";
 
 // One pass (10-minute cron):
 //   1. Pick every distinct character name that has at least one active sub.
@@ -26,7 +27,12 @@ export async function pollOnce(env: Env): Promise<{ scraped: number; fired: numb
   const names = (distinctNames.results ?? []).map((r) => r.name);
   if (names.length === 0) return { scraped: 0, fired: 0 };
 
-  const snapshots = await scrapeMany(env, names);
+  // Fetch character snapshots and rankings in parallel — they're
+  // independent HTTP calls. Rankings get reused across all chars.
+  const [snapshots, rankings] = await Promise.all([
+    scrapeMany(env, names),
+    fetchRankings(),
+  ]);
 
   // Pull all character rows for those names, plus their owners' Telegram chat_id.
   const placeholders = names.map(() => "?").join(",");
@@ -63,7 +69,7 @@ export async function pollOnce(env: Env): Promise<{ scraped: number; fired: numb
   }
 
   const t = now();
-  const cooldown = Number(env.COOLDOWN_SECONDS || "21600");
+  const cooldown = Number(env.COOLDOWN_SECONDS || "3600");
   let fired = 0;
 
   for (const char of charsById.values()) {
@@ -107,6 +113,7 @@ export async function pollOnce(env: Env): Promise<{ scraped: number; fired: numb
       fired++;
     }
 
+    const ranks = enrichRanks(snap, rankings);
     await env.DB
       .prepare(
         `UPDATE characters
@@ -115,10 +122,20 @@ export async function pollOnce(env: Env): Promise<{ scraped: number; fired: numb
                 last_level = COALESCE(?, last_level),
                 last_map = COALESCE(?, last_map),
                 last_status = COALESCE(?, last_status),
-                last_checked_at = ?
+                last_checked_at = ?,
+                class_code = ?,
+                rank_overall = ?,
+                rank_class = ?,
+                next_target_name = ?,
+                next_target_resets = ?
           WHERE name = ?`,
       )
-      .bind(snap.class, snap.resets, snap.level, snap.map, snap.status, t, char.name)
+      .bind(
+        snap.class, snap.resets, snap.level, snap.map, snap.status, t,
+        ranks.classCode, ranks.rankOverall, ranks.rankClass,
+        ranks.nextTargetName, ranks.nextTargetResets,
+        char.name,
+      )
       .run();
   }
 
@@ -191,4 +208,26 @@ function inBox(
   if (!snap.mapName || snap.mapX == null || snap.mapY == null) return false;
   if (snap.mapName.toLowerCase() !== box.map.toLowerCase()) return false;
   return snap.mapX >= box.x1 && snap.mapX <= box.x2 && snap.mapY >= box.y1 && snap.mapY <= box.y2;
+}
+
+// Resolve a char's overall + class ranking (and the char one slot above
+// in the class list — i.e. the immediate "next target" to surpass) using
+// the freshly-fetched rankings map.
+function enrichRanks(snap: ProfileSnapshot, rankings: RankingMap): {
+  classCode: string | null;
+  rankOverall: number | null;
+  rankClass: number | null;
+  nextTargetName: string | null;
+  nextTargetResets: number | null;
+} {
+  const code = classCodeFor(snap.class);
+  const overall = findRank(rankings.overall, snap.name);
+  const inClass = code ? findRank(rankings.byClass[code], snap.name) : null;
+  return {
+    classCode: code,
+    rankOverall: overall?.rank ?? null,
+    rankClass: inClass?.rank ?? null,
+    nextTargetName: inClass?.nextTarget?.name ?? null,
+    nextTargetResets: inClass?.nextTarget?.resets ?? null,
+  };
 }

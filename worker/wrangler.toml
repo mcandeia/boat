@@ -29,7 +29,7 @@ enabled = true
 PROFILE_BASE_URL         = "https://mupatos.com.br/site/profile/character"
 LOGIN_TOKEN_TTL_SECONDS  = "600"        # 10 minutes for deep-link auth
 SESSION_TTL_DAYS         = "30"
-COOLDOWN_SECONDS         = "21600"      # don't re-fire the same alert within 6h
+COOLDOWN_SECONDS         = "3600"       # don't re-fire the same alert within 1h
 COOKIE_NAME              = "mlw_sess"
 
 # Telegram. TELEGRAM_BOT_TOKEN + TELEGRAM_WEBHOOK_SECRET are GH Action secrets.

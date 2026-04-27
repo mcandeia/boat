@@ -400,12 +400,26 @@ function renderCharLeft(container, c) {
         : '<span class="px-2 py-0.5 rounded-full bg-border text-muted border border-border text-xs">Offline</span>')
     : '<span class="text-muted text-xs">—</span>';
 
+  const dash = '<span class="text-muted">—</span>';
   const rows = [];
-  rows.push(statRow("Classe", c.class ? escapeHtml(c.class) : '<span class="text-muted">—</span>'));
-  rows.push(statRow("Resets", typeof c.resets === "number" ? String(c.resets) : '<span class="text-muted">—</span>'));
-  rows.push(statRow("Level", c.last_level != null ? '<b class="text-goldsoft">' + c.last_level + '</b>' : '<span class="text-muted">—</span>'));
-  rows.push(statRow("Mapa", c.last_map ? escapeHtml(c.last_map) : '<span class="text-muted">—</span>'));
+  rows.push(statRow("Classe", c.class ? escapeHtml(c.class) : dash));
+  rows.push(statRow("Resets", typeof c.resets === "number" ? String(c.resets) : dash));
+  rows.push(statRow("Level", c.last_level != null ? '<b class="text-goldsoft">' + c.last_level + '</b>' : dash));
+  rows.push(statRow("Mapa", c.last_map ? escapeHtml(c.last_map) : dash));
   rows.push(statRow("Situação", statusBadge));
+
+  // Rankings (rank in the resets ladder + next target one slot above).
+  // Both are null for chars not in the top 99 — show — instead.
+  const rankOverall = c.rank_overall ? '#' + c.rank_overall : dash;
+  const classBadge = c.class_code ? ' <span class="text-muted">(' + escapeHtml(c.class_code.toUpperCase()) + ')</span>' : '';
+  const rankClass = c.rank_class ? '#' + c.rank_class + classBadge : dash;
+  rows.push(statRow("Rank geral", rankOverall));
+  rows.push(statRow("Rank classe", rankClass));
+  if (c.next_target_name && c.next_target_resets != null) {
+    const gap = (c.next_target_resets - (c.resets ?? 0));
+    const gapTxt = gap > 0 ? ' <span class="text-muted">(+' + gap + ' resets)</span>' : '';
+    rows.push(statRow("Próximo alvo", '<b class="text-goldsoft">' + escapeHtml(c.next_target_name) + '</b>' + gapTxt));
+  }
 
   const checked = relativeTime(c.last_checked_at);
   const checkedLine = checked

@@ -152,7 +152,7 @@ async function maybeFireOnCreate(
   }
 
   const t = now();
-  const cooldown = Number(env.COOLDOWN_SECONDS || "21600");
+  const cooldown = Number(env.COOLDOWN_SECONDS || "3600");
   await env.DB
     .prepare("UPDATE subscriptions SET cooldown_until = ?, last_fired_at = ? WHERE id = ?")
     .bind(t + cooldown, t, subId)

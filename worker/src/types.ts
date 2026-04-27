@@ -53,6 +53,11 @@ export interface CharacterRow {
   last_checked_at: number | null;
   next_check_at: number;
   created_at: number;
+  rank_overall: number | null;
+  rank_class: number | null;
+  class_code: string | null;
+  next_target_name: string | null;
+  next_target_resets: number | null;
 }
 
 export interface SubscriptionRow {
