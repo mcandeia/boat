@@ -1560,88 +1560,83 @@ async function compareSelectedChars() {
 }
 
 function renderComparisonChart(datasets) {
-  const W = 720, H = 280, padL = 36, padR = 36, padT = 22, padB = 40;
+  // Bar chart: resets/day over the window (first → last snapshot).
+  const W = 720, H = 260, padL = 36, padR = 22, padT = 22, padB = 52;
   const innerW = W - padL - padR, innerH = H - padT - padB;
 
-  let tMin = Infinity, tMax = -Infinity;
-  let rMin = Infinity, rMax = -Infinity;
-
-  const validSets = [];
+  const rows = [];
   for (const set of datasets) {
     const samples = [];
     for (const cyc of set.data.cycles ?? []) for (const s of cyc.samples) samples.push(s);
     if (samples.length === 0) continue;
-    
-    const setTMin = samples[0].ts;
-    const setTMax = samples[samples.length - 1].ts;
-    const setRMin = Math.min(...samples.map((s) => s.resets ?? 0));
-    const setRMax = Math.max(...samples.map((s) => s.resets ?? 0));
-    
-    tMin = Math.min(tMin, setTMin);
-    tMax = Math.max(tMax, setTMax);
-    rMin = Math.min(rMin, setRMin);
-    rMax = Math.max(rMax, setRMax);
-    
-    validSets.push({ ...set, samples });
+    const first = samples[0];
+    const last = samples[samples.length - 1];
+    const start = first.resets ?? 0;
+    const end = last.resets ?? 0;
+    const gained = Math.max(0, end - start);
+    const spanDays = Math.max(1, (last.ts - first.ts) / 86400);
+    const perDay = gained / spanDays;
+    rows.push({ charName: set.charName, start, end, gained, perDay, spanDays });
   }
 
-  if (validSets.length === 0) {
+  if (rows.length === 0) {
     return '<div class="text-xs text-muted">sem dados para os personagens selecionados.</div>';
   }
 
-  const span = Math.max(tMax - tMin, 1);
-  const rSpan = Math.max(rMax - rMin, 1);
-  const xOf = (t) => padL + ((t - tMin) / span) * innerW;
-  const yOf = (r) => padT + innerH - ((r - rMin) / rSpan) * innerH;
+  // Sort descending by resets/day so the ranking is obvious.
+  rows.sort((a, b) => b.perDay - a.perDay);
 
-  const colors = ["#f0a93b", "#3fb950", "#58a6ff", "#f25a5a", "#bc8cff", "#ff7b72", "#d2a8ff"];
-
-  let pathsHtml = "";
-  let legendHtml = "";
-
-  validSets.forEach((set, idx) => {
-    const color = colors[idx % colors.length];
-    let d = "";
-    set.samples.forEach((s, i) => {
-      const x = xOf(s.ts), y = yOf(s.resets ?? 0);
-      if (i === 0) d += "M" + x + "," + y;
-      else {
-        const px = xOf(set.samples[i - 1].ts), py = yOf(set.samples[i - 1].resets ?? 0);
-        d += " L" + x + "," + py + " L" + x + "," + y;
-      }
-    });
-    pathsHtml += '<path d="' + d + '" fill="none" stroke="' + color + '" stroke-width="2" stroke-opacity="0.8" />';
-    
-    legendHtml += '<div class="flex items-center gap-1.5"><div class="w-3 h-3 rounded-full" style="background:' + color + '"></div><span class="text-xs text-slate-300">' + escapeHtml(set.charName) + '</span></div>';
-  });
-
-  const tickCount = Math.min(rSpan + 1, 6);
-  const yTickLines = Array.from({length: tickCount}).map((_, i) => {
-    const v = Math.round(rMin + (rSpan * i) / Math.max(tickCount - 1, 1));
-    const y = yOf(v);
+  const maxPerDay = Math.max(...rows.map((r) => r.perDay), 0.01);
+  const tickCount = 5;
+  const yTickLines = Array.from({ length: tickCount }).map((_, i) => {
+    const v = (maxPerDay * i) / Math.max(tickCount - 1, 1);
+    const y = padT + innerH - (v / maxPerDay) * innerH;
+    const lbl = (Math.round(v * 10) / 10).toFixed(v < 10 ? 1 : 0);
     return '<line x1="' + padL + '" x2="' + (W - padR) + '" y1="' + y + '" y2="' + y + '" stroke="#252a36" stroke-dasharray="2,3" />' +
-           '<text x="' + (padL - 4) + '" y="' + (y + 3) + '" fill="#8a93a3" font-size="10" text-anchor="end">' + v + '</text>';
+      '<text x="' + (padL - 4) + '" y="' + (y + 3) + '" fill="#8a93a3" font-size="10" text-anchor="end">' + lbl + '</text>';
   }).join("");
 
-  const fmt = (ts) => {
-    const d = new Date(ts * 1000);
-    return String(d.getDate()).padStart(2, '0') + "/" + String(d.getMonth() + 1).padStart(2, '0');
+  const step = innerW / Math.max(rows.length, 1);
+  const barW = Math.min(step * 0.62, 56);
+  const fmtShort = (name) => {
+    const s = String(name || "");
+    return s.length > 10 ? s.slice(0, 9) + "…" : s;
   };
-  const xLabels = [tMin, tMin + span / 2, tMax].map((t, i) => {
-    const x = xOf(t);
-    const anchor = i === 0 ? "start" : i === 2 ? "end" : "middle";
-    return '<text x="' + x + '" y="' + (H - padB + 14) + '" fill="#8a93a3" font-size="10" text-anchor="' + anchor + '">' + fmt(t) + '</text>';
+
+  const barsHtml = rows.map((r, i) => {
+    const x = padL + (i + 0.5) * step;
+    const h = (r.perDay / maxPerDay) * innerH;
+    const y = padT + innerH - h;
+    const perDayTxt = (Math.round(r.perDay * 100) / 100).toFixed(r.perDay < 10 ? 2 : 1);
+    const daysTxt = (Math.round(r.spanDays * 10) / 10).toFixed(1);
+    const tip = escapeHtml(
+      r.charName +
+      ": " + perDayTxt + " rr/dia" +
+      " (+" + r.gained + " em " + daysTxt + " dias · " + r.start + " → " + r.end + ")"
+    );
+    const label = escapeHtml(fmtShort(r.charName));
+    const xLabel = '<text x="' + x + '" y="' + (H - padB + 14) + '" fill="#8a93a3" font-size="10" text-anchor="middle">' + label + '</text>';
+    const bar = '<rect class="hist-dot cursor-pointer transition-opacity hover:opacity-80" x="' + (x - barW / 2) + '" y="' + y + '" width="' + barW + '" height="' + Math.max(h, 2) + '" fill="#f0a93b" fill-opacity="0.85" data-tip="' + tip + '" />';
+    const val = r.perDay > 0
+      ? '<text x="' + x + '" y="' + (y - 4) + '" fill="#f7c779" font-size="10" text-anchor="middle">' + perDayTxt + '</text>'
+      : '';
+    return xLabel + bar + val;
   }).join("");
 
-  const header = '<div class="flex items-center justify-between mb-3"><h3 class="text-xs font-semibold uppercase text-goldsoft">Comparativo: Evolução (Resets)</h3><button id="admin-compare-close" class="text-muted hover:text-slate-100 text-lg leading-none">&times;</button></div>';
-  
+  const header =
+    '<div class="flex items-center justify-between mb-3">' +
+      '<h3 class="text-xs font-semibold uppercase text-goldsoft">Comparativo: resets por dia (últimos 14 dias)</h3>' +
+      '<button id="admin-compare-close" class="text-muted hover:text-slate-100 text-lg leading-none">&times;</button>' +
+    '</div>';
+
+  const hint = '<div class="text-[11px] text-muted mb-2">Passe o mouse nas barras para ver detalhes (início → fim).</div>';
+
   return header +
+    hint +
     '<svg viewBox="0 0 ' + W + ' ' + H + '" class="w-full h-auto bg-bg border border-border rounded-md">' +
       yTickLines +
-      pathsHtml +
-      xLabels +
-    '</svg>' +
-    '<div class="flex flex-wrap gap-4 mt-3">' + legendHtml + '</div>';
+      barsHtml +
+    '</svg>';
 }
 
 $("admin-poll").onclick = async (e) => {
