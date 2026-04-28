@@ -256,6 +256,28 @@ export const INDEX_HTML = /* html */ `<!doctype html>
         </table>
       </div>
       <div id="admin-msg" class="text-[11px] text-muted mt-2"></div>
+
+      <div class="mt-5 pt-4 border-t border-border">
+        <div class="flex items-center justify-between gap-3 mb-2">
+          <h3 class="text-xs uppercase tracking-widest text-gold">Eventos do servidor</h3>
+          <span class="text-[11px] text-muted">scraped de mupatos.net (1×/h). Marca <b>Manual</b> pra travar o horário.</span>
+        </div>
+        <div class="overflow-x-auto">
+          <table class="w-full text-xs">
+            <thead class="text-muted text-left border-b border-border">
+              <tr>
+                <th class="py-1.5 pr-2">Cat</th>
+                <th class="py-1.5 pr-2">Evento</th>
+                <th class="py-1.5 pr-2">Sala</th>
+                <th class="py-1.5 pr-2">Horários (HH:MM,HH:MM,...)</th>
+                <th class="py-1.5 pr-2">Manual</th>
+                <th class="py-1.5 pr-2"></th>
+              </tr>
+            </thead>
+            <tbody id="admin-events"></tbody>
+          </table>
+        </div>
+      </div>
     </div>
 
     <div class="bg-panel border border-border rounded-xl p-5">
@@ -513,6 +535,7 @@ function renderDash() {
   if (u.is_admin) {
     $("admin-card").classList.remove("hidden");
     loadAdminChars();
+    loadAdminEvents();
   }
 
   const cl = $("char-list");
@@ -1405,6 +1428,51 @@ $("admin-poll").onclick = async (e) => {
     loadAdminChars();
   } catch (err) { toast(err.message, "err"); }
 };
+
+async function loadAdminEvents() {
+  const tbody = $("admin-events");
+  if (!tbody) return;
+  tbody.innerHTML = '<tr><td colspan="6" class="py-2 text-muted">carregando…</td></tr>';
+  try {
+    const data = await fetchJSON("/api/admin/events");
+    const evs = data.events || [];
+    if (evs.length === 0) {
+      tbody.innerHTML = '<tr><td colspan="6" class="py-2 text-muted">nenhum evento — espera o cron sincronizar</td></tr>';
+      return;
+    }
+    tbody.innerHTML = evs.map(adminEventRowHtml).join("");
+    for (const ev of evs) wireAdminEventRow(ev);
+  } catch (e) {
+    tbody.innerHTML = '<tr><td colspan="6" class="py-2 text-danger">' + escapeHtml(e.message) + '</td></tr>';
+  }
+}
+function adminEventRowHtml(ev) {
+  const manualBadge = ev.manual ? ' <span class="text-[10px] uppercase text-gold">manual</span>' : '';
+  return '<tr class="border-b border-border/60" data-evrow="' + ev.id + '">' +
+    '<td class="py-1.5 pr-2 text-muted">' + escapeHtml(ev.category) + '</td>' +
+    '<td class="py-1.5 pr-2 text-goldsoft font-semibold">' + escapeHtml(ev.name) + manualBadge + '</td>' +
+    '<td class="py-1.5 pr-2 uppercase">' + escapeHtml(ev.room) + '</td>' +
+    '<td class="py-1.5 pr-2"><input data-field="schedule" type="text" value="' + escapeHtml(ev.schedule) + '" class="w-full bg-bg border border-border rounded px-2 py-1 text-xs" /></td>' +
+    '<td class="py-1.5 pr-2 text-center"><input data-field="manual" type="checkbox" ' + (ev.manual ? 'checked' : '') + ' class="accent-gold" /></td>' +
+    '<td class="py-1.5 pr-2"><button class="px-2 py-1 rounded border border-border text-[11px] hover:bg-bg" data-action="save">Salvar</button></td>' +
+    '</tr>';
+}
+function wireAdminEventRow(ev) {
+  const row = document.querySelector('tr[data-evrow="' + ev.id + '"]');
+  if (!row) return;
+  row.querySelector('[data-action="save"]').onclick = async () => {
+    const schedule = row.querySelector('[data-field="schedule"]').value.trim();
+    const manual = row.querySelector('[data-field="manual"]').checked;
+    try {
+      await fetchJSON("/api/admin/events/" + ev.id, {
+        method: "PATCH",
+        body: JSON.stringify({ schedule, manual }),
+      });
+      toast("evento atualizado", "ok");
+      loadAdminEvents();
+    } catch (e) { toast(e.message, "err"); }
+  };
+}
 
 // ---- Boot ----
 if (!localStorage.getItem(CONSENT_KEY)) showConsent();

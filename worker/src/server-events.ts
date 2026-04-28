@@ -153,8 +153,9 @@ export async function refreshServerEvents(env: Env): Promise<{ entries: number }
     }
   }
   // Drop rows that the latest scrape didn't touch — staff removed them.
+  // Manual overrides survive even if the page no longer lists them.
   await env.DB
-    .prepare("DELETE FROM server_events WHERE updated_at < ?")
+    .prepare("DELETE FROM server_events WHERE updated_at < ? AND manual = 0")
     .bind(t - 60)
     .run();
   return { entries: total };
@@ -169,13 +170,16 @@ async function upsertEvent(
   meta: string | null,
   t: number,
 ): Promise<void> {
+  // Manual rows survive: we still bump updated_at to mark them as "seen
+  // this pass" (so the prune doesn't drop them), but leave schedule/meta
+  // alone so the admin's override stays.
   await env.DB
     .prepare(
       `INSERT INTO server_events (category, name, room, schedule, meta, updated_at)
          VALUES (?, ?, ?, ?, ?, ?)
        ON CONFLICT(category, name, room) DO UPDATE SET
-         schedule = excluded.schedule,
-         meta = excluded.meta,
+         schedule = CASE WHEN manual = 1 THEN schedule ELSE excluded.schedule END,
+         meta     = CASE WHEN manual = 1 THEN meta     ELSE excluded.meta     END,
          updated_at = excluded.updated_at`,
     )
     .bind(category, name, room, schedule, meta, t)
