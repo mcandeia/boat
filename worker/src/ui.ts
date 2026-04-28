@@ -47,6 +47,7 @@ export const INDEX_HTML = /* html */ `<!doctype html>
 <!-- Toast host. Stacks notifications top-right; each toast slides in and
      auto-removes after a few seconds. -->
 <div id="toasts" class="fixed top-4 right-4 z-[60] flex flex-col items-end gap-2 pointer-events-none max-w-[calc(100%-2rem)]"></div>
+<div id="chart-tip" class="hidden fixed z-[70] pointer-events-none px-2 py-1 rounded bg-bg border border-gold/40 text-xs text-slate-100 shadow-lg whitespace-nowrap"></div>
 <style>
   @keyframes mlw-toast-in {
     from { transform: translateX(120%); opacity: 0; }
@@ -967,9 +968,34 @@ async function toggleAdminHistory(charId, charName) {
   try {
     const data = await fetchJSON("/api/admin/chars/" + charId + "/history?days=7");
     cell.innerHTML = renderHistoryChart(data, charName);
+    wireHistoryTooltips(cell);
   } catch (e) {
     cell.innerHTML = '<span class="text-danger text-xs">' + escapeHtml(e.message) + '</span>';
   }
+}
+
+// Floating tooltip for the resets-over-time chart. One singleton tip div
+// (top of body), positioned near the cursor on dot mouseover; hidden on
+// mouseleave. Cheaper and more reliable than native <title> tooltips,
+// which have a 1.5s show delay and don't work on inline SVG in some
+// browsers (Chrome/macOS in particular).
+function wireHistoryTooltips(cell) {
+  const tip = $("chart-tip");
+  if (!tip) return;
+  cell.addEventListener("mousemove", (e) => {
+    const t = e.target;
+    if (!(t instanceof Element) || !t.classList.contains("hist-dot")) {
+      tip.classList.add("hidden");
+      return;
+    }
+    tip.textContent = t.getAttribute("data-tip") || "";
+    // Position above-right of the cursor; flip to left if near right edge.
+    const x = e.clientX, y = e.clientY;
+    tip.style.top = (y - 28) + "px";
+    tip.style.left = (x + 12) + "px";
+    tip.classList.remove("hidden");
+  });
+  cell.addEventListener("mouseleave", () => tip.classList.add("hidden"));
 }
 
 // Step-plot of resets over time. Resets only go up, so this shows progress
@@ -1014,14 +1040,12 @@ function renderHistoryChart(data, charName) {
   };
   const dots = samples.map((s) => {
     const x = xOf(s.ts), y = yOf(s.resets ?? 0);
-    const tooltip =
+    const tip =
       fmtFull(s.ts) + " · resets " + (s.resets ?? "?") +
       " · lv " + (s.level ?? "?") +
       (s.map ? " · " + s.map : "") +
       (s.status ? " · " + s.status : "");
-    return '<circle cx="' + x + '" cy="' + y + '" r="3" fill="#f0a93b" stroke="#0b0d12" stroke-width="1" class="cursor-pointer hover:r-4">' +
-      '<title>' + escapeHtml(tooltip) + '</title>' +
-    '</circle>';
+    return '<circle cx="' + x + '" cy="' + y + '" r="4" fill="#f0a93b" stroke="#0b0d12" stroke-width="1.5" class="hist-dot cursor-pointer" data-tip="' + escapeHtml(tip) + '"></circle>';
   }).join("");
 
   // Y-axis ticks (every reset, but cap at 6 labels)
