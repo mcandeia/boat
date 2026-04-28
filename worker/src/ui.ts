@@ -255,33 +255,53 @@ export const INDEX_HTML = /* html */ `<!doctype html>
 
         <div class="bg-panel border border-border rounded-xl p-5">
           <h2 class="text-xs uppercase tracking-widest text-muted mb-3">Alertas</h2>
-          <ul id="sub-list" class="divide-y divide-border"></ul>
-          <div class="mt-4 pt-4 border-t border-border space-y-3">
-            <label class="text-xs text-muted block">Adicionar um alerta</label>
-            <div class="grid gap-2 sm:grid-cols-2">
-              <div>
-                <label class="text-[11px] text-muted block mb-1">Personagem</label>
-                <select id="sub-char" class="w-full bg-bg border border-border rounded-md px-3 outline-none focus:border-gold/60"></select>
+          <div id="sub-list" class="space-y-2"></div>
+          <div class="mt-4 pt-4 border-t border-border">
+            <details open class="group">
+              <summary class="cursor-pointer select-none flex items-center justify-between gap-3">
+                <div>
+                  <div class="text-xs text-muted uppercase tracking-widest">Adicionar um alerta</div>
+                  <div class="text-[11px] text-muted mt-1">Escolha o tipo, preencha os campos e veja um preview antes de criar.</div>
+                </div>
+                <span class="text-xs text-muted group-open:rotate-180 transition-transform">▾</span>
+              </summary>
+              <div class="mt-3 space-y-3">
+                <div class="grid gap-2 sm:grid-cols-2">
+                  <div>
+                    <label class="text-[11px] text-muted block mb-1">Personagem</label>
+                    <select id="sub-char" class="w-full bg-bg border border-border rounded-md px-3 outline-none focus:border-gold/60"></select>
+                    <div class="text-[11px] text-muted mt-1">Para eventos do servidor, esse campo é ignorado.</div>
+                  </div>
+                  <div>
+                    <label class="text-[11px] text-muted block mb-1">Tipo de alerta</label>
+                    <select id="sub-type" class="w-full bg-bg border border-border rounded-md px-3 outline-none focus:border-gold/60">
+                      <option value="level_gte">Nível atingido (≥)</option>
+                      <option value="map_eq">Entrou no mapa</option>
+                      <option value="status_eq">Online / offline</option>
+                      <option value="gm_online">GM online (este personagem)</option>
+                      <option value="level_stale">Sem subir level (idle)</option>
+                      <option value="server_event">Evento do servidor (Chaos Castle, invasões, etc.)</option>
+                    </select>
+                  </div>
+                </div>
+                <div id="sub-fields"></div>
+                <div class="rounded-md border border-border bg-bg/40 px-3 py-2">
+                  <div class="text-[11px] uppercase tracking-widest text-muted mb-1">Preview</div>
+                  <div id="sub-preview" class="text-sm text-slate-200">—</div>
+                  <div id="sub-preview-hint" class="text-[11px] text-muted mt-1"></div>
+                </div>
+                <div>
+                  <label class="text-[11px] text-muted block mb-1">Mensagem customizada (opcional)</label>
+                  <input id="sub-custom-message" type="text" maxlength="200" placeholder="ex.: {username} upou para o nivel {lv}!" class="h-10 w-full bg-bg border border-border rounded-md px-3 outline-none focus:border-gold/60" />
+                  <div class="text-[11px] text-muted mt-1">Use tokens (ex.: <span class="text-goldsoft">{username}</span>, <span class="text-goldsoft">{lv}</span>) para inserir dados.</div>
+                  <div id="token-help" class="mt-2"></div>
+                </div>
+                <div class="flex items-center gap-3 flex-wrap">
+                  <button id="add-sub" class="gold-btn block px-5 rounded-md bg-gold text-bg font-semibold text-center border border-transparent hover:brightness-110 transition disabled:opacity-50 disabled:cursor-not-allowed" disabled>Adicionar alerta</button>
+                  <div id="sub-form-error" class="text-[11px] text-danger"></div>
+                </div>
               </div>
-              <div>
-                <label class="text-[11px] text-muted block mb-1">Tipo de alerta</label>
-                <select id="sub-type" class="w-full bg-bg border border-border rounded-md px-3 outline-none focus:border-gold/60">
-                  <option value="level_gte">Nível atingido (≥)</option>
-                  <option value="map_eq">Entrou no mapa</option>
-                  <option value="status_eq">Online / offline</option>
-                  <option value="gm_online">GM online (este personagem)</option>
-                  <option value="level_stale">Sem subir level (idle)</option>
-                  <option value="server_event">Evento do servidor (Chaos Castle, invasões, etc.)</option>
-                </select>
-              </div>
-            </div>
-            <div id="sub-fields"></div>
-            <div class="mt-3 mb-4">
-              <label class="text-[11px] text-muted block mb-1">Mensagem customizada (opcional)</label>
-              <input id="sub-custom-message" type="text" maxlength="200" placeholder="ex.: {username} upou para o nivel {lv}!" class="h-10 w-full bg-bg border border-border rounded-md px-3 outline-none focus:border-gold/60" />
-              <div class="text-[11px] text-muted mt-1">Use <span class="text-goldsoft">{username}</span> e <span class="text-goldsoft">{lv}</span> para inserir dados.</div>
-            </div>
-            <button id="add-sub" class="gold-btn block px-5 rounded-md bg-gold text-bg font-semibold text-center border border-transparent hover:brightness-110 transition">Adicionar alerta</button>
+            </details>
           </div>
         </div>
       </div>
@@ -718,13 +738,13 @@ function renderDash() {
   const sl = $("sub-list");
   sl.innerHTML = "";
   if (state.subscriptions.length === 0) {
-    sl.innerHTML = '<li class="py-3 text-muted text-sm">Nenhum alerta ainda.</li>';
+    sl.innerHTML = '<div class="py-3 text-muted text-sm">Nenhum alerta ainda.</div>';
   }
   const charById = Object.fromEntries(state.characters.map((c) => [c.id, c]));
   const now = Math.floor(Date.now() / 1000);
   for (const s of state.subscriptions) {
-    const li = document.createElement("li");
-    li.className = "py-3 flex items-center justify-between gap-3";
+    const li = document.createElement("div");
+    li.className = "rounded-xl border border-border bg-bg/40 px-4 py-3 flex items-start justify-between gap-3";
     const left = document.createElement("div");
     left.className = "min-w-0";
     const linkedChar = s.character_id ? charById[s.character_id] : null;
@@ -750,8 +770,9 @@ function renderDash() {
     //   - else -> "ainda não disparou"
     let resultBadge;
     if (s.cooldown_until && s.cooldown_until > now) {
-      const remaining = relativeTime(now * 2 - s.cooldown_until); // hack: format the diff
-      resultBadge = '<span class="px-2 py-0.5 rounded-full bg-gold/10 text-goldsoft border border-gold/20 text-xs">disparou recentemente · cooldown</span>';
+      const remainingSecs = Math.max(0, s.cooldown_until - now);
+      const remainingTxt = formatDuration(remainingSecs);
+      resultBadge = '<span class="px-2 py-0.5 rounded-full bg-gold/10 text-goldsoft border border-gold/20 text-xs">cooldown · ' + (remainingTxt || "—") + '</span>';
     } else if (s.last_fired_at) {
       resultBadge = '<span class="px-2 py-0.5 rounded-full bg-ok/10 text-ok border border-ok/20 text-xs">disparou ' + relativeTime(s.last_fired_at) + '</span>';
     } else {
@@ -767,20 +788,20 @@ function renderDash() {
     }
 
     left.innerHTML =
-      '<div class="text-sm">' + label + '</div>' +
-      '<div class="mt-1.5 flex flex-wrap gap-1.5 items-center">' + activeBadge + resultBadge + '</div>' +
-      '<div class="text-[11px] text-muted mt-1">' + meta.join(' · ') + '</div>';
+      '<div class="text-sm leading-snug">' + label + '</div>' +
+      '<div class="mt-2 flex flex-wrap gap-1.5 items-center">' + activeBadge + resultBadge + '</div>' +
+      '<div class="text-[11px] text-muted mt-2">' + meta.join(' · ') + '</div>';
     const right = document.createElement("div");
-    right.className = "flex gap-2 shrink-0";
+    right.className = "flex gap-2 shrink-0 items-start";
     const toggle = document.createElement("button");
-    toggle.className = "px-3 py-1.5 rounded-md border border-border text-sm hover:bg-bg transition";
+    toggle.className = "px-3 py-1.5 rounded-md border border-border text-sm hover:bg-bg transition min-w-[92px]";
     toggle.textContent = s.active ? "Pausar" : "Retomar";
     toggle.onclick = async () => {
       await fetchJSON("/api/subscriptions/" + s.id, { method: "PATCH", body: JSON.stringify({ active: !s.active }) });
       refresh();
     };
     const del = document.createElement("button");
-    del.className = "px-3 py-1.5 rounded-md border border-border text-danger text-sm hover:bg-bg transition";
+    del.className = "px-3 py-1.5 rounded-md border border-border text-danger text-sm hover:bg-bg transition min-w-[92px]";
     del.textContent = "Excluir";
     del.onclick = async () => {
       await fetchJSON("/api/subscriptions/" + s.id, { method: "DELETE" });
@@ -1013,6 +1034,62 @@ function safeZoneFor(mapName) {
   return SAFE_ZONES[k] || null;
 }
 
+function tokenHelpHtml(t) {
+  const base = [
+    ["{username}", "Nome do personagem"],
+    ["{char}", "Alias de {username}"],
+    ["{lv}", "Level atual"],
+    ["{level}", "Alias de {lv}"],
+    ["{resets}", "Resets atuais"],
+    ["{threshold}", "O alvo/threshold do alerta (quando existir)"],
+  ];
+  const perType = [];
+  if (t === "map_eq" || t === "coords_in") perType.push(["{map}", "Mapa atual"]);
+  if (t === "status_eq" || t === "gm_online") perType.push(["{status}", "Status atual (Online/Offline)"]);
+  if (t === "coords_in") perType.push(["{coords}", "Zona/coords do alerta (threshold completo)"]);
+  if (t === "server_event") {
+    perType.push(["{event}", "Nome do evento"]);
+    perType.push(["{room}", "Sala (FREE/VIP/SPECIAL)"]);
+    perType.push(["{lead}", "Minutos antes (lead time)"]);
+    perType.push(["{leadMinutes}", "Alias de {lead}"]);
+    perType.push(["{item}", "Item sugerido para entrada (quando conhecido)"]);
+    perType.push(["{npc}", "NPC (quando conhecido)"]);
+    perType.push(["{npc_map}", "Mapa do NPC (quando conhecido)"]);
+    perType.push(["{npc_coords}", "Coords do NPC (quando conhecido)"]);
+  }
+
+  const row = (k, desc) =>
+    '<li class="py-1 flex items-start justify-between gap-3 border-b border-border/40 last:border-0">' +
+      '<code class="text-goldsoft text-[11px] bg-bg/60 border border-border/60 rounded px-1.5 py-0.5">' + k + "</code>" +
+      '<span class="text-[11px] text-muted text-right">' + escapeHtml(desc) + "</span>" +
+    "</li>";
+
+  return (
+    '<details class="rounded-md border border-border bg-bg/40 px-3 py-2">' +
+      '<summary class="cursor-pointer text-[11px] text-muted hover:text-slate-200 select-none">Tokens disponíveis (clique para ver)</summary>' +
+      '<div class="mt-2 grid sm:grid-cols-2 gap-3">' +
+        '<div>' +
+          '<div class="text-[11px] uppercase tracking-widest text-muted mb-1">Base</div>' +
+          '<ul class="leading-snug">' + base.map(([k, d]) => row(k, d)).join("") + "</ul>" +
+        "</div>" +
+        '<div>' +
+          '<div class="text-[11px] uppercase tracking-widest text-muted mb-1">Este alerta</div>' +
+          (perType.length
+            ? '<ul class="leading-snug">' + perType.map(([k, d]) => row(k, d)).join("") + "</ul>"
+            : '<div class="text-[11px] text-muted">Sem tokens extras para este tipo.</div>') +
+        "</div>" +
+      "</div>" +
+      '<div class="text-[11px] text-muted mt-2">Dica: tokens não reconhecidos ficam como texto normal.</div>' +
+    "</details>"
+  );
+}
+
+function syncTokenHelp() {
+  const host = $("token-help");
+  if (!host) return;
+  host.innerHTML = tokenHelpHtml(subTypeEl.value);
+}
+
 function renderSubFields() {
   const t = subTypeEl.value;
   let html = "";
@@ -1064,6 +1141,8 @@ function renderSubFields() {
       '<div class="text-[11px] text-muted mt-1">Os horários vêm de mupatos.net/eventos e mupatos.net/invasoes (atualizados de hora em hora).</div>';
   }
   subFieldsEl.innerHTML = html;
+  syncTokenHelp();
+  updateSubFormUi();
 
   // map_eq: react to map-name typing → toggle the safe-zone checkbox.
   // When the checkbox is on, hide the manual-coords details so the user
@@ -1118,6 +1197,25 @@ function renderSubFields() {
 }
 subTypeEl.addEventListener("change", renderSubFields);
 renderSubFields();
+
+// Live validation / preview for alert form.
+let subFormWired = false;
+function wireSubFormLivePreview() {
+  if (subFormWired) return;
+  subFormWired = true;
+  ["sub-char", "sub-type", "sub-custom-message"].forEach((id) => {
+    const el = $(id);
+    if (el) el.addEventListener("input", updateSubFormUi);
+    if (el) el.addEventListener("change", updateSubFormUi);
+  });
+  // Dynamic fields inside #sub-fields are replaced on type change, so use
+  // event delegation on the container.
+  if (subFieldsEl) {
+    subFieldsEl.addEventListener("input", updateSubFormUi);
+    subFieldsEl.addEventListener("change", updateSubFormUi);
+  }
+}
+wireSubFormLivePreview();
 
 function readSubFormPayload() {
   const character_id = Number($("sub-char").value) || null;
@@ -1178,9 +1276,94 @@ function readSubFormPayload() {
     if (!room) throw new Error("selecione a sala");
     if (!lead) throw new Error("informe quantos minutos antes");
     // server_event ignores character_id.
-    return { event_type: "server_event", threshold: ev + "|" + room + "|" + lead };
+    const baseNoChar = custom_message ? { custom_message } : {};
+    return { ...baseNoChar, event_type: "server_event", threshold: ev + "|" + room + "|" + lead };
   }
   throw new Error("evento do servidor ainda não disponível");
+}
+
+function subLabelFromPayload(payload) {
+  const t = payload.event_type;
+  const nameById = Object.fromEntries(state.characters.map((c) => [c.id, c.name]));
+  const charName = payload.character_id ? (nameById[payload.character_id] || ("#" + payload.character_id)) : "(servidor)";
+  const thr = payload.threshold;
+  if (t === "level_gte") return charName + " — nível ≥ " + thr;
+  if (t === "map_eq") return charName + " — entrou no mapa " + thr;
+  if (t === "coords_in") return charName + " — entrou na zona " + thr;
+  if (t === "status_eq") return charName + " — ficou " + thr;
+  if (t === "gm_online") return "GM " + charName + " — online";
+  if (t === "level_stale") return charName + " — sem subir level por " + thr + " min";
+  if (t === "server_event") {
+    const parts = String(thr || "").split("|");
+    return "📣 " + (parts[0] || "?") + " (" + (parts[1] || "?").toUpperCase() + ") — " + (parts[2] || "?") + " min antes";
+  }
+  return "—";
+}
+
+function updateSubFormUi() {
+  const btn = $("add-sub");
+  const err = $("sub-form-error");
+  const prev = $("sub-preview");
+  const hint = $("sub-preview-hint");
+  if (!btn || !err || !prev || !hint) return;
+
+  err.textContent = "";
+  hint.textContent = "";
+  function applyTemplateClient(tpl, dict) {
+    let out = escapeHtml(tpl || "");
+    for (const [k, v] of Object.entries(dict || {})) {
+      const re = new RegExp("\\\\{" + k + "\\\\}", "gi");
+      out = out.replace(re, v);
+    }
+    return out;
+  }
+  try {
+    const payload = readSubFormPayload();
+    const label = escapeHtml(subLabelFromPayload(payload));
+
+    const custom = (payload.custom_message || "").trim();
+    if (!custom) {
+      prev.innerHTML = '<span class="text-slate-200">' + label + "</span>";
+      hint.textContent = "Mensagem padrão será usada.";
+    } else {
+      // Build a best-effort token dict for preview using current form values + last known character snapshot.
+      const char = payload.character_id
+        ? state.characters.find((c) => c.id === payload.character_id)
+        : null;
+      const dict = {
+        username: escapeHtml(char?.name || ""),
+        char: escapeHtml(char?.name || ""),
+        lv: char?.last_level != null ? String(char.last_level) : "?",
+        level: char?.last_level != null ? String(char.last_level) : "?",
+        resets: typeof char?.resets === "number" ? String(char.resets) : "?",
+        map: escapeHtml(char?.last_map || ""),
+        status: escapeHtml(char?.last_status || ""),
+        threshold: escapeHtml(payload.threshold || ""),
+        coords: escapeHtml(payload.threshold || ""),
+        // server_event extras (best-effort from threshold)
+        event: escapeHtml(String(payload.threshold || "").split("|")[0] || ""),
+        room: escapeHtml(String(payload.threshold || "").split("|")[1]?.toUpperCase?.() ? String(payload.threshold || "").split("|")[1].toUpperCase() : ""),
+        lead: escapeHtml(String(payload.threshold || "").split("|")[2] || ""),
+        leadMinutes: escapeHtml(String(payload.threshold || "").split("|")[2] || ""),
+        item: "",
+        npc: "",
+        npc_map: "",
+        npc_coords: "",
+      };
+      const rendered = applyTemplateClient(custom, dict);
+      prev.innerHTML =
+        '<div class="space-y-2">' +
+          '<div><div class="text-[11px] uppercase tracking-widest text-muted mb-1">Regra do alerta</div><div class="text-sm text-slate-200">' + label + "</div></div>" +
+          '<div><div class="text-[11px] uppercase tracking-widest text-muted mb-1">Mensagem custom (preview)</div><div class="text-sm text-slate-200">' + rendered + "</div></div>" +
+        "</div>";
+      hint.textContent = "Preview usa os últimos dados conhecidos do painel (pode variar no momento do disparo).";
+    }
+    btn.disabled = false;
+  } catch (e) {
+    prev.textContent = "—";
+    err.textContent = (e && e.message) ? e.message : "preencha os campos";
+    btn.disabled = true;
+  }
 }
 
 $("add-sub").onclick = async (e) => {
@@ -1191,6 +1374,7 @@ $("add-sub").onclick = async (e) => {
       fetchJSON("/api/subscriptions", { method: "POST", body: JSON.stringify(payload) }),
     );
     renderSubFields();   // resets the dynamic inputs to their empty state
+    updateSubFormUi();
     toast("alerta criado", "ok");
     refresh();
   } catch (err) {

@@ -2,7 +2,7 @@ import type { CharacterRow, Env, ProfileSnapshot, SubscriptionRow } from "./type
 import { parseMap, scrapeMany } from "./scraper";
 import { now } from "./util";
 import { sendTelegram } from "./telegram";
-import { formatAlert } from "./messages";
+import { formatAlert, formatServerEventAlert } from "./messages";
 import { classCodeFor, fetchRankings, findRank, type RankingMap } from "./rankings";
 import {
   brNowParts,
@@ -201,6 +201,13 @@ export async function pollServerEvents(env: Env): Promise<{ refreshed: boolean; 
   const subs = subsRes.results ?? [];
   if (subs.length === 0) return { refreshed, fired: 0 };
 
+  // Precompute user's max char level to tailor entry requirements in messages.
+  const maxLevelRes = await env.DB
+    .prepare(`SELECT user_id, MAX(last_level) AS max_level FROM characters GROUP BY user_id`)
+    .all<{ user_id: number; max_level: number | null }>();
+  const maxLevelByUser = new Map<number, number | null>();
+  for (const r of maxLevelRes.results ?? []) maxLevelByUser.set(r.user_id, r.max_level);
+
   const cooldown = Number(env.COOLDOWN_SECONDS || "3600");
   const br = brNowParts(t);
   let fired = 0;
@@ -219,7 +226,13 @@ export async function pollServerEvents(env: Env): Promise<{ refreshed: boolean; 
     const schedule = parseSchedule(ev.schedule);
     if (!shouldFireServerAlert(schedule, parsed.lead, br)) continue;
 
-    const msg = `📣 <b>${parsed.name}</b> (${parsed.room.toUpperCase()}) começa em ${parsed.lead} min.`;
+    const msg = formatServerEventAlert({
+      name: parsed.name,
+      room: parsed.room,
+      leadMinutes: parsed.lead,
+      userMaxLevel: maxLevelByUser.get(sub.user_id) ?? null,
+      customMessage: sub.custom_message ?? null,
+    });
     const send = await sendTelegram(env, sub.owner_chat_id, msg);
     if (!send.ok) {
       console.log(`telegram send FAILED server-event sub=${sub.id} status=${send.status}`);
