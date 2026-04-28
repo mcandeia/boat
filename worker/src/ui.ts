@@ -278,6 +278,11 @@ export const INDEX_HTML = /* html */ `<!doctype html>
           </div>
         </div>
         <div id="sub-fields"></div>
+        <div class="mt-3 mb-4">
+          <label class="text-[11px] text-muted block mb-1">Mensagem customizada (opcional)</label>
+          <input id="sub-custom-message" type="text" maxlength="200" placeholder="ex.: {username} upou para o nivel {lv}!" class="h-10 w-full bg-bg border border-border rounded-md px-3 outline-none focus:border-gold/60" />
+          <div class="text-[11px] text-muted mt-1">Use <span class="text-goldsoft">{username}</span> e <span class="text-goldsoft">{lv}</span> para inserir dados.</div>
+        </div>
         <button id="add-sub" class="gold-btn block px-5 rounded-md bg-gold text-bg font-semibold text-center border border-transparent hover:brightness-110 transition">Adicionar alerta</button>
       </div>
     </div>
@@ -819,11 +824,13 @@ renderSubFields();
 
 function readSubFormPayload() {
   const character_id = Number($("sub-char").value) || null;
+  const custom_message = ($("sub-custom-message")?.value || "").trim();
+  const base = custom_message ? { character_id, custom_message } : { character_id };
   const t = subTypeEl.value;
   if (t === "level_gte") {
     const v = ($("sf-level").value || "").trim();
     if (!v) throw new Error("informe o nível");
-    return { character_id, event_type: "level_gte", threshold: v };
+    return { ...base, event_type: "level_gte", threshold: v };
   }
   if (t === "map_eq") {
     const map = ($("sf-map").value || "").trim();
@@ -836,18 +843,18 @@ function readSubFormPayload() {
         throw new Error("preencha os 4 valores de coordenadas (ou deixe os 4 em branco)");
       }
       return {
-        character_id,
+        ...base,
         event_type: "coords_in",
         threshold: map + ":" + x1 + "-" + x2 + ":" + y1 + "-" + y2,
       };
     }
-    return { character_id, event_type: "map_eq", threshold: map };
+    return { ...base, event_type: "map_eq", threshold: map };
   }
   if (t === "status_eq") {
-    return { character_id, event_type: "status_eq", threshold: $("sf-status").value };
+    return { ...base, event_type: "status_eq", threshold: $("sf-status").value };
   }
   if (t === "gm_online") {
-    return { character_id, event_type: "gm_online" };
+    return { ...base, event_type: "gm_online" };
   }
   throw new Error("evento do servidor ainda não disponível");
 }

@@ -72,6 +72,7 @@ export interface SubscriptionRow {
   cooldown_until: number;
   last_fired_at: number | null;
   created_at: number;
+  custom_message: string | null;
 }
 
 export interface ProfileSnapshot {
