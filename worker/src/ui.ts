@@ -983,20 +983,31 @@ async function toggleAdminHistory(charId, charName) {
 function wireHistoryTooltips(cell) {
   const tip = $("chart-tip");
   if (!tip) return;
+  const setBarsHighlight = (on) => {
+    cell.querySelectorAll(".cycle-bar").forEach((b) => {
+      b.setAttribute("stroke-opacity", on ? "1" : (b.getAttribute("stroke") === "#f0a93b" ? "0.85" : "0.5"));
+      b.setAttribute("stroke-width", on ? "1.8" : (b.getAttribute("stroke") === "#f0a93b" ? "1.6" : "1.2"));
+    });
+  };
   cell.addEventListener("mousemove", (e) => {
     const t = e.target;
-    if (!(t instanceof Element) || !t.classList.contains("hist-dot")) {
+    const isHit = t instanceof Element && (t.classList.contains("hist-dot") || t.classList.contains("cycle-bar"));
+    if (!isHit) {
       tip.classList.add("hidden");
+      setBarsHighlight(false);
       return;
     }
     tip.textContent = t.getAttribute("data-tip") || "";
-    // Position above-right of the cursor; flip to left if near right edge.
-    const x = e.clientX, y = e.clientY;
-    tip.style.top = (y - 28) + "px";
-    tip.style.left = (x + 12) + "px";
+    tip.style.top = (e.clientY - 28) + "px";
+    tip.style.left = (e.clientX + 12) + "px";
     tip.classList.remove("hidden");
+    // Linked hover: any cycle-bar hovered → all of them highlight at once.
+    setBarsHighlight(t.classList.contains("cycle-bar"));
   });
-  cell.addEventListener("mouseleave", () => tip.classList.add("hidden"));
+  cell.addEventListener("mouseleave", () => {
+    tip.classList.add("hidden");
+    setBarsHighlight(false);
+  });
 }
 
 // Step-plot of resets over time. Resets only go up, so this shows progress
@@ -1067,20 +1078,61 @@ function renderHistoryChart(data, charName) {
            '<circle cx="' + x + '" cy="' + yL + '" r="3" fill="#7aa2f7" stroke="#0b0d12" stroke-width="1.2" class="hist-dot cursor-pointer" data-tip="' + safeTip + '"></circle>';
   }).join("");
 
-  // "Last cycle benchmark" — a vertical dashed line at the moment in the
-  // PREVIOUS reset cycle where the char first reached the current level.
-  // Distance to the chart's right edge ≈ leveling speed delta this cycle.
+  // "Cycle benchmark" markers — one for the current cycle, one for the
+  // previous (when applicable). Each marker is a vertical dashed line at
+  // the moment the cycle first reached the current level, with a tooltip
+  // showing how long that took from the cycle's local-min level. Linked
+  // hover (any bar hovered → both highlight) makes side-by-side speed
+  // comparison obvious.
   const last = samples[samples.length - 1];
-  let marker = "";
-  if (last.resets != null && last.level != null && last.resets > 0) {
-    const prevR = last.resets - 1;
-    const firstHit = samples.find((s) => s.resets === prevR && (s.level ?? -1) >= (last.level ?? 0));
-    if (firstHit) {
-      const x = xOf(firstHit.ts);
-      const labelTs = fmtFull(firstHit.ts);
-      marker =
-        '<line x1="' + x + '" x2="' + x + '" y1="' + padT + '" y2="' + (H - padB) + '" stroke="#8a93a3" stroke-width="1" stroke-dasharray="4,3" />' +
-        '<text x="' + (x + 4) + '" y="' + (padT + 10) + '" fill="#8a93a3" font-size="10">↩ lv ' + last.level + ' no reset ' + prevR + ' (' + labelTs + ')</text>';
+  function cycleStats(resetCount, targetLevel) {
+    const samp = samples.filter((s) => s.resets === resetCount);
+    if (samp.length === 0) return null;
+    let lowest = Infinity, fromTs = 0;
+    for (const s of samp) {
+      const lv = s.level ?? Infinity;
+      if (lv < lowest) { lowest = lv; fromTs = s.ts; }
+    }
+    if (!isFinite(lowest)) return null;
+    const hit = samp.find((s) => (s.level ?? -Infinity) >= targetLevel && s.ts >= fromTs);
+    if (!hit) return null;
+    return { fromLevel: lowest, fromTs, hitTs: hit.ts, duration: hit.ts - fromTs };
+  }
+  function fmtDur(secs) {
+    if (secs < 60) return secs + "s";
+    const m = Math.floor(secs / 60);
+    if (m < 60) return m + "min";
+    const h = Math.floor(m / 60), r = m % 60;
+    return h + "h" + (r ? " " + r + "min" : "");
+  }
+  function bar(stats, resetCount, isCurrent) {
+    if (!stats) return "";
+    const x = xOf(stats.hitTs);
+    const tip =
+      "R" + resetCount + (isCurrent ? " (atual)" : "") +
+      " · lv " + last.level + " em " +
+      escapeHtml(fmtDur(stats.duration)) +
+      " (desde lv " + stats.fromLevel + ")";
+    const color = isCurrent ? "#f0a93b" : "#8a93a3";
+    const opacity = isCurrent ? "0.85" : "0.5";
+    const w = isCurrent ? "1.6" : "1.2";
+    return '<line x1="' + x + '" x2="' + x + '" y1="' + padT + '" y2="' + (H - padB) + '" stroke="' + color + '" stroke-width="' + w + '" stroke-dasharray="4,3" stroke-opacity="' + opacity + '" class="cycle-bar cursor-pointer" data-tip="' + tip + '"></line>';
+  }
+  let markers = "";
+  let inlineLabels = "";
+  if (last.resets != null && last.level != null) {
+    // One bar per distinct reset cycle visible in the window.
+    const distinctResets = [...new Set(samples.map((s) => s.resets).filter((r) => r != null))].sort((a, b) => a - b);
+    for (const r of distinctResets) {
+      const stats = cycleStats(r, last.level);
+      if (!stats) continue;
+      const isCurrent = r === last.resets;
+      markers += bar(stats, r, isCurrent);
+      // Tiny duration label above each bar — gold for current cycle, muted
+      // for past ones. Lets users scan-compare without hovering.
+      const x = xOf(stats.hitTs);
+      const fill = isCurrent ? "#f7c779" : "#8a93a3";
+      inlineLabels += '<text x="' + (x + 3) + '" y="' + (padT + 10) + '" fill="' + fill + '" font-size="9">' + fmtDur(stats.duration) + '</text>';
     }
   }
 
@@ -1091,8 +1143,10 @@ function renderHistoryChart(data, charName) {
       '<text x="6" y="3" fill="#f7c779">resets</text>' +
       '<circle cx="56" cy="0" r="3" fill="#7aa2f7" />' +
       '<text x="62" y="3" fill="#7aa2f7">level</text>' +
-      '<line x1="100" x2="116" y1="0" y2="0" stroke="#8a93a3" stroke-dasharray="4,3" />' +
-      '<text x="120" y="3" fill="#8a93a3">ciclo anterior</text>' +
+      '<line x1="100" x2="116" y1="0" y2="0" stroke="#f0a93b" stroke-dasharray="4,3" />' +
+      '<text x="120" y="3" fill="#f7c779">ciclo atual</text>' +
+      '<line x1="166" x2="182" y1="0" y2="0" stroke="#8a93a3" stroke-dasharray="4,3" />' +
+      '<text x="186" y="3" fill="#8a93a3">ciclos passados</text>' +
     '</g>';
 
   // Gridlines at uniform fractions of the plot height; cap at 5, fewer
@@ -1133,10 +1187,11 @@ function renderHistoryChart(data, charName) {
   return stats +
     '<svg viewBox="0 0 ' + W + ' ' + H + '" class="w-full h-auto bg-bg border border-border rounded-md">' +
       yTickLines.join("") +
-      marker +
+      markers +
       '<path d="' + lDp + '" fill="none" stroke="#7aa2f7" stroke-width="1.5" stroke-opacity="0.85" />' +
       '<path d="' + d + '" fill="none" stroke="#f0a93b" stroke-width="2" />' +
       dots +
+      inlineLabels +
       xLabels +
       legend +
     '</svg>';
