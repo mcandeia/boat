@@ -21,12 +21,14 @@ import {
   adminCharHistory,
   adminListCharSubs,
   adminListChars,
+  adminListEvents,
   adminRefreshChar,
   adminRunCron,
   adminSetBlocked,
+  adminUpdateEvent,
 } from "./routes/admin";
 import { telegramWebhook } from "./routes/telegram-webhook";
-import { pollOnce } from "./poll";
+import { pollOnce, pollServerEvents } from "./poll";
 import { setTelegramWebhook } from "./telegram";
 import { INDEX_HTML } from "./ui";
 
@@ -56,6 +58,15 @@ export default {
       // ---- Telegram webhook (public, secret-token guarded) ----
       if (pathname === "/api/telegram/webhook" && method === "POST") {
         return await telegramWebhook(env, req);
+      }
+
+      // Public schedule list (used by the alert form to populate the
+      // event-name dropdown). Read-only.
+      if (pathname === "/api/events" && method === "GET") {
+        const rs = await env.DB
+          .prepare("SELECT category, name, room, schedule, meta, updated_at FROM server_events ORDER BY category, name, room")
+          .all<{ category: string; name: string; room: string; schedule: string; meta: string | null; updated_at: number }>();
+        return json({ events: rs.results ?? [] });
       }
 
       // ---- everything below requires a session ----
@@ -112,6 +123,9 @@ export default {
         const charHistory = pathname.match(/^\/api\/admin\/chars\/(\d+)\/history$/);
         if (charHistory && method === "GET") return await adminCharHistory(env, Number(charHistory[1]), req);
         if (pathname === "/api/admin/poll" && method === "POST") return await adminRunCron(env);
+        if (pathname === "/api/admin/events" && method === "GET") return await adminListEvents(env);
+        const evPatch = pathname.match(/^\/api\/admin\/events\/(\d+)$/);
+        if (evPatch && method === "PATCH") return await adminUpdateEvent(env, Number(evPatch[1]), req);
       }
 
       // ---- maintenance (Bearer SESSION_SECRET) — for ops/CI use ----
@@ -139,6 +153,11 @@ export default {
       pollOnce(env)
         .then((r) => console.log(`poll: scraped=${r.scraped} fired=${r.fired}`))
         .catch((e) => console.error("poll failed", e)),
+    );
+    ctx.waitUntil(
+      pollServerEvents(env)
+        .then((r) => console.log(`server-events: refreshed=${r.refreshed} fired=${r.fired}`))
+        .catch((e) => console.error("server-events poll failed", e)),
     );
   },
 };

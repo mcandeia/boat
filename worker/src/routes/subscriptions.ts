@@ -68,7 +68,11 @@ export async function createSubscription(env: Env, userId: number, req: Request)
     threshold = null;
     if (!characterId) return bad(400, "selecione um personagem");
   } else if (eventType === "server_event") {
-    if (!threshold) return bad(400, "nome do evento obrigatório");
+    // Threshold format: "<event>|<room>|<leadMinutes>", e.g. "Chaos Castle|vip|5".
+    if (!threshold || !/^[^|]+\|(free|vip|special)\|\d+$/i.test(threshold)) {
+      return bad(400, "use o formato 'Nome do Evento|free|5'");
+    }
+    threshold = threshold.replace(/^([^|]+)\|(free|vip|special)\|(\d+)$/i, (_a, n, r, m) => `${n.trim()}|${r.toLowerCase()}|${Number(m)}`);
     characterId = null;
   } else if (eventType === "level_stale") {
     const n = Number(threshold);

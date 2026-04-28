@@ -113,6 +113,61 @@ export async function adminCharHistory(env: Env, charId: number, req: Request): 
   return await buildHistoryResponse(env, charId, req);
 }
 
+interface AdminEventRow {
+  id: number;
+  category: string;
+  name: string;
+  room: string;
+  schedule: string;
+  meta: string | null;
+  manual: number;
+  updated_at: number;
+}
+
+export async function adminListEvents(env: Env): Promise<Response> {
+  const rs = await env.DB
+    .prepare(
+      `SELECT id, category, name, room, schedule, meta, manual, updated_at
+         FROM server_events
+        ORDER BY category, name, room`,
+    )
+    .all<AdminEventRow>();
+  return json({ events: rs.results ?? [] });
+}
+
+// PATCH body: { schedule: "13:30,19:30,21:30", manual: true } — schedule
+// validation = comma-separated HH:MM. Setting manual=true makes the row
+// survive subsequent scrapes; setting manual=false hands control back to
+// the scraper (next refresh will sync from mupatos.net).
+const SCHED_RE = /^(\d{1,2}:\d{2})(,\d{1,2}:\d{2})*$/;
+export async function adminUpdateEvent(env: Env, id: number, req: Request): Promise<Response> {
+  const body = (await req.json().catch(() => ({}))) as { schedule?: string; manual?: boolean };
+  const sets: string[] = [];
+  const args: unknown[] = [];
+  if (typeof body.schedule === "string") {
+    const cleaned = body.schedule.replace(/\s+/g, "");
+    if (cleaned && !SCHED_RE.test(cleaned)) {
+      return bad(400, "schedule deve estar no formato 'HH:MM,HH:MM,…'");
+    }
+    sets.push("schedule = ?");
+    args.push(cleaned);
+  }
+  if (typeof body.manual === "boolean") {
+    sets.push("manual = ?");
+    args.push(body.manual ? 1 : 0);
+  }
+  if (sets.length === 0) return bad(400, "nada pra atualizar");
+  sets.push("updated_at = ?");
+  args.push(now());
+  args.push(id);
+  const r = await env.DB
+    .prepare(`UPDATE server_events SET ${sets.join(", ")} WHERE id = ?`)
+    .bind(...args)
+    .run();
+  if (r.meta.changes === 0) return bad(404, "evento não encontrado");
+  return json({ ok: true });
+}
+
 export async function adminListCharSubs(env: Env, charId: number): Promise<Response> {
   const owner = await env.DB
     .prepare("SELECT id FROM characters WHERE id = ?")
