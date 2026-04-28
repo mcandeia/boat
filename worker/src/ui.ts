@@ -236,12 +236,17 @@ export const INDEX_HTML = /* html */ `<!doctype html>
     <div id="admin-card" class="hidden bg-panel border border-gold/30 rounded-xl p-5">
       <div class="flex items-center justify-between gap-3 mb-3">
         <h2 class="text-xs uppercase tracking-widest text-gold">Admin</h2>
-        <button id="admin-poll" class="gold-btn block px-3 rounded-md bg-gold text-bg font-semibold text-center border border-transparent hover:brightness-110 transition text-xs">Rodar cron agora</button>
+        <div class="flex gap-2">
+          <button id="admin-compare" class="px-3 py-1.5 rounded-md border border-gold/40 text-goldsoft hover:bg-gold/10 transition text-xs">📈 Comparar</button>
+          <button id="admin-poll" class="gold-btn block px-3 rounded-md bg-gold text-bg font-semibold text-center border border-transparent hover:brightness-110 transition text-xs">Rodar cron agora</button>
+        </div>
       </div>
+      <div id="admin-comparison-chart" class="hidden mb-6 bg-bg/50 p-4 rounded-xl border border-border"></div>
       <div class="overflow-x-auto">
         <table class="w-full text-xs">
           <thead class="text-muted text-left border-b border-border">
             <tr>
+              <th class="py-1.5 pr-2 w-6"></th>
               <th class="py-1.5 pr-2">#</th>
               <th class="py-1.5 pr-2">Char</th>
               <th class="py-1.5 pr-2">Dono</th>
@@ -968,18 +973,18 @@ $("add-sub").onclick = async (e) => {
 async function loadAdminChars() {
   const tbody = $("admin-chars");
   if (!tbody) return;
-  tbody.innerHTML = '<tr><td colspan="8" class="py-2 text-muted">carregando…</td></tr>';
+  tbody.innerHTML = '<tr><td colspan="9" class="py-2 text-muted">carregando…</td></tr>';
   try {
     const data = await fetchJSON("/api/admin/chars");
     const chars = data.characters || [];
     if (chars.length === 0) {
-      tbody.innerHTML = '<tr><td colspan="8" class="py-2 text-muted">nenhum char</td></tr>';
+      tbody.innerHTML = '<tr><td colspan="9" class="py-2 text-muted">nenhum char</td></tr>';
       return;
     }
     tbody.innerHTML = chars.map(adminCharRowHtml).join("");
     for (const c of chars) wireAdminCharActions(c);
   } catch (e) {
-    tbody.innerHTML = '<tr><td colspan="8" class="py-2 text-danger">' + escapeHtml(e.message) + '</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="9" class="py-2 text-danger">' + escapeHtml(e.message) + '</td></tr>';
   }
 }
 function adminCharRowHtml(c) {
@@ -995,6 +1000,7 @@ function adminCharRowHtml(c) {
     : '<span class="text-muted">0</span>';
   const historyBtn = '<button class="px-2 py-1 rounded border border-border hover:bg-bg ml-1" data-action="history" title="Histórico">📈</button>';
   return '<tr class="border-b border-border/60" data-row="' + c.id + '">' +
+    '<td class="py-1.5 pr-2"><input type="checkbox" class="admin-char-check accent-gold cursor-pointer" data-char-id="' + c.id + '" data-char-name="' + escapeHtml(c.name) + '" /></td>' +
     '<td class="py-1.5 pr-2 text-muted">' + c.id + '</td>' +
     '<td class="py-1.5 pr-2 font-semibold">' +
       '<a href="https://mupatos.com.br/site/profile/character/' + encodeURIComponent(c.name) + '" target="_blank" rel="noopener" class="text-goldsoft hover:underline">' + escapeHtml(c.name) + '</a>' +
@@ -1012,10 +1018,10 @@ function adminCharRowHtml(c) {
     '</td>' +
     '</tr>' +
     '<tr class="hidden bg-bg/50" data-subs-for="' + c.id + '">' +
-      '<td colspan="8" class="px-3 py-2 text-[11px]" data-subs-body></td>' +
+      '<td colspan="9" class="px-3 py-2 text-[11px]" data-subs-body></td>' +
     '</tr>' +
     '<tr class="hidden bg-bg/50" data-history-for="' + c.id + '">' +
-      '<td colspan="8" class="px-3 py-2" data-history-body></td>' +
+      '<td colspan="9" class="px-3 py-2" data-history-body></td>' +
     '</tr>';
 }
 function wireAdminCharActions(c) {
@@ -1074,12 +1080,109 @@ async function toggleAdminHistory(charId, charName) {
   const cell = expansion.querySelector('[data-history-body]');
   cell.innerHTML = '<span class="text-muted text-xs">carregando histórico…</span>';
   try {
-    const data = await fetchJSON("/api/admin/chars/" + charId + "/history?days=7");
-    cell.innerHTML = renderHistoryChart(data, charName);
+    const data = await fetchJSON("/api/admin/chars/" + charId + "/history?days=14");
+    const tabs = '<div class="flex gap-4 mb-3 border-b border-border text-sm">' +
+      '<button class="pb-1 border-b-2 border-goldsoft text-goldsoft hist-tab-btn" data-target="hist-evolucao-' + charId + '">Evolução</button>' +
+      '<button class="pb-1 border-b-2 border-transparent text-muted hover:text-slate-300 hist-tab-btn" data-target="hist-resets-' + charId + '">Resets/Dia</button>' +
+      '</div>' +
+      '<div id="hist-evolucao-' + charId + '" class="hist-tab-content">' + renderHistoryChart(data, charName) + '</div>' +
+      '<div id="hist-resets-' + charId + '" class="hist-tab-content hidden">' + renderResetsPerDayChart(data, charName) + '</div>';
+    cell.innerHTML = tabs;
     wireHistoryTooltips(cell);
+
+    const btns = cell.querySelectorAll('.hist-tab-btn');
+    btns.forEach(btn => {
+      btn.onclick = () => {
+        btns.forEach(b => b.className = "pb-1 border-b-2 border-transparent text-muted hover:text-slate-300 hist-tab-btn");
+        cell.querySelectorAll('.hist-tab-content').forEach(c => c.classList.add("hidden"));
+        btn.className = "pb-1 border-b-2 border-goldsoft text-goldsoft hist-tab-btn";
+        document.getElementById(btn.getAttribute("data-target")).classList.remove("hidden");
+      };
+    });
   } catch (e) {
     cell.innerHTML = '<span class="text-danger text-xs">' + escapeHtml(e.message) + '</span>';
   }
+}
+
+function renderResetsPerDayChart(data, charName) {
+  const samples = [];
+  for (const cyc of data.cycles ?? []) for (const s of cyc.samples) samples.push(s);
+  if (samples.length === 0) {
+    return '<div class="text-xs text-muted">sem snapshots ainda.</div>';
+  }
+
+  const maxResetsByDay = {};
+  const dayList = [];
+  for (const s of samples) {
+    if (s.resets == null) continue;
+    const d = new Date(s.ts * 1000);
+    const dateStr = String(d.getDate()).padStart(2, '0') + '/' + String(d.getMonth() + 1).padStart(2, '0');
+    if (maxResetsByDay[dateStr] === undefined) {
+      maxResetsByDay[dateStr] = s.resets;
+      dayList.push(dateStr);
+    } else {
+      maxResetsByDay[dateStr] = Math.max(maxResetsByDay[dateStr], s.resets);
+    }
+  }
+
+  if (dayList.length === 0) return '<div class="text-xs text-muted">nenhum dado de resets.</div>';
+
+  const chartData = [];
+  let prevMax = null;
+  if (dayList.length > 0) {
+    let firstDayMin = Infinity;
+    for (const s of samples) {
+      if (s.resets == null) continue;
+      const d = new Date(s.ts * 1000);
+      const dateStr = String(d.getDate()).padStart(2, '0') + '/' + String(d.getMonth() + 1).padStart(2, '0');
+      if (dateStr === dayList[0]) firstDayMin = Math.min(firstDayMin, s.resets);
+    }
+    prevMax = firstDayMin;
+  }
+
+  for (const day of dayList) {
+    const curMax = maxResetsByDay[day];
+    const gained = curMax - prevMax;
+    chartData.push({ day, gained });
+    prevMax = curMax;
+  }
+
+  const W = 720, H = 240, padL = 36, padR = 36, padT = 22, padB = 26;
+  const innerW = W - padL - padR, innerH = H - padT - padB;
+  const maxGain = Math.max(...chartData.map(d => d.gained), 1);
+  
+  const tickCount = Math.min(maxGain + 1, 6);
+  const yTickLines = Array.from({length: tickCount}).map((_, i) => {
+    const v = Math.round((maxGain * i) / Math.max(tickCount - 1, 1));
+    const y = padT + innerH - (v / maxGain) * innerH;
+    return '<line x1="' + padL + '" x2="' + (W - padR) + '" y1="' + y + '" y2="' + y + '" stroke="#252a36" stroke-dasharray="2,3" />' +
+           '<text x="' + (padL - 4) + '" y="' + (y + 3) + '" fill="#8a93a3" font-size="10" text-anchor="end">' + v + '</text>';
+  }).join("");
+
+  const barW = Math.min(innerW / chartData.length * 0.6, 40);
+  const step = innerW / Math.max(chartData.length, 1);
+  
+  const barsHtml = chartData.map((d, i) => {
+    const x = padL + (i + 0.5) * step;
+    const h = (d.gained / maxGain) * innerH;
+    const y = padT + innerH - h;
+    const xLabel = '<text x="' + x + '" y="' + (H - padB + 14) + '" fill="#8a93a3" font-size="10" text-anchor="middle">' + d.day + '</text>';
+    const bar = '<rect class="hist-dot cursor-pointer transition-opacity hover:opacity-80" x="' + (x - barW/2) + '" y="' + y + '" width="' + barW + '" height="' + Math.max(h, 2) + '" fill="#f0a93b" fill-opacity="0.8" data-tip="' + d.gained + ' resets em ' + d.day + '" />';
+    const valText = d.gained > 0 ? '<text x="' + x + '" y="' + (y - 4) + '" fill="#f7c779" font-size="10" text-anchor="middle">' + d.gained + '</text>' : '';
+    return xLabel + bar + valText;
+  }).join("");
+
+  const stats =
+    '<div class="text-[11px] text-muted mb-2">' +
+      '<b class="text-goldsoft">' + escapeHtml(charName) + '</b> · resets por dia (últimos ' + data.days + ' dias)' +
+    '</div>';
+
+  return stats +
+    '<svg viewBox="0 0 ' + W + ' ' + H + '" class="w-full h-auto bg-bg border border-border rounded-md">' +
+      yTickLines +
+      barsHtml +
+    '</svg>';
+
 }
 
 // Floating tooltip for the resets-over-time chart. One singleton tip div
@@ -1357,6 +1460,118 @@ function renderAdminSubs(subs) {
   });
   return '<ul class="leading-snug">' + items.join("") + '</ul>';
 }
+async function compareSelectedChars() {
+  const checkboxes = document.querySelectorAll('.admin-char-check:checked');
+  if (checkboxes.length === 0) {
+    toast("selecione pelo menos um personagem", "err");
+    return;
+  }
+  const chartContainer = $("admin-comparison-chart");
+  chartContainer.classList.remove("hidden");
+  chartContainer.innerHTML = '<div class="text-xs text-muted">carregando dados para comparação...</div>';
+  
+  const datasets = [];
+  try {
+    const promises = Array.from(checkboxes).map(async (cb) => {
+      const charId = cb.getAttribute("data-char-id");
+      const charName = cb.getAttribute("data-char-name");
+      const data = await fetchJSON("/api/admin/chars/" + charId + "/history?days=14");
+      return { charId, charName, data };
+    });
+    const results = await Promise.all(promises);
+    chartContainer.innerHTML = renderComparisonChart(results);
+    const closeBtn = document.getElementById('admin-compare-close');
+    if (closeBtn) closeBtn.onclick = () => chartContainer.classList.add('hidden');
+  } catch (e) {
+    chartContainer.innerHTML = '<div class="text-xs text-danger">erro ao carregar: ' + escapeHtml(e.message) + '</div>';
+  }
+}
+
+function renderComparisonChart(datasets) {
+  const W = 720, H = 280, padL = 36, padR = 36, padT = 22, padB = 40;
+  const innerW = W - padL - padR, innerH = H - padT - padB;
+
+  let tMin = Infinity, tMax = -Infinity;
+  let rMin = Infinity, rMax = -Infinity;
+
+  const validSets = [];
+  for (const set of datasets) {
+    const samples = [];
+    for (const cyc of set.data.cycles ?? []) for (const s of cyc.samples) samples.push(s);
+    if (samples.length === 0) continue;
+    
+    const setTMin = samples[0].ts;
+    const setTMax = samples[samples.length - 1].ts;
+    const setRMin = Math.min(...samples.map((s) => s.resets ?? 0));
+    const setRMax = Math.max(...samples.map((s) => s.resets ?? 0));
+    
+    tMin = Math.min(tMin, setTMin);
+    tMax = Math.max(tMax, setTMax);
+    rMin = Math.min(rMin, setRMin);
+    rMax = Math.max(rMax, setRMax);
+    
+    validSets.push({ ...set, samples });
+  }
+
+  if (validSets.length === 0) {
+    return '<div class="text-xs text-muted">sem dados para os personagens selecionados.</div>';
+  }
+
+  const span = Math.max(tMax - tMin, 1);
+  const rSpan = Math.max(rMax - rMin, 1);
+  const xOf = (t) => padL + ((t - tMin) / span) * innerW;
+  const yOf = (r) => padT + innerH - ((r - rMin) / rSpan) * innerH;
+
+  const colors = ["#f0a93b", "#3fb950", "#58a6ff", "#f25a5a", "#bc8cff", "#ff7b72", "#d2a8ff"];
+
+  let pathsHtml = "";
+  let legendHtml = "";
+
+  validSets.forEach((set, idx) => {
+    const color = colors[idx % colors.length];
+    let d = "";
+    set.samples.forEach((s, i) => {
+      const x = xOf(s.ts), y = yOf(s.resets ?? 0);
+      if (i === 0) d += "M" + x + "," + y;
+      else {
+        const px = xOf(set.samples[i - 1].ts), py = yOf(set.samples[i - 1].resets ?? 0);
+        d += " L" + x + "," + py + " L" + x + "," + y;
+      }
+    });
+    pathsHtml += '<path d="' + d + '" fill="none" stroke="' + color + '" stroke-width="2" stroke-opacity="0.8" />';
+    
+    legendHtml += '<div class="flex items-center gap-1.5"><div class="w-3 h-3 rounded-full" style="background:' + color + '"></div><span class="text-xs text-slate-300">' + escapeHtml(set.charName) + '</span></div>';
+  });
+
+  const tickCount = Math.min(rSpan + 1, 6);
+  const yTickLines = Array.from({length: tickCount}).map((_, i) => {
+    const v = Math.round(rMin + (rSpan * i) / Math.max(tickCount - 1, 1));
+    const y = yOf(v);
+    return '<line x1="' + padL + '" x2="' + (W - padR) + '" y1="' + y + '" y2="' + y + '" stroke="#252a36" stroke-dasharray="2,3" />' +
+           '<text x="' + (padL - 4) + '" y="' + (y + 3) + '" fill="#8a93a3" font-size="10" text-anchor="end">' + v + '</text>';
+  }).join("");
+
+  const fmt = (ts) => {
+    const d = new Date(ts * 1000);
+    return String(d.getDate()).padStart(2, '0') + "/" + String(d.getMonth() + 1).padStart(2, '0');
+  };
+  const xLabels = [tMin, tMin + span / 2, tMax].map((t, i) => {
+    const x = xOf(t);
+    const anchor = i === 0 ? "start" : i === 2 ? "end" : "middle";
+    return '<text x="' + x + '" y="' + (H - padB + 14) + '" fill="#8a93a3" font-size="10" text-anchor="' + anchor + '">' + fmt(t) + '</text>';
+  }).join("");
+
+  const header = '<div class="flex items-center justify-between mb-3"><h3 class="text-xs font-semibold uppercase text-goldsoft">Comparativo: Evolução (Resets)</h3><button id="admin-compare-close" class="text-muted hover:text-slate-100 text-lg leading-none">&times;</button></div>';
+  
+  return header +
+    '<svg viewBox="0 0 ' + W + ' ' + H + '" class="w-full h-auto bg-bg border border-border rounded-md">' +
+      yTickLines +
+      pathsHtml +
+      xLabels +
+    '</svg>' +
+    '<div class="flex flex-wrap gap-4 mt-3">' + legendHtml + '</div>';
+}
+
 $("admin-poll").onclick = async (e) => {
   const btn = e.currentTarget;
   try {
@@ -1365,6 +1580,7 @@ $("admin-poll").onclick = async (e) => {
     loadAdminChars();
   } catch (err) { toast(err.message, "err"); }
 };
+if ($("admin-compare")) $("admin-compare").onclick = compareSelectedChars;
 
 // ---- Boot ----
 if (!localStorage.getItem(CONSENT_KEY)) showConsent();
