@@ -69,7 +69,6 @@ export default {
         return json({ events: rs.results ?? [] });
       }
 
-
       // ---- everything below requires a session ----
       const sess = await readSession(env, cookie);
       if (!sess) return bad(401, "você não está autenticado");
