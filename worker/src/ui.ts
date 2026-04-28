@@ -1075,20 +1075,23 @@ function renderHistoryChart(data, charName) {
       '<text x="62" y="3" fill="#7aa2f7">level</text>' +
     '</g>';
 
-  // Left Y axis: resets ticks. Right Y axis: level ticks.
-  const tickCount = 5;
-  const rTicks = [], lTicks = [];
+  // Gridlines at uniform fractions of the plot height; cap at 5, fewer
+  // when the resets range is tiny (e.g. only 32→33). At each gridline the
+  // left axis shows the resets value and the right shows level. Stable
+  // even when both spans are small or huge.
+  const tickCount = Math.max(2, Math.min(5, rSpan + 1));
+  const yTickLines = [];
   for (let i = 0; i < tickCount; i++) {
-    rTicks.push(Math.round(rMin + (rSpan * i) / (tickCount - 1)));
-    lTicks.push(Math.round(lMin + (lSpan * i) / (tickCount - 1)));
+    const frac = i / (tickCount - 1);          // 0=bottom, 1=top
+    const y = padT + innerH * (1 - frac);
+    const rVal = Math.round(rMin + rSpan * frac);
+    const lVal = Math.round(lMin + lSpan * frac);
+    yTickLines.push(
+      '<line x1="' + padL + '" x2="' + (W - padR) + '" y1="' + y + '" y2="' + y + '" stroke="#252a36" stroke-dasharray="2,3" />' +
+      '<text x="' + (padL - 4) + '" y="' + (y + 3) + '" fill="#f0a93b" font-size="10" text-anchor="end">' + rVal + '</text>' +
+      '<text x="' + (W - padR + 4) + '" y="' + (y + 3) + '" fill="#7aa2f7" font-size="10" text-anchor="start">' + lVal + '</text>',
+    );
   }
-  const yTickLines = rTicks.map((v, i) => {
-    const y = yOf(v);
-    const lv = lTicks[i];
-    return '<line x1="' + padL + '" x2="' + (W - padR) + '" y1="' + y + '" y2="' + y + '" stroke="#252a36" stroke-dasharray="2,3" />' +
-           '<text x="' + (padL - 4) + '" y="' + (y + 3) + '" fill="#f0a93b" font-size="10" text-anchor="end">' + v + '</text>' +
-           '<text x="' + (W - padR + 4) + '" y="' + (y + 3) + '" fill="#7aa2f7" font-size="10" text-anchor="start">' + lv + '</text>';
-  }).join("");
 
   // X labels — start, mid, end timestamps
   const fmt = (ts) => {
@@ -1109,7 +1112,7 @@ function renderHistoryChart(data, charName) {
 
   return stats +
     '<svg viewBox="0 0 ' + W + ' ' + H + '" class="w-full h-auto bg-bg border border-border rounded-md">' +
-      yTickLines +
+      yTickLines.join("") +
       '<path d="' + lDp + '" fill="none" stroke="#7aa2f7" stroke-width="1.5" stroke-opacity="0.85" />' +
       '<path d="' + d + '" fill="none" stroke="#f0a93b" stroke-width="2" />' +
       dots +
