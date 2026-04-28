@@ -32,12 +32,13 @@ export async function scrapeMany(
   if (names.length === 0) return result;
 
   // Per-character timeout — small enough that the total pass stays bounded
-  // even with several characters. We run them sequentially; concurrent
-  // fetch() to the same origin would be polite-by-default but we keep it
-  // simple.
+  // even with many characters.
   const perCharTimeoutMs = Math.min(options.totalTimeoutMs ?? 25_000, 15_000);
+  // Concurrency cap — politeness toward mupatos and a hedge against
+  // blowing the per-invocation subrequest budget on huge passes.
+  const CONCURRENCY = 20;
 
-  for (const name of names) {
+  async function fetchOne(name: string): Promise<void> {
     const url = `${env.PROFILE_BASE_URL}/${encodeURIComponent(name)}`;
     try {
       const ctrl = new AbortController();
@@ -47,7 +48,7 @@ export async function scrapeMany(
       if (!res.ok) {
         console.log(`scrape ${name}: HTTP ${res.status}`);
         result.set(name, emptySnapshot(name));
-        continue;
+        return;
       }
       const html = await res.text();
       result.set(name, parseProfile(html, name));
@@ -55,6 +56,14 @@ export async function scrapeMany(
       console.log(`scrape ${name} failed: ${(err as Error).message}`);
       result.set(name, emptySnapshot(name));
     }
+  }
+
+  // Run in chunks of CONCURRENCY in parallel. With ~2s per fetch this
+  // gives us roughly: 100 chars / 20 concurrent = 5 batches × 2s = 10s
+  // wallclock for the whole pass (vs ~200s sequentially).
+  for (let i = 0; i < names.length; i += CONCURRENCY) {
+    const batch = names.slice(i, i + CONCURRENCY);
+    await Promise.all(batch.map(fetchOne));
   }
   return result;
 }

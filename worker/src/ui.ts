@@ -1657,13 +1657,16 @@ async function toggleUserCharHistory(charId, charName) {
   cell.innerHTML = '<span class="text-muted text-xs">carregando histórico…</span>';
   try {
     const data = await fetchJSON("/api/characters/" + charId + "/history?days=14");
+    const chart = renderHistoryChart(data, charName);
     const tabs = '<div class="flex gap-4 mb-3 border-b border-border text-sm">' +
       '<button class="pb-1 border-b-2 border-goldsoft text-goldsoft hist-tab-btn" data-target="uhist-evolucao-' + charId + '">Evolução</button>' +
       '<button class="pb-1 border-b-2 border-transparent text-muted hover:text-slate-300 hist-tab-btn" data-target="uhist-resets-' + charId + '">Resets/Dia</button>' +
       '</div>' +
-      '<div id="uhist-evolucao-' + charId + '" class="hist-tab-content">' + renderHistoryChart(data, charName) + '</div>' +
+      '<div id="uhist-evolucao-' + charId + '" class="hist-tab-content">' + chart.html + '</div>' +
       '<div id="uhist-resets-' + charId + '" class="hist-tab-content hidden">' + renderResetsPerDayChart(data, charName) + '</div>';
     cell.innerHTML = tabs;
+    cell.__drawBars = chart.drawBars;
+    cell.__lastLevel = chart.lastLevel;
     wireHistoryTooltips(cell);
 
     const btns = cell.querySelectorAll('.hist-tab-btn');
@@ -1692,13 +1695,16 @@ async function toggleAdminHistory(charId, charName) {
   cell.innerHTML = '<span class="text-muted text-xs">carregando histórico…</span>';
   try {
     const data = await fetchJSON("/api/admin/chars/" + charId + "/history?days=14");
+    const chart = renderHistoryChart(data, charName);
     const tabs = '<div class="flex gap-4 mb-3 border-b border-border text-sm">' +
       '<button class="pb-1 border-b-2 border-goldsoft text-goldsoft hist-tab-btn" data-target="hist-evolucao-' + charId + '">Evolução</button>' +
       '<button class="pb-1 border-b-2 border-transparent text-muted hover:text-slate-300 hist-tab-btn" data-target="hist-resets-' + charId + '">Resets/Dia</button>' +
       '</div>' +
-      '<div id="hist-evolucao-' + charId + '" class="hist-tab-content">' + renderHistoryChart(data, charName) + '</div>' +
+      '<div id="hist-evolucao-' + charId + '" class="hist-tab-content">' + chart.html + '</div>' +
       '<div id="hist-resets-' + charId + '" class="hist-tab-content hidden">' + renderResetsPerDayChart(data, charName) + '</div>';
     cell.innerHTML = tabs;
+    cell.__drawBars = chart.drawBars;
+    cell.__lastLevel = chart.lastLevel;
     wireHistoryTooltips(cell);
 
     const btns = cell.querySelectorAll('.hist-tab-btn');
@@ -1812,6 +1818,9 @@ function wireHistoryTooltips(cell) {
       b.setAttribute("stroke-width", on ? "1.8" : (b.getAttribute("stroke") === "#f0a93b" ? "1.6" : "1.2"));
     });
   };
+  // Track which level the bars are currently drawn for, so we don't
+  // thrash the SVG on every mousemove pixel.
+  let barsLevel = cell.__lastLevel ?? null;
   cell.addEventListener("mousemove", (e) => {
     const t = e.target;
     const isHit = t instanceof Element && (t.classList.contains("hist-dot") || t.classList.contains("cycle-bar"));
@@ -1824,12 +1833,27 @@ function wireHistoryTooltips(cell) {
     tip.style.top = (e.clientY - 28) + "px";
     tip.style.left = (e.clientX + 12) + "px";
     tip.classList.remove("hidden");
-    // Linked hover: any cycle-bar hovered → all of them highlight at once.
     setBarsHighlight(t.classList.contains("cycle-bar"));
+
+    // Hover-redraw: when the cursor's on a dot tied to a level value,
+    // redraw the cycle bars at THAT level so the user can compare how
+    // long every cycle took to reach the level they're pointing at.
+    if (t.classList.contains("hist-dot") && t.dataset.level && cell.__drawBars) {
+      const lv = Number(t.dataset.level);
+      if (lv !== barsLevel) {
+        cell.__drawBars(cell, lv);
+        barsLevel = lv;
+      }
+    }
   });
   cell.addEventListener("mouseleave", () => {
     tip.classList.add("hidden");
     setBarsHighlight(false);
+    // Snap bars back to the latest level.
+    if (cell.__drawBars && cell.__lastLevel != null && barsLevel !== cell.__lastLevel) {
+      cell.__drawBars(cell, cell.__lastLevel);
+      barsLevel = cell.__lastLevel;
+    }
   });
 }
 
@@ -1840,7 +1864,11 @@ function renderHistoryChart(data, charName) {
   const samples = [];
   for (const cyc of data.cycles ?? []) for (const s of cyc.samples) samples.push(s);
   if (samples.length === 0) {
-    return '<div class="text-xs text-muted">sem snapshots ainda — espera alguns minutos pro cron registrar mudanças.</div>';
+    return {
+      html: '<div class="text-xs text-muted">sem snapshots ainda — espera alguns minutos pro cron registrar mudanças.</div>',
+      drawBars: () => {},
+      lastLevel: null,
+    };
   }
 
   const tMin = samples[0].ts;
@@ -1897,8 +1925,9 @@ function renderHistoryChart(data, charName) {
       (s.map ? " · " + s.map : "") +
       (s.status ? " · " + s.status : "");
     const safeTip = escapeHtml(tip);
-    return '<circle cx="' + x + '" cy="' + yR + '" r="5" fill="#f0a93b" stroke="#0b0d12" stroke-width="1.2" class="hist-dot cursor-pointer" data-tip="' + safeTip + '"></circle>' +
-           '<circle cx="' + x + '" cy="' + yL + '" r="4" fill="#7aa2f7" stroke="#0b0d12" stroke-width="1.2" class="hist-dot cursor-pointer" data-tip="' + safeTip + '"></circle>';
+    const lvAttr = s.level != null ? ' data-level="' + s.level + '"' : "";
+    return '<circle cx="' + x + '" cy="' + yR + '" r="5" fill="#f0a93b" stroke="#0b0d12" stroke-width="1.2" class="hist-dot cursor-pointer" data-tip="' + safeTip + '"' + lvAttr + '></circle>' +
+           '<circle cx="' + x + '" cy="' + yL + '" r="4" fill="#7aa2f7" stroke="#0b0d12" stroke-width="1.2" class="hist-dot cursor-pointer" data-tip="' + safeTip + '"' + lvAttr + '></circle>';
   }).join("");
 
   // "Cycle benchmark" markers — one for the current cycle, one for the
@@ -1928,12 +1957,12 @@ function renderHistoryChart(data, charName) {
     const h = Math.floor(m / 60), r = m % 60;
     return h + "h" + (r ? " " + r + "min" : "");
   }
-  function bar(stats, resetCount, isCurrent) {
+  function bar(stats, resetCount, isCurrent, targetLevel) {
     if (!stats) return "";
     const x = xOf(stats.hitTs);
     const tip =
       "R" + resetCount + (isCurrent ? " (atual)" : "") +
-      " · lv " + last.level + " em " +
+      " · lv " + targetLevel + " em " +
       escapeHtml(fmtDur(stats.duration)) +
       " (desde lv " + stats.fromLevel + ")";
     const color = isCurrent ? "#f0a93b" : "#8a93a3";
@@ -1946,23 +1975,29 @@ function renderHistoryChart(data, charName) {
     const visible = '<line x1="' + x + '" x2="' + x + '" y1="' + padT + '" y2="' + (H - padB) + '" stroke="' + color + '" stroke-width="' + w + '" stroke-dasharray="4,3" stroke-opacity="' + opacity + '" class="cycle-bar pointer-events-none"></line>';
     return hit + visible;
   }
-  let markers = "";
-  let inlineLabels = "";
-  if (last.resets != null && last.level != null) {
-    // One bar per distinct reset cycle visible in the window.
+  // Bar + label markup is now computed lazily so we can re-render on hover
+  // for whatever level the user is pointing at.
+  function buildBarsAndLabels(targetLevel) {
+    if (last == null || last.resets == null || targetLevel == null) {
+      return { bars: "", labels: "" };
+    }
     const distinctResets = [...new Set(samples.map((s) => s.resets).filter((r) => r != null))].sort((a, b) => a - b);
+    let bars = "", labels = "";
     for (const r of distinctResets) {
-      const stats = cycleStats(r, last.level);
+      const stats = cycleStats(r, targetLevel);
       if (!stats) continue;
       const isCurrent = r === last.resets;
-      markers += bar(stats, r, isCurrent);
-      // Tiny duration label above each bar — gold for current cycle, muted
-      // for past ones. Lets users scan-compare without hovering.
+      bars += bar(stats, r, isCurrent, targetLevel);
       const x = xOf(stats.hitTs);
       const fill = isCurrent ? "#f7c779" : "#8a93a3";
-      inlineLabels += '<text x="' + (x + 3) + '" y="' + (padT + 10) + '" fill="' + fill + '" font-size="9">' + fmtDur(stats.duration) + '</text>';
+      labels += '<text x="' + (x + 3) + '" y="' + (padT + 10) + '" fill="' + fill + '" font-size="9">' + fmtDur(stats.duration) + '</text>';
     }
+    return { bars, labels };
   }
+  // Initial render uses last.level so the chart looks the same on load.
+  const initial = buildBarsAndLabels(last?.level);
+  const markers = initial.bars;
+  const inlineLabels = initial.labels;
 
   // Tiny legend in the top-right of the chart area.
   const legend =
@@ -2012,17 +2047,28 @@ function renderHistoryChart(data, charName) {
       data.count + ' snapshots · resets ' + rMin + ' → <b class="text-goldsoft">' + rMax + '</b>' +
     '</div>';
 
-  return stats +
+  const html = stats +
     '<svg viewBox="0 0 ' + W + ' ' + H + '" class="w-full h-auto bg-bg border border-border rounded-md">' +
       yTickLines.join("") +
-      markers +
+      '<g class="bars-layer">' + markers + '</g>' +
       '<path d="' + lDp + '" fill="none" stroke="#7aa2f7" stroke-width="1.5" stroke-opacity="0.85" />' +
       '<path d="' + d + '" fill="none" stroke="#f0a93b" stroke-width="2" />' +
       dots +
-      inlineLabels +
+      '<g class="labels-layer">' + inlineLabels + '</g>' +
       xLabels +
       legend +
     '</svg>';
+  // Closure that the hover handler can call to repaint bars + labels at
+  // whatever level the user points at. The container element it targets
+  // must be the one where we set innerHTML = html.
+  const drawBars = (cell, targetLevel) => {
+    const { bars, labels } = buildBarsAndLabels(targetLevel);
+    const barsEl = cell.querySelector(".bars-layer");
+    const labelsEl = cell.querySelector(".labels-layer");
+    if (barsEl) barsEl.innerHTML = bars;
+    if (labelsEl) labelsEl.innerHTML = labels;
+  };
+  return { html, drawBars, lastLevel: last?.level ?? null };
 }
 
 async function toggleAdminSubs(charId) {

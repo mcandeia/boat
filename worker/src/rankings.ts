@@ -64,13 +64,13 @@ export function classCodeFor(className: string | null): ClassCode | null {
 }
 
 export async function fetchRankings(): Promise<RankingMap> {
-  const overall = await fetchOne(null);
+  // 6 small page fetches — kick them off in parallel so the cron tick
+  // doesn't burn 12+ s waiting sequentially.
+  const codes = [null as ClassCode | null, ...CLASS_CODES];
+  const lists = await Promise.all(codes.map((c) => fetchOne(c)));
   const byClass = {} as Record<ClassCode, RankEntry[]>;
-  // Sequential — politeness; 6 small fetches total.
-  for (const code of CLASS_CODES) {
-    byClass[code] = await fetchOne(code);
-  }
-  return { overall, byClass };
+  for (let i = 0; i < CLASS_CODES.length; i++) byClass[CLASS_CODES[i]] = lists[i + 1];
+  return { overall: lists[0], byClass };
 }
 
 async function fetchOne(code: ClassCode | null): Promise<RankEntry[]> {
