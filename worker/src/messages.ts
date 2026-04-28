@@ -54,9 +54,20 @@ export function formatAlert(
   const thr = escHtml(sub.threshold ?? "");
   const map = escHtml(snap.map ?? "");
   if (sub.custom_message) {
-    return escHtml(sub.custom_message)
-      .replace(/\{username\}/g, n)
-      .replace(/\{lv\}/g, snap.level != null ? String(snap.level) : "?");
+    const dict: Record<string, string> = {
+      username: n,
+      char: n,
+      lv: snap.level != null ? String(snap.level) : "?",
+      level: snap.level != null ? String(snap.level) : "?",
+      resets: snap.resets != null ? String(snap.resets) : "?",
+      map: escHtml(snap.mapName ?? snap.map ?? ""),
+      status: escHtml(snap.status ?? ""),
+      threshold: thr,
+    };
+    if (sub.event_type === "coords_in") {
+      dict.coords = thr;
+    }
+    return applyTemplate(sub.custom_message, dict);
   }
   switch (sub.event_type) {
     case "level_gte":
@@ -74,5 +85,107 @@ export function formatAlert(
     case "level_stale":
       return `⏸️ <b>${n}</b> sem subir level há <b>${thr} min</b> (lv ${snap.level ?? "?"}). Caiu? AFK?`;
   }
+}
+
+function applyTemplate(tpl: string, dict: Record<string, string>): string {
+  // Escape the template itself (so users can't inject HTML), then
+  // substitute whitelisted tokens.
+  let out = escHtml(tpl);
+  for (const [k, v] of Object.entries(dict)) {
+    const re = new RegExp("\\\\{" + k + "\\\\}", "gi");
+    out = out.replace(re, v);
+  }
+  return out;
+}
+
+type EntryReq = {
+  itemLabel: string;         // e.g. "Armor of Guardsman"
+  itemTiered: boolean;       // +1..+7 by level range
+  npc?: { name: string; map: string; coords?: string };
+};
+
+function tierForLevel(level: number | null): { tier: number; min: number; max: number } | null {
+  if (level == null || !Number.isFinite(level)) return null;
+  // Classic MU ticket ranges. Conservative defaults.
+  const ranges = [
+    { tier: 1, min: 15, max: 49 },
+    { tier: 2, min: 50, max: 119 },
+    { tier: 3, min: 120, max: 179 },
+    { tier: 4, min: 180, max: 239 },
+    { tier: 5, min: 240, max: 299 },
+    { tier: 6, min: 300, max: 349 },
+    { tier: 7, min: 350, max: 9999 },
+  ];
+  for (const r of ranges) if (level >= r.min && level <= r.max) return r;
+  return null;
+}
+
+function serverEventEntryReq(eventNameRaw: string): EntryReq | null {
+  const n = (eventNameRaw || "").toLowerCase();
+  if (!n) return null;
+  if (n.includes("chaos castle")) {
+    return { itemLabel: "Armor of Guardsman", itemTiered: true, npc: { name: "Chaos Goblin", map: "Noria", coords: "168,96" } };
+  }
+  if (n.includes("blood castle")) {
+    return { itemLabel: "Blood Bone", itemTiered: true, npc: { name: "Archangel Messenger", map: "Devias", coords: "198,47" } };
+  }
+  if (n.includes("devil square")) {
+    return { itemLabel: "Devil's Invitation", itemTiered: true, npc: { name: "Charon", map: "Noria", coords: "167,90" } };
+  }
+  return null;
+}
+
+export function formatServerEventAlert(opts: {
+  name: string;
+  room: string;
+  leadMinutes: number;
+  // Best-effort: user's highest character level (so we can suggest the right ticket).
+  userMaxLevel?: number | null;
+  customMessage?: string | null;
+}): string {
+  const name = escHtml(opts.name);
+  const room = escHtml((opts.room || "").toUpperCase());
+  const lead = Number(opts.leadMinutes) || 0;
+
+  const req = serverEventEntryReq(opts.name);
+  const tier = tierForLevel(opts.userMaxLevel ?? null);
+
+  let extra = "";
+  let itemLine = "";
+  let npcLine = "";
+  if (req) {
+    if (req.itemTiered) {
+      if (tier) {
+        itemLine = `🎟️ Entrada: <b>${escHtml(req.itemLabel)} +${tier.tier}</b> (lvl ${tier.min}–${tier.max}).`;
+      } else {
+        itemLine = `🎟️ Entrada: <b>${escHtml(req.itemLabel)} +N</b> (depende do level; +1…+7).`;
+      }
+    } else {
+      itemLine = `🎟️ Entrada: <b>${escHtml(req.itemLabel)}</b>.`;
+    }
+    if (req.npc) {
+      const loc = `${req.npc.map}${req.npc.coords ? " (" + req.npc.coords + ")" : ""}`;
+      npcLine = `📍 NPC: <b>${escHtml(req.npc.name)}</b> — ${escHtml(loc)}.`;
+    }
+  }
+  if (itemLine) extra += "\n" + itemLine;
+  if (npcLine) extra += "\n" + npcLine;
+
+  if (opts.customMessage) {
+    const dict: Record<string, string> = {
+      event: name,
+      room,
+      lead: String(lead),
+      leadMinutes: String(lead),
+      threshold: escHtml(opts.name + "|" + (opts.room || "").toLowerCase() + "|" + lead),
+      item: itemLine ? itemLine.replace(/^🎟️ Entrada:\s*/i, "").replace(/\.$/, "") : "",
+      npc: req?.npc?.name ? escHtml(req.npc.name) : "",
+      npc_map: req?.npc?.map ? escHtml(req.npc.map) : "",
+      npc_coords: req?.npc?.coords ? escHtml(req.npc.coords) : "",
+    };
+    return applyTemplate(opts.customMessage, dict);
+  }
+
+  return `📣 <b>${name}</b> (${room}) começa em <b>${lead} min</b>.${extra}`;
 }
 
