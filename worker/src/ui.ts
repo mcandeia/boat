@@ -106,7 +106,7 @@ export const INDEX_HTML = /* html */ `<!doctype html>
   </div>
 </section>
 
-<main class="max-w-3xl mx-auto px-4 py-10">
+<main id="app" class="max-w-3xl mx-auto px-4 py-10">
   <header class="mb-8 flex items-end justify-between gap-4 flex-wrap">
     <div>
       <h1 class="brand text-2xl md:text-3xl text-goldsoft">Painel do jogador Mu Patos</h1>
@@ -167,154 +167,178 @@ export const INDEX_HTML = /* html */ `<!doctype html>
   <!-- ============================================================ -->
   <!-- DASHBOARD                                                    -->
   <!-- ============================================================ -->
-  <section id="dash" class="hidden space-y-5">
+  <section id="dash" class="hidden">
+    <div class="grid grid-cols-1 lg:grid-cols-[220px_1fr] gap-5 items-start">
+      <!-- Side menu (Dashboard/Admin) -->
+      <nav class="bg-panel border border-border rounded-xl p-3 lg:sticky lg:top-6">
+        <div class="text-[11px] uppercase tracking-widest text-muted px-2 pt-1 pb-2">Menu</div>
+        <div class="flex lg:flex-col gap-2">
+          <button id="nav-dashboard" class="flex-1 lg:flex-none px-3 py-2 rounded-md border border-border text-sm hover:bg-bg transition text-left">Dashboard</button>
+          <button id="nav-admin" class="hidden flex-1 lg:flex-none px-3 py-2 rounded-md border border-gold/40 text-goldsoft hover:bg-gold/10 transition text-left">Admin</button>
+        </div>
+        <div id="nav-hint" class="hidden mt-3 text-[11px] text-muted px-2 leading-relaxed">
+          Dica: use o menu para alternar entre o painel normal e o admin.
+        </div>
+      </nav>
 
-    <div class="bg-panel border border-border rounded-xl p-5">
-      <h2 class="text-xs uppercase tracking-widest text-muted mb-3">Conta</h2>
-      <div class="flex items-center justify-between gap-3 flex-wrap">
-        <div class="text-sm">Conectado como <code id="me-phone" class="bg-bg px-2 py-0.5 rounded text-goldsoft tabular-nums"></code></div>
-        <button id="logout" class="px-3 py-1.5 rounded-md border border-border text-sm hover:bg-bg transition">Sair</button>
-      </div>
-    </div>
-
-    <div class="bg-panel border border-border rounded-xl p-5">
-      <details>
-        <summary class="cursor-pointer flex items-center justify-between gap-3">
-          <span class="flex items-center gap-2">
-            <span class="text-gold">💡</span>
-            <span class="text-sm font-semibold text-goldsoft">Receba os alertas com som diferente (recomendado)</span>
-          </span>
-          <span class="text-xs text-muted">expandir</span>
-        </summary>
-        <div class="mt-4 pt-4 border-t border-border space-y-4 text-sm leading-relaxed text-slate-300">
-          <p>O Telegram permite definir um <b class="text-goldsoft">som de notificação por chat</b> e prioridade alta. Configure no chat com o bot pra saber na hora que é um alerta de level.</p>
-
-          <div>
-            <div class="font-semibold text-goldsoft mb-1">📱 Android (Telegram)</div>
-            <ol class="list-decimal list-inside space-y-1 text-slate-300">
-              <li>Abra o chat do bot no Telegram.</li>
-              <li>Toque no nome do bot no topo → <b>Notificações</b>.</li>
-              <li>Em <b>Som</b>, escolha um som exclusivo (pode importar um MP3).</li>
-              <li>Em <b>Importância</b>, marque <b>Alta</b> ou <b>Urgente</b> — alertas urgentes ignoram o modo silencioso.</li>
-              <li>Ligue a <b>Vibração</b> em <i>Longa</i>.</li>
-              <li>(Opcional) Fixe o chat no topo da lista (ícone de pino) pra encontrar fácil.</li>
-            </ol>
-          </div>
-
-          <div>
-            <div class="font-semibold text-goldsoft mb-1">🍏 iPhone (Telegram)</div>
-            <ol class="list-decimal list-inside space-y-1 text-slate-300">
-              <li>Abra o chat do bot.</li>
-              <li>Toque no nome / avatar do bot no topo da conversa pra abrir o perfil.</li>
-              <li>Toque em <b>Notificações</b>.</li>
-              <li>Em <b>Som</b>, escolha um toque diferente do padrão (pode ser um dos da lista do Telegram ou um som que você adicionou no iPhone).</li>
-              <li>(Opcional) Em <b>Tom de Aviso</b>, ative pra repetir caso você ignore.</li>
-              <li>(Opcional) Volte ao chat, deslize pra direita na lista de conversas e toque <b>Fixar</b> — fica sempre no topo.</li>
-              <li>Em <b>Ajustes do iPhone</b> → <b>Notificações</b> → <b>Telegram</b>: confirme que <b>Permitir Notificações</b>, <b>Sons</b> e <b>Pré-visualizações</b> estão ligados.</li>
-            </ol>
+      <!-- Main content -->
+      <div class="min-w-0">
+      <!-- Normal user dashboard -->
+      <div id="dash-main" class="space-y-5">
+        <div class="bg-panel border border-border rounded-xl p-5">
+          <h2 class="text-xs uppercase tracking-widest text-muted mb-3">Conta</h2>
+          <div class="flex items-center justify-between gap-3 flex-wrap">
+            <div class="text-sm">Conectado como <code id="me-phone" class="bg-bg px-2 py-0.5 rounded text-goldsoft tabular-nums"></code></div>
+            <button id="logout" class="px-3 py-1.5 rounded-md border border-border text-sm hover:bg-bg transition">Sair</button>
           </div>
         </div>
-      </details>
-    </div>
 
-    <div class="bg-panel border border-border rounded-xl p-5">
-      <h2 class="text-xs uppercase tracking-widest text-muted mb-3">Personagens</h2>
-      <ul id="char-list" class="divide-y divide-border"></ul>
-      <div class="mt-4 pt-4 border-t border-border">
-        <label class="text-xs text-muted block mb-1.5" for="new-char">Cadastrar um personagem</label>
-        <div class="flex gap-2 flex-wrap">
-          <input id="new-char" placeholder="nome do personagem (ex.: daddy)"
-            class="flex-1 min-w-[180px] h-10 bg-bg border border-border rounded-md px-3 outline-none focus:border-gold/60" />
-          <label class="inline-flex items-center gap-2 h-10 px-3 border border-border rounded-md text-sm">
-            <input id="new-char-gm" type="checkbox" class="accent-gold" /> GM
-          </label>
-          <button id="add-char" class="gold-btn block px-4 rounded-md bg-gold text-bg font-semibold text-center border border-transparent hover:brightness-110 transition">Adicionar</button>
-        </div>
-      </div>
-    </div>
+        <div class="bg-panel border border-border rounded-xl p-5">
+          <details>
+            <summary class="cursor-pointer flex items-center justify-between gap-3">
+              <span class="flex items-center gap-2">
+                <span class="text-gold">💡</span>
+                <span class="text-sm font-semibold text-goldsoft">Receba os alertas com som diferente (recomendado)</span>
+              </span>
+              <span class="text-xs text-muted">expandir</span>
+            </summary>
+            <div class="mt-4 pt-4 border-t border-border space-y-4 text-sm leading-relaxed text-slate-300">
+              <p>O Telegram permite definir um <b class="text-goldsoft">som de notificação por chat</b> e prioridade alta. Configure no chat com o bot pra saber na hora que é um alerta de level.</p>
 
-    <div id="admin-card" class="hidden bg-panel border border-gold/30 rounded-xl p-5">
-      <div class="flex items-center justify-between gap-3 mb-3">
-        <h2 class="text-xs uppercase tracking-widest text-gold">Admin</h2>
-        <div class="flex gap-2">
-          <button id="admin-compare" class="px-3 py-1.5 rounded-md border border-gold/40 text-goldsoft hover:bg-gold/10 transition text-xs">📈 Comparar</button>
-          <button id="admin-poll" class="gold-btn block px-3 rounded-md bg-gold text-bg font-semibold text-center border border-transparent hover:brightness-110 transition text-xs">Rodar cron agora</button>
-        </div>
-      </div>
-      <div id="admin-comparison-chart" class="hidden mb-6 bg-bg/50 p-4 rounded-xl border border-border"></div>
-      <div class="overflow-x-auto">
-        <table class="w-full text-xs">
-          <thead class="text-muted text-left border-b border-border">
-            <tr>
-              <th class="py-1.5 pr-2 w-6"></th>
-              <th class="py-1.5 pr-2">#</th>
-              <th class="py-1.5 pr-2">Char</th>
-              <th class="py-1.5 pr-2">Dono</th>
-              <th class="py-1.5 pr-2">Classe</th>
-              <th class="py-1.5 pr-2">Lv</th>
-              <th class="py-1.5 pr-2">Status</th>
-              <th class="py-1.5 pr-2">Subs</th>
-              <th class="py-1.5 pr-2">Ações</th>
-            </tr>
-          </thead>
-          <tbody id="admin-chars"></tbody>
-        </table>
-      </div>
-      <div id="admin-msg" class="text-[11px] text-muted mt-2"></div>
+              <div>
+                <div class="font-semibold text-goldsoft mb-1">📱 Android (Telegram)</div>
+                <ol class="list-decimal list-inside space-y-1 text-slate-300">
+                  <li>Abra o chat do bot no Telegram.</li>
+                  <li>Toque no nome do bot no topo → <b>Notificações</b>.</li>
+                  <li>Em <b>Som</b>, escolha um som exclusivo (pode importar um MP3).</li>
+                  <li>Em <b>Importância</b>, marque <b>Alta</b> ou <b>Urgente</b> — alertas urgentes ignoram o modo silencioso.</li>
+                  <li>Ligue a <b>Vibração</b> em <i>Longa</i>.</li>
+                  <li>(Opcional) Fixe o chat no topo da lista (ícone de pino) pra encontrar fácil.</li>
+                </ol>
+              </div>
 
-      <div class="mt-5 pt-4 border-t border-border">
-        <div class="flex items-center justify-between gap-3 mb-2">
-          <h3 class="text-xs uppercase tracking-widest text-gold">Eventos do servidor</h3>
-          <span class="text-[11px] text-muted">scraped de mupatos.net (1×/h). Marca <b>Manual</b> pra travar o horário.</span>
+              <div>
+                <div class="font-semibold text-goldsoft mb-1">🍏 iPhone (Telegram)</div>
+                <ol class="list-decimal list-inside space-y-1 text-slate-300">
+                  <li>Abra o chat do bot.</li>
+                  <li>Toque no nome / avatar do bot no topo da conversa pra abrir o perfil.</li>
+                  <li>Toque em <b>Notificações</b>.</li>
+                  <li>Em <b>Som</b>, escolha um toque diferente do padrão (pode ser um dos da lista do Telegram ou um som que você adicionou no iPhone).</li>
+                  <li>(Opcional) Em <b>Tom de Aviso</b>, ative pra repetir caso você ignore.</li>
+                  <li>(Opcional) Volte ao chat, deslize pra direita na lista de conversas e toque <b>Fixar</b> — fica sempre no topo.</li>
+                  <li>Em <b>Ajustes do iPhone</b> → <b>Notificações</b> → <b>Telegram</b>: confirme que <b>Permitir Notificações</b>, <b>Sons</b> e <b>Pré-visualizações</b> estão ligados.</li>
+                </ol>
+              </div>
+            </div>
+          </details>
         </div>
-        <div class="overflow-x-auto">
-          <table class="w-full text-xs">
-            <thead class="text-muted text-left border-b border-border">
-              <tr>
-                <th class="py-1.5 pr-2">Cat</th>
-                <th class="py-1.5 pr-2">Evento</th>
-                <th class="py-1.5 pr-2">Sala</th>
-                <th class="py-1.5 pr-2">Horários (HH:MM,HH:MM,...)</th>
-                <th class="py-1.5 pr-2">Manual</th>
-                <th class="py-1.5 pr-2"></th>
-              </tr>
-            </thead>
-            <tbody id="admin-events"></tbody>
-          </table>
-        </div>
-      </div>
-    </div>
 
-    <div class="bg-panel border border-border rounded-xl p-5">
-      <h2 class="text-xs uppercase tracking-widest text-muted mb-3">Alertas</h2>
-      <ul id="sub-list" class="divide-y divide-border"></ul>
-      <div class="mt-4 pt-4 border-t border-border space-y-3">
-        <label class="text-xs text-muted block">Adicionar um alerta</label>
-        <div class="grid gap-2 sm:grid-cols-2">
-          <div>
-            <label class="text-[11px] text-muted block mb-1">Personagem</label>
-            <select id="sub-char" class="w-full bg-bg border border-border rounded-md px-3 outline-none focus:border-gold/60"></select>
+        <div class="bg-panel border border-border rounded-xl p-5">
+          <div class="flex items-center justify-between gap-3 mb-3 flex-wrap">
+            <h2 class="text-xs uppercase tracking-widest text-muted">Personagens</h2>
+            <button id="user-compare" class="hidden px-3 py-1.5 rounded-md border border-border text-xs hover:bg-bg transition">📊 Comparar</button>
           </div>
-          <div>
-            <label class="text-[11px] text-muted block mb-1">Tipo de alerta</label>
-            <select id="sub-type" class="w-full bg-bg border border-border rounded-md px-3 outline-none focus:border-gold/60">
-              <option value="level_gte">Nível atingido (≥)</option>
-              <option value="map_eq">Entrou no mapa</option>
-              <option value="status_eq">Online / offline</option>
-              <option value="gm_online">GM online (este personagem)</option>
-              <option value="level_stale">Sem subir level (idle)</option>
-              <option value="server_event">Evento do servidor (Chaos Castle, invasões, etc.)</option>
-            </select>
+          <div id="user-comparison-chart" class="hidden mb-4 bg-bg/50 p-4 rounded-xl border border-border"></div>
+          <ul id="char-list" class="divide-y divide-border"></ul>
+          <div class="mt-4 pt-4 border-t border-border">
+            <label class="text-xs text-muted block mb-1.5" for="new-char">Cadastrar um personagem</label>
+            <div class="flex gap-2 flex-wrap">
+              <input id="new-char" placeholder="nome do personagem (ex.: daddy)"
+                class="flex-1 min-w-[180px] h-10 bg-bg border border-border rounded-md px-3 outline-none focus:border-gold/60" />
+              <label class="inline-flex items-center gap-2 h-10 px-3 border border-border rounded-md text-sm">
+                <input id="new-char-gm" type="checkbox" class="accent-gold" /> GM
+              </label>
+              <button id="add-char" class="gold-btn block px-4 rounded-md bg-gold text-bg font-semibold text-center border border-transparent hover:brightness-110 transition">Adicionar</button>
+            </div>
           </div>
         </div>
-        <div id="sub-fields"></div>
-        <div class="mt-3 mb-4">
-          <label class="text-[11px] text-muted block mb-1">Mensagem customizada (opcional)</label>
-          <input id="sub-custom-message" type="text" maxlength="200" placeholder="ex.: {username} upou para o nivel {lv}!" class="h-10 w-full bg-bg border border-border rounded-md px-3 outline-none focus:border-gold/60" />
-          <div class="text-[11px] text-muted mt-1">Use <span class="text-goldsoft">{username}</span> e <span class="text-goldsoft">{lv}</span> para inserir dados.</div>
+
+        <div class="bg-panel border border-border rounded-xl p-5">
+          <h2 class="text-xs uppercase tracking-widest text-muted mb-3">Alertas</h2>
+          <ul id="sub-list" class="divide-y divide-border"></ul>
+          <div class="mt-4 pt-4 border-t border-border space-y-3">
+            <label class="text-xs text-muted block">Adicionar um alerta</label>
+            <div class="grid gap-2 sm:grid-cols-2">
+              <div>
+                <label class="text-[11px] text-muted block mb-1">Personagem</label>
+                <select id="sub-char" class="w-full bg-bg border border-border rounded-md px-3 outline-none focus:border-gold/60"></select>
+              </div>
+              <div>
+                <label class="text-[11px] text-muted block mb-1">Tipo de alerta</label>
+                <select id="sub-type" class="w-full bg-bg border border-border rounded-md px-3 outline-none focus:border-gold/60">
+                  <option value="level_gte">Nível atingido (≥)</option>
+                  <option value="map_eq">Entrou no mapa</option>
+                  <option value="status_eq">Online / offline</option>
+                  <option value="gm_online">GM online (este personagem)</option>
+                  <option value="level_stale">Sem subir level (idle)</option>
+                  <option value="server_event">Evento do servidor (Chaos Castle, invasões, etc.)</option>
+                </select>
+              </div>
+            </div>
+            <div id="sub-fields"></div>
+            <div class="mt-3 mb-4">
+              <label class="text-[11px] text-muted block mb-1">Mensagem customizada (opcional)</label>
+              <input id="sub-custom-message" type="text" maxlength="200" placeholder="ex.: {username} upou para o nivel {lv}!" class="h-10 w-full bg-bg border border-border rounded-md px-3 outline-none focus:border-gold/60" />
+              <div class="text-[11px] text-muted mt-1">Use <span class="text-goldsoft">{username}</span> e <span class="text-goldsoft">{lv}</span> para inserir dados.</div>
+            </div>
+            <button id="add-sub" class="gold-btn block px-5 rounded-md bg-gold text-bg font-semibold text-center border border-transparent hover:brightness-110 transition">Adicionar alerta</button>
+          </div>
         </div>
-        <button id="add-sub" class="gold-btn block px-5 rounded-md bg-gold text-bg font-semibold text-center border border-transparent hover:brightness-110 transition">Adicionar alerta</button>
       </div>
+
+      <!-- Admin panel (only visible for admins + when tab selected) -->
+      <div id="admin-card" class="hidden bg-panel border border-gold/30 rounded-xl p-5">
+          <div class="flex items-center justify-between gap-3 mb-3">
+            <h2 class="text-xs uppercase tracking-widest text-gold">Admin</h2>
+            <div class="flex gap-2">
+              <button id="admin-compare" class="px-3 py-1.5 rounded-md border border-gold/40 text-goldsoft hover:bg-gold/10 transition text-xs">📈 Comparar</button>
+              <button id="admin-poll" class="gold-btn block px-3 rounded-md bg-gold text-bg font-semibold text-center border border-transparent hover:brightness-110 transition text-xs">Rodar cron agora</button>
+            </div>
+          </div>
+          <div id="admin-comparison-chart" class="hidden mb-6 bg-bg/50 p-4 rounded-xl border border-border"></div>
+          <div class="overflow-x-auto">
+            <table class="w-full text-xs">
+              <thead class="text-muted text-left border-b border-border">
+                <tr>
+                  <th class="py-1.5 pr-2 w-6"></th>
+                  <th class="py-1.5 pr-2">#</th>
+                  <th class="py-1.5 pr-2">Char</th>
+                  <th class="py-1.5 pr-2">Dono</th>
+                  <th class="py-1.5 pr-2">Classe</th>
+                  <th class="py-1.5 pr-2">Lv</th>
+                  <th class="py-1.5 pr-2">Status</th>
+                  <th class="py-1.5 pr-2">Subs</th>
+                  <th class="py-1.5 pr-2">Ações</th>
+                </tr>
+              </thead>
+              <tbody id="admin-chars"></tbody>
+            </table>
+          </div>
+          <div id="admin-msg" class="text-[11px] text-muted mt-2"></div>
+
+          <div class="mt-5 pt-4 border-t border-border">
+            <div class="flex items-center justify-between gap-3 mb-2">
+              <h3 class="text-xs uppercase tracking-widest text-gold">Eventos do servidor</h3>
+              <span class="text-[11px] text-muted">scraped de mupatos.net (1×/h). Marca <b>Manual</b> pra travar o horário.</span>
+            </div>
+            <div class="overflow-x-auto">
+              <table class="w-full text-xs">
+                <thead class="text-muted text-left border-b border-border">
+                  <tr>
+                    <th class="py-1.5 pr-2">Cat</th>
+                    <th class="py-1.5 pr-2">Evento</th>
+                    <th class="py-1.5 pr-2">Sala</th>
+                    <th class="py-1.5 pr-2">Horários (HH:MM,HH:MM,...)</th>
+                    <th class="py-1.5 pr-2">Manual</th>
+                    <th class="py-1.5 pr-2"></th>
+                  </tr>
+                </thead>
+                <tbody id="admin-events"></tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      </div> <!-- /main content -->
     </div>
   </section>
 </main>
@@ -413,6 +437,7 @@ async function withSpinner(btn, fn) {
 
 // ---- App state ----
 let state = { user: null, characters: [], subscriptions: [] };
+let userCompareMode = false;
 
 async function refresh() {
   try {
@@ -422,7 +447,15 @@ async function refresh() {
   } catch {
     $("login").classList.remove("hidden");
     $("dash").classList.add("hidden");
+    setAppAdminLayout(false);
   }
+}
+
+function setAppAdminLayout(isAdmin) {
+  const app = $("app");
+  if (!app) return;
+  app.classList.remove("max-w-3xl", "max-w-6xl");
+  app.classList.add(isAdmin ? "max-w-6xl" : "max-w-3xl");
 }
 
 function relativeTime(unixSeconds) {
@@ -445,11 +478,55 @@ function formatDuration(seconds) {
 function escapeHtml(s) {
   return String(s).replace(/[&<>]/g, (c) => c === "&" ? "&amp;" : c === "<" ? "&lt;" : "&gt;");
 }
+
+// ---- Class symbols (MU) ----
+// Keep it resilient to naming variants coming from the scrape.
+const CLASS_SYMBOLS = [
+  { re: /\b(dark\s*wizard|dw|wizard|mago)\b/i, sym: "🧙", label: "Dark Wizard" },
+  { re: /\b(dark\s*knight|dk|knight|guerreiro)\b/i, sym: "🗡️", label: "Dark Knight" },
+  { re: /\b(elf|fairy\s*elf|fe|arqueira)\b/i, sym: "🏹", label: "Elf" },
+  { re: /\b(summoner|su|invocadora)\b/i, sym: "🔮", label: "Summoner" },
+  { re: /\b(magic\s*gladiator|mg|gladiator)\b/i, sym: "⚔️", label: "Magic Gladiator" },
+  { re: /\b(dark\s*lord|dl|lord)\b/i, sym: "👑", label: "Dark Lord" },
+  { re: /\b(rage\s*fighter|rf|fighter)\b/i, sym: "🥊", label: "Rage Fighter" },
+];
+function classBadgeHtml(className) {
+  if (!className) return "";
+  const hit = CLASS_SYMBOLS.find((x) => x.re.test(className));
+  if (!hit) return "";
+  return '<span class="mr-1.5" title="' + escapeHtml(hit.label) + '">' + hit.sym + '</span>';
+}
+function fmtFullTs(unixSeconds) {
+  if (!unixSeconds) return null;
+  const d = new Date(unixSeconds * 1000);
+  const pad = (n) => String(n).padStart(2, "0");
+  return (
+    pad(d.getDate()) + "/" + pad(d.getMonth() + 1) + "/" + d.getFullYear() +
+    " " + pad(d.getHours()) + ":" + pad(d.getMinutes())
+  );
+}
 function statRow(label, value) {
   return '<div class="flex justify-between gap-3 py-1.5 border-b border-border/60 last:border-0">' +
     '<span class="text-muted">' + escapeHtml(label) + '</span>' +
     '<span class="text-slate-100 text-right">' + value + '</span>' +
     '</div>';
+}
+function statRowIcon(icon, label, value) {
+  return '<div class="flex justify-between gap-3 py-1.5 border-b border-border/60 last:border-0">' +
+    '<span class="text-muted flex items-center gap-2"><span class="text-slate-300" aria-hidden="true">' + icon + '</span><span>' + escapeHtml(label) + '</span></span>' +
+    '<span class="text-slate-100 text-right">' + value + '</span>' +
+    '</div>';
+}
+function statCard(icon, label, value) {
+  return (
+    '<div class="rounded-lg border border-border bg-bg/40 px-3 py-2.5 min-w-0">' +
+      '<div class="flex items-center gap-2 text-[11px] text-muted uppercase tracking-wide">' +
+        '<span class="text-slate-300" aria-hidden="true">' + icon + '</span>' +
+        '<span class="truncate">' + escapeHtml(label) + '</span>' +
+      '</div>' +
+      '<div class="mt-1 text-sm text-slate-100 font-semibold truncate">' + value + '</div>' +
+    '</div>'
+  );
 }
 function renderCharLeft(container, c) {
   const profileUrl = "https://mupatos.com.br/site/profile/character/" + encodeURIComponent(c.name);
@@ -469,30 +546,31 @@ function renderCharLeft(container, c) {
     : '<span class="text-muted text-xs">—</span>';
 
   const dash = '<span class="text-muted">—</span>';
-  const rows = [];
-  rows.push(statRow("Classe", c.class ? escapeHtml(c.class) : dash));
-  rows.push(statRow("Resets", typeof c.resets === "number" ? String(c.resets) : dash));
-  rows.push(statRow("Média/Reset", c.avg_reset_time ? formatDuration(c.avg_reset_time) : dash));
-  rows.push(statRow("Level", c.last_level != null ? '<b class="text-goldsoft">' + c.last_level + '</b>' : dash));
-  rows.push(statRow("Mapa", c.last_map ? escapeHtml(c.last_map) : dash));
-  rows.push(statRow("Situação", statusBadge));
+  const cards = [];
+  cards.push(statCard("🎭", "Classe", c.class ? (classBadgeHtml(c.class) + escapeHtml(c.class)) : dash));
+  cards.push(statCard("♻️", "Resets", typeof c.resets === "number" ? '<span class="text-goldsoft">' + String(c.resets) + '</span>' : dash));
+  cards.push(statCard("⏱️", "Média/Reset", c.avg_reset_time ? formatDuration(c.avg_reset_time) : dash));
+  cards.push(statCard("📈", "Level", c.last_level != null ? '<span class="text-goldsoft">' + c.last_level + '</span>' : dash));
+  cards.push(statCard("🗺️", "Mapa", c.last_map ? escapeHtml(c.last_map) : dash));
+  cards.push(statCard("🟢", "Situação", statusBadge));
 
   // Rankings (rank in the resets ladder + next target one slot above).
   // Both are null for chars not in the top 99 — show — instead.
   const rankOverall = c.rank_overall ? '#' + c.rank_overall : dash;
   const classBadge = c.class_code ? ' <span class="text-muted">(' + escapeHtml(c.class_code.toUpperCase()) + ')</span>' : '';
   const rankClass = c.rank_class ? '#' + c.rank_class + classBadge : dash;
-  rows.push(statRow("Rank geral", rankOverall));
-  rows.push(statRow("Rank classe", rankClass));
+  cards.push(statCard("🏆", "Rank geral", rankOverall));
+  cards.push(statCard("🥇", "Rank classe", rankClass));
   if (c.next_target_name && c.next_target_resets != null) {
     const gap = (c.next_target_resets - (c.resets ?? 0));
     const gapTxt = gap > 0 ? ' <span class="text-muted">(+' + gap + ' resets)</span>' : '';
-    rows.push(statRow("Próximo alvo", '<b class="text-goldsoft">' + escapeHtml(c.next_target_name) + '</b>' + gapTxt));
+    cards.push(statCard("🎯", "Próximo alvo", '<span class="text-goldsoft">' + escapeHtml(c.next_target_name) + '</span>' + gapTxt));
   }
 
   const checked = relativeTime(c.last_checked_at);
+  const checkedFull = fmtFullTs(c.last_checked_at);
   const checkedLine = checked
-    ? '<div class="text-[11px] text-muted mt-2">atualizado ' + checked + '</div>'
+    ? '<div class="text-[11px] text-muted mt-2" title="' + escapeHtml(checkedFull || "") + '">atualizado ' + checked + (checkedFull ? ' <span class="text-muted/70">(ver horário)</span>' : '') + '</div>'
     : '';
   const gmTag = c.is_gm
     ? ' <span class="ml-2 px-2 py-0.5 rounded-full bg-gold/10 text-goldsoft text-xs border border-gold/20 align-middle">GM</span>'
@@ -503,7 +581,7 @@ function renderCharLeft(container, c) {
       '<a href="' + profileUrl + '" target="_blank" rel="noopener" class="font-semibold text-goldsoft text-base hover:underline">' + escapeHtml(c.name) + '</a>' +
       gmTag +
     '</div>' +
-    '<div class="text-xs">' + rows.join("") + '</div>' +
+    '<div class="grid grid-cols-2 sm:grid-cols-3 gap-2.5">' + cards.join("") + '</div>' +
     checkedLine;
 }
 
@@ -546,14 +624,22 @@ function renderDash() {
   const u = state.user;
   const display = u.first_name || (u.username ? "@" + u.username : "Telegram");
   $("me-phone").textContent = display;
+  setAppAdminLayout(!!u.is_admin);
   if (u.is_admin) {
-    $("admin-card").classList.remove("hidden");
+    $("nav-admin").classList.remove("hidden");
+    $("nav-hint").classList.remove("hidden");
     loadAdminChars();
     loadAdminEvents();
   }
 
   const cl = $("char-list");
   cl.innerHTML = "";
+  // User compare button only makes sense with 2+ chars.
+  const userCompareBtn = $("user-compare");
+  if (userCompareBtn) {
+    userCompareBtn.classList.toggle("hidden", state.characters.length < 2);
+    userCompareBtn.textContent = userCompareMode ? "Gerar comparativo" : "📊 Comparar";
+  }
   if (state.characters.length === 0) {
     cl.innerHTML = '<li class="py-3 text-muted text-sm">Nenhum personagem ainda. Adicione um abaixo.</li>';
   }
@@ -567,6 +653,15 @@ function renderDash() {
     renderCharLeft(left, c);
     const right = document.createElement("div");
     right.className = "flex items-center gap-2 shrink-0";
+    if (userCompareMode) {
+      const cb = document.createElement("input");
+      cb.type = "checkbox";
+      cb.className = "accent-gold cursor-pointer";
+      cb.setAttribute("data-user-compare", "1");
+      cb.setAttribute("data-char-id", c.id);
+      cb.setAttribute("data-char-name", c.name);
+      right.appendChild(cb);
+    }
     const refreshBtn = document.createElement("button");
     refreshBtn.className = "h-8 w-8 rounded-md border border-border text-sm hover:bg-bg transition flex items-center justify-center";
     refreshBtn.title = "Atualizar dados";
@@ -696,6 +791,71 @@ function renderDash() {
     li.appendChild(left);
     li.appendChild(right);
     sl.appendChild(li);
+  }
+}
+
+async function compareUserSelectedChars() {
+  const checkboxes = document.querySelectorAll('input[data-user-compare="1"]:checked');
+  if (checkboxes.length < 2) {
+    toast("selecione pelo menos 2 personagens", "err");
+    return;
+  }
+  const chartContainer = $("user-comparison-chart");
+  chartContainer.classList.remove("hidden");
+  chartContainer.innerHTML = '<div class="text-xs text-muted">carregando comparação...</div>';
+
+  try {
+    const promises = Array.from(checkboxes).map(async (cb) => {
+      const charId = cb.getAttribute("data-char-id");
+      const charName = cb.getAttribute("data-char-name");
+      const data = await fetchJSON("/api/characters/" + charId + "/history?days=14");
+      return { charId, charName, data };
+    });
+    const results = await Promise.all(promises);
+    chartContainer.innerHTML = renderComparisonChartGeneric(results, {
+      title: "Comparativo: resets por dia (últimos 14 dias)",
+      closeBtnId: "user-compare-close",
+    });
+    const closeBtn = document.getElementById("user-compare-close");
+    if (closeBtn) closeBtn.onclick = () => chartContainer.classList.add("hidden");
+  } catch (e) {
+    chartContainer.innerHTML = '<div class="text-xs text-danger">erro ao carregar: ' + escapeHtml(e.message) + '</div>';
+  }
+}
+
+function setDashView(view) {
+  const isAdmin = !!state.user?.is_admin;
+  const dashBtn = $("nav-dashboard");
+  const adminBtn = $("nav-admin");
+  const main = $("dash-main");
+  const admin = $("admin-card");
+
+  const activeCls = "bg-bg border-gold/40 text-goldsoft";
+  const idleCls = "border-border text-slate-200 hover:bg-bg";
+
+  const setBtn = (btn, active) => {
+    if (!btn) return;
+    btn.className = btn.className
+      .replace(activeCls, "")
+      .replace(idleCls, "")
+      .replace(/\s+/g, " ")
+      .trim();
+    btn.className =
+      btn.className +
+      " " +
+      (active ? activeCls : idleCls);
+  };
+
+  if (view === "admin" && isAdmin) {
+    main.classList.add("hidden");
+    admin.classList.remove("hidden");
+    setBtn(dashBtn, false);
+    setBtn(adminBtn, true);
+  } else {
+    main.classList.remove("hidden");
+    admin.classList.add("hidden");
+    setBtn(dashBtn, true);
+    setBtn(adminBtn, false);
   }
 }
 
@@ -1068,6 +1228,7 @@ function adminCharRowHtml(c) {
     ? '<button class="text-goldsoft hover:underline cursor-pointer" data-action="subs">' + c.sub_count + '</button>'
     : '<span class="text-muted">0</span>';
   const historyBtn = '<button class="px-2 py-1 rounded border border-border hover:bg-bg ml-1" data-action="history" title="Histórico">📈</button>';
+  const classHtml = c.class ? (classBadgeHtml(c.class) + escapeHtml(c.class)) : '<span class="text-muted">—</span>';
   return '<tr class="border-b border-border/60" data-row="' + c.id + '">' +
     '<td class="py-1.5 pr-2"><input type="checkbox" class="admin-char-check accent-gold cursor-pointer" data-char-id="' + c.id + '" data-char-name="' + escapeHtml(c.name) + '" /></td>' +
     '<td class="py-1.5 pr-2 text-muted">' + c.id + '</td>' +
@@ -1076,7 +1237,7 @@ function adminCharRowHtml(c) {
       blockedBadge + (c.is_gm ? ' <span class="text-[10px] text-gold uppercase">GM</span>' : '') +
     '</td>' +
     '<td class="py-1.5 pr-2">' + escapeHtml(owner) + ' <span class="text-muted">#' + c.user_id + '</span></td>' +
-    '<td class="py-1.5 pr-2">' + (c.class ? escapeHtml(c.class) : '<span class="text-muted">—</span>') + '</td>' +
+    '<td class="py-1.5 pr-2">' + classHtml + '</td>' +
     '<td class="py-1.5 pr-2">' + (c.last_level != null ? c.last_level : '<span class="text-muted">—</span>') + ' <span class="text-muted text-[10px]">lvl</span> / ' + (typeof c.resets === "number" ? c.resets : "—") + ' <span class="text-muted text-[10px]">rr</span>' + (c.avg_reset_time ? '<br><span class="text-muted text-[10px]">~' + formatDuration(c.avg_reset_time) + '/rr</span>' : '') + '</td>' +
     '<td class="py-1.5 pr-2">' + status + '</td>' +
     '<td class="py-1.5 pr-2">' + subBtn + '</td>' +
@@ -1130,9 +1291,25 @@ async function toggleUserCharHistory(charId, charName) {
   const cell = expansion.querySelector('[data-history-body]');
   cell.innerHTML = '<span class="text-muted text-xs">carregando histórico…</span>';
   try {
-    const data = await fetchJSON("/api/characters/" + charId + "/history?days=7");
-    cell.innerHTML = renderHistoryChart(data, charName);
+    const data = await fetchJSON("/api/characters/" + charId + "/history?days=14");
+    const tabs = '<div class="flex gap-4 mb-3 border-b border-border text-sm">' +
+      '<button class="pb-1 border-b-2 border-goldsoft text-goldsoft hist-tab-btn" data-target="uhist-evolucao-' + charId + '">Evolução</button>' +
+      '<button class="pb-1 border-b-2 border-transparent text-muted hover:text-slate-300 hist-tab-btn" data-target="uhist-resets-' + charId + '">Resets/Dia</button>' +
+      '</div>' +
+      '<div id="uhist-evolucao-' + charId + '" class="hist-tab-content">' + renderHistoryChart(data, charName) + '</div>' +
+      '<div id="uhist-resets-' + charId + '" class="hist-tab-content hidden">' + renderResetsPerDayChart(data, charName) + '</div>';
+    cell.innerHTML = tabs;
     wireHistoryTooltips(cell);
+
+    const btns = cell.querySelectorAll('.hist-tab-btn');
+    btns.forEach(btn => {
+      btn.onclick = () => {
+        btns.forEach(b => b.className = "pb-1 border-b-2 border-transparent text-muted hover:text-slate-300 hist-tab-btn");
+        cell.querySelectorAll('.hist-tab-content').forEach(c => c.classList.add("hidden"));
+        btn.className = "pb-1 border-b-2 border-goldsoft text-goldsoft hist-tab-btn";
+        document.getElementById(btn.getAttribute("data-target")).classList.remove("hidden");
+      };
+    });
   } catch (e) {
     cell.innerHTML = '<span class="text-danger text-xs">' + escapeHtml(e.message) + '</span>';
   }
@@ -1567,6 +1744,13 @@ async function compareSelectedChars() {
 }
 
 function renderComparisonChart(datasets) {
+  return renderComparisonChartGeneric(datasets, {
+    title: "Comparativo: resets por dia (últimos 14 dias)",
+    closeBtnId: "admin-compare-close",
+  });
+}
+
+function renderComparisonChartGeneric(datasets, opts) {
   // Bar chart: resets/day over the window (first → last snapshot).
   const W = 720, H = 260, padL = 36, padR = 22, padT = 22, padB = 52;
   const innerW = W - padL - padR, innerH = H - padT - padB;
@@ -1632,8 +1816,8 @@ function renderComparisonChart(datasets) {
 
   const header =
     '<div class="flex items-center justify-between mb-3">' +
-      '<h3 class="text-xs font-semibold uppercase text-goldsoft">Comparativo: resets por dia (últimos 14 dias)</h3>' +
-      '<button id="admin-compare-close" class="text-muted hover:text-slate-100 text-lg leading-none">&times;</button>' +
+      '<h3 class="text-xs font-semibold uppercase text-goldsoft">' + escapeHtml(opts?.title || "Comparativo") + '</h3>' +
+      '<button id="' + escapeHtml(opts?.closeBtnId || "compare-close") + '" class="text-muted hover:text-slate-100 text-lg leading-none">&times;</button>' +
     '</div>';
 
   const hint = '<div class="text-[11px] text-muted mb-2">Passe o mouse nas barras para ver detalhes (início → fim).</div>';
@@ -1703,6 +1887,30 @@ function wireAdminEventRow(ev) {
 
 // ---- Boot ----
 if (!localStorage.getItem(CONSENT_KEY)) showConsent();
+// Side-menu wiring (admin tab only shows for admins).
+$("nav-dashboard").onclick = () => setDashView("dashboard");
+if ($("nav-admin")) $("nav-admin").onclick = () => setDashView("admin");
+// User comparison (own characters)
+if ($("user-compare")) $("user-compare").onclick = async () => {
+  const btn = $("user-compare");
+  const chart = $("user-comparison-chart");
+  if (!userCompareMode) {
+    userCompareMode = true;
+    if (chart) chart.classList.add("hidden");
+    renderDash();
+    toast("marque 2+ personagens e clique novamente", "info");
+    return;
+  }
+  const checked = document.querySelectorAll('input[data-user-compare="1"]:checked');
+  if (checked.length < 2) {
+    // Second click with no selection cancels.
+    userCompareMode = false;
+    if (chart) chart.classList.add("hidden");
+    renderDash();
+    return;
+  }
+  await compareUserSelectedChars();
+};
 refresh();
 </script>
 </body>
