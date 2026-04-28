@@ -1582,7 +1582,8 @@ async function loadAdminChars() {
   }
 }
 function adminCharRowHtml(c) {
-  const owner = c.owner_first_name || (c.owner_username ? "@" + c.owner_username : "user " + c.user_id);
+  const ownerId = (c.owner_user_id != null) ? c.owner_user_id : (c.user_id != null ? c.user_id : null);
+  const owner = c.owner_first_name || (c.owner_username ? "@" + c.owner_username : (ownerId != null ? ("user " + ownerId) : "—"));
   const status = c.last_status
     ? (c.last_status === "Online"
         ? '<span class="text-ok">Online</span>'
@@ -1601,7 +1602,7 @@ function adminCharRowHtml(c) {
       '<a href="https://mupatos.com.br/site/profile/character/' + encodeURIComponent(c.name) + '" target="_blank" rel="noopener" class="text-goldsoft hover:underline">' + escapeHtml(c.name) + '</a>' +
       blockedBadge + (c.is_gm ? ' <span class="text-[10px] text-gold uppercase">GM</span>' : '') +
     '</td>' +
-    '<td class="py-1.5 pr-2">' + escapeHtml(owner) + ' <span class="text-muted">#' + c.user_id + '</span></td>' +
+    '<td class="py-1.5 pr-2">' + escapeHtml(owner) + (ownerId != null ? (' <span class="text-muted">#' + ownerId + '</span>') : '') + '</td>' +
     '<td class="py-1.5 pr-2">' + classHtml + '</td>' +
     '<td class="py-1.5 pr-2">' + (c.last_level != null ? c.last_level : '<span class="text-muted">—</span>') + ' <span class="text-muted text-[10px]">lvl</span> / ' + (typeof c.resets === "number" ? c.resets : "—") + ' <span class="text-muted text-[10px]">rr</span>' + (c.avg_reset_time ? '<br><span class="text-muted text-[10px]">~' + formatDuration(c.avg_reset_time) + '/rr</span>' : '') + '</td>' +
     '<td class="py-1.5 pr-2">' + status + '</td>' +

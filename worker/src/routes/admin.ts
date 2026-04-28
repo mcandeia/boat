@@ -20,6 +20,7 @@ interface AdminCharRow {
   rank_class: number | null;
   class_code: string | null;
   created_at: number;
+  owner_user_id: number | null;
   owner_first_name: string | null;
   owner_username: string | null;
   sub_count: number;
@@ -34,6 +35,12 @@ export async function adminListChars(env: Env): Promise<Response> {
          c.last_status, c.last_checked_at, c.rank_overall, c.rank_class,
          c.class_code, c.created_at,
          -- best-effort: show one owner (latest link) for display
+         (SELECT u.id
+            FROM user_characters uc
+            JOIN users u ON u.id = uc.user_id
+           WHERE uc.character_id = c.id
+           ORDER BY uc.created_at DESC
+           LIMIT 1) AS owner_user_id,
          (SELECT u.first_name
             FROM user_characters uc
             JOIN users u ON u.id = uc.user_id
