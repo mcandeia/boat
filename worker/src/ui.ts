@@ -896,6 +896,7 @@ function adminCharRowHtml(c) {
   const subBtn = (c.sub_count ?? 0) > 0
     ? '<button class="text-goldsoft hover:underline cursor-pointer" data-action="subs">' + c.sub_count + '</button>'
     : '<span class="text-muted">0</span>';
+  const historyBtn = '<button class="px-2 py-1 rounded border border-border hover:bg-bg ml-1" data-action="history" title="Histórico">📈</button>';
   return '<tr class="border-b border-border/60" data-row="' + c.id + '">' +
     '<td class="py-1.5 pr-2 text-muted">' + c.id + '</td>' +
     '<td class="py-1.5 pr-2 text-goldsoft font-semibold">' + escapeHtml(c.name) + blockedBadge + (c.is_gm ? ' <span class="text-[10px] text-gold uppercase">GM</span>' : '') + '</td>' +
@@ -907,10 +908,14 @@ function adminCharRowHtml(c) {
     '<td class="py-1.5 pr-2 whitespace-nowrap">' +
       '<button class="px-2 py-1 rounded border border-border hover:bg-bg" data-action="block">' + (c.blocked ? "Desbloquear" : "Bloquear") + '</button>' +
       ' <button class="px-2 py-1 rounded border border-border hover:bg-bg ml-1" data-action="refresh">↻</button>' +
+      historyBtn +
     '</td>' +
     '</tr>' +
     '<tr class="hidden bg-bg/50" data-subs-for="' + c.id + '">' +
       '<td colspan="8" class="px-3 py-2 text-[11px]" data-subs-body></td>' +
+    '</tr>' +
+    '<tr class="hidden bg-bg/50" data-history-for="' + c.id + '">' +
+      '<td colspan="8" class="px-3 py-2" data-history-body></td>' +
     '</tr>';
 }
 function wireAdminCharActions(c) {
@@ -935,6 +940,98 @@ function wireAdminCharActions(c) {
   };
   const subsBtn = row.querySelector('[data-action="subs"]');
   if (subsBtn) subsBtn.onclick = () => toggleAdminSubs(c.id);
+  const historyBtnEl = row.querySelector('[data-action="history"]');
+  if (historyBtnEl) historyBtnEl.onclick = () => toggleAdminHistory(c.id, c.name);
+}
+
+async function toggleAdminHistory(charId, charName) {
+  const expansion = document.querySelector('tr[data-history-for="' + charId + '"]');
+  if (!expansion) return;
+  if (!expansion.classList.contains("hidden")) {
+    expansion.classList.add("hidden");
+    return;
+  }
+  expansion.classList.remove("hidden");
+  const cell = expansion.querySelector('[data-history-body]');
+  cell.innerHTML = '<span class="text-muted text-xs">carregando histórico…</span>';
+  try {
+    const data = await fetchJSON("/api/admin/chars/" + charId + "/history?days=7");
+    cell.innerHTML = renderHistoryChart(data, charName);
+  } catch (e) {
+    cell.innerHTML = '<span class="text-danger text-xs">' + escapeHtml(e.message) + '</span>';
+  }
+}
+
+// Step-plot of resets over time. Resets only go up, so this shows progress
+// at a glance — slope = leveling speed.
+function renderHistoryChart(data, charName) {
+  // Flatten cycles to a single sample list.
+  const samples = [];
+  for (const cyc of data.cycles ?? []) for (const s of cyc.samples) samples.push(s);
+  if (samples.length === 0) {
+    return '<div class="text-xs text-muted">sem snapshots ainda — espera alguns minutos pro cron registrar mudanças.</div>';
+  }
+
+  const tMin = samples[0].ts;
+  const tMax = samples[samples.length - 1].ts;
+  const span = Math.max(tMax - tMin, 1);
+  const rMin = Math.min(...samples.map((s) => s.resets ?? 0));
+  const rMax = Math.max(...samples.map((s) => s.resets ?? 0));
+  const rSpan = Math.max(rMax - rMin, 1);
+
+  const W = 720, H = 220, padL = 36, padR = 8, padT = 12, padB = 24;
+  const innerW = W - padL - padR, innerH = H - padT - padB;
+
+  const xOf = (t) => padL + ((t - tMin) / span) * innerW;
+  const yOf = (r) => padT + innerH - ((r - rMin) / rSpan) * innerH;
+
+  // Step path (horizontal then vertical).
+  let d = "";
+  samples.forEach((s, i) => {
+    const x = xOf(s.ts), y = yOf(s.resets ?? 0);
+    if (i === 0) d += "M" + x + "," + y;
+    else {
+      const px = xOf(samples[i - 1].ts), py = yOf(samples[i - 1].resets ?? 0);
+      d += " L" + x + "," + py + " L" + x + "," + y;
+    }
+  });
+
+  // Y-axis ticks (every reset, but cap at 6 labels)
+  const ticks = [];
+  const tickCount = Math.min(rSpan + 1, 6);
+  for (let i = 0; i < tickCount; i++) {
+    const v = Math.round(rMin + (rSpan * i) / Math.max(tickCount - 1, 1));
+    ticks.push(v);
+  }
+  const yTickLines = ticks.map((v) => {
+    const y = yOf(v);
+    return '<line x1="' + padL + '" x2="' + (W - padR) + '" y1="' + y + '" y2="' + y + '" stroke="#252a36" stroke-dasharray="2,3" />' +
+           '<text x="' + (padL - 4) + '" y="' + (y + 3) + '" fill="#8a93a3" font-size="10" text-anchor="end">' + v + '</text>';
+  }).join("");
+
+  // X labels — start, mid, end timestamps
+  const fmt = (ts) => {
+    const d = new Date(ts * 1000);
+    return d.getDate() + "/" + (d.getMonth() + 1) + " " + String(d.getHours()).padStart(2, "0") + ":" + String(d.getMinutes()).padStart(2, "0");
+  };
+  const xLabels = [tMin, tMin + span / 2, tMax].map((t, i) => {
+    const x = xOf(t);
+    const anchor = i === 0 ? "start" : i === 2 ? "end" : "middle";
+    return '<text x="' + x + '" y="' + (H - padB + 14) + '" fill="#8a93a3" font-size="10" text-anchor="' + anchor + '">' + fmt(t) + '</text>';
+  }).join("");
+
+  const stats =
+    '<div class="text-[11px] text-muted mb-2">' +
+      '<b class="text-goldsoft">' + escapeHtml(charName) + '</b> · últimos ' + data.days + ' dias · ' +
+      data.count + ' snapshots · resets ' + rMin + ' → <b class="text-goldsoft">' + rMax + '</b>' +
+    '</div>';
+
+  return stats +
+    '<svg viewBox="0 0 ' + W + ' ' + H + '" class="w-full h-auto bg-bg border border-border rounded-md">' +
+      yTickLines +
+      '<path d="' + d + '" fill="none" stroke="#f0a93b" stroke-width="2" />' +
+      xLabels +
+    '</svg>';
 }
 
 async function toggleAdminSubs(charId) {

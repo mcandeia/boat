@@ -17,6 +17,7 @@ import {
 } from "./routes/subscriptions";
 import { me } from "./routes/me";
 import {
+  adminCharHistory,
   adminListCharSubs,
   adminListChars,
   adminRefreshChar,
@@ -104,6 +105,8 @@ export default {
         if (charRefresh && method === "POST") return await adminRefreshChar(env, Number(charRefresh[1]));
         const charSubs = pathname.match(/^\/api\/admin\/chars\/(\d+)\/subs$/);
         if (charSubs && method === "GET") return await adminListCharSubs(env, Number(charSubs[1]));
+        const charHistory = pathname.match(/^\/api\/admin\/chars\/(\d+)\/history$/);
+        if (charHistory && method === "GET") return await adminCharHistory(env, Number(charHistory[1]), req);
         if (pathname === "/api/admin/poll" && method === "POST") return await adminRunCron(env);
       }
 

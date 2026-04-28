@@ -138,6 +138,23 @@ export async function pollOnce(env: Env): Promise<{ scraped: number; fired: numb
         char.name,
       )
       .run();
+
+    // History: insert a snapshot when anything visible changed since the
+    // previous tick. Idle chars don't bloat the table.
+    const changed =
+      snap.level !== prev.level ||
+      snap.resets !== prev.resets ||
+      snap.map !== prev.map ||
+      snap.status !== prev.status;
+    if (changed) {
+      await env.DB
+        .prepare(
+          `INSERT INTO char_snapshots (char_id, ts, level, resets, map, status)
+           VALUES (?, ?, ?, ?, ?, ?)`,
+        )
+        .bind(char.id, t, snap.level, snap.resets, snap.map, snap.status)
+        .run();
+    }
   }
 
   return { scraped: snapshots.size, fired };
