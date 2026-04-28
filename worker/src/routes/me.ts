@@ -27,6 +27,7 @@ export async function me(env: Env, userId: number): Promise<Response> {
       id: user.id,
       first_name: user.first_name,
       username: user.telegram_username,
+      is_admin: !!user.admin,
     },
     characters,
     subscriptions,

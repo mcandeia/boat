@@ -1,0 +1,91 @@
+import type { Env, UserRow } from "../types";
+import { bad, json, now } from "../util";
+import { scrapeOne } from "../scraper";
+import { pollOnce } from "../poll";
+
+// Every admin route assumes the gate in index.ts already verified the
+// caller has users.admin = 1.
+
+interface AdminCharRow {
+  id: number;
+  name: string;
+  blocked: number;
+  class: string | null;
+  resets: number | null;
+  last_level: number | null;
+  last_status: string | null;
+  last_checked_at: number | null;
+  rank_overall: number | null;
+  rank_class: number | null;
+  class_code: string | null;
+  is_gm: number;
+  created_at: number;
+  user_id: number;
+  owner_first_name: string | null;
+  owner_username: string | null;
+  sub_count: number;
+}
+
+export async function adminListChars(env: Env): Promise<Response> {
+  const rs = await env.DB
+    .prepare(
+      `SELECT
+         c.id, c.name, c.blocked, c.class, c.resets, c.last_level,
+         c.last_status, c.last_checked_at, c.rank_overall, c.rank_class,
+         c.class_code, c.is_gm, c.created_at, c.user_id,
+         u.first_name AS owner_first_name,
+         u.telegram_username AS owner_username,
+         (SELECT COUNT(*) FROM subscriptions s WHERE s.character_id = c.id AND s.active = 1) AS sub_count
+       FROM characters c
+       JOIN users u ON u.id = c.user_id
+       ORDER BY c.id DESC`,
+    )
+    .all<AdminCharRow>();
+  return json({ characters: rs.results ?? [] });
+}
+
+export async function adminSetBlocked(
+  env: Env,
+  charId: number,
+  req: Request,
+): Promise<Response> {
+  const body = (await req.json().catch(() => ({}))) as { blocked?: boolean };
+  if (typeof body.blocked !== "boolean") return bad(400, "blocked boolean obrigatório");
+  const r = await env.DB
+    .prepare("UPDATE characters SET blocked = ? WHERE id = ?")
+    .bind(body.blocked ? 1 : 0, charId)
+    .run();
+  if (r.meta.changes === 0) return bad(404, "personagem não encontrado");
+  return json({ ok: true });
+}
+
+export async function adminRefreshChar(env: Env, charId: number): Promise<Response> {
+  const row = await env.DB
+    .prepare("SELECT id, name, blocked FROM characters WHERE id = ?")
+    .bind(charId)
+    .first<{ id: number; name: string; blocked: number }>();
+  if (!row) return bad(404, "personagem não encontrado");
+  if (row.blocked) return bad(409, "personagem está bloqueado");
+  const snap = await scrapeOne(env, row.name, { totalTimeoutMs: 25_000 });
+  if (snap.scraped) {
+    await env.DB
+      .prepare(
+        `UPDATE characters
+            SET class = COALESCE(?, class),
+                resets = COALESCE(?, resets),
+                last_level = COALESCE(?, last_level),
+                last_map = COALESCE(?, last_map),
+                last_status = COALESCE(?, last_status),
+                last_checked_at = ?
+          WHERE id = ?`,
+      )
+      .bind(snap.class, snap.resets, snap.level, snap.map, snap.status, now(), charId)
+      .run();
+  }
+  return json({ ok: snap.scraped, snapshot: snap });
+}
+
+export async function adminRunCron(env: Env): Promise<Response> {
+  const r = await pollOnce(env);
+  return json({ ok: true, ...r });
+}

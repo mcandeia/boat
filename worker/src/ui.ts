@@ -231,6 +231,31 @@ export const INDEX_HTML = /* html */ `<!doctype html>
       </div>
     </div>
 
+    <div id="admin-card" class="hidden bg-panel border border-gold/30 rounded-xl p-5">
+      <div class="flex items-center justify-between gap-3 mb-3">
+        <h2 class="text-xs uppercase tracking-widest text-gold">Admin</h2>
+        <button id="admin-poll" class="gold-btn block px-3 rounded-md bg-gold text-bg font-semibold text-center border border-transparent hover:brightness-110 transition text-xs">Rodar cron agora</button>
+      </div>
+      <div class="overflow-x-auto">
+        <table class="w-full text-xs">
+          <thead class="text-muted text-left border-b border-border">
+            <tr>
+              <th class="py-1.5 pr-2">#</th>
+              <th class="py-1.5 pr-2">Char</th>
+              <th class="py-1.5 pr-2">Dono</th>
+              <th class="py-1.5 pr-2">Classe</th>
+              <th class="py-1.5 pr-2">Lv</th>
+              <th class="py-1.5 pr-2">Status</th>
+              <th class="py-1.5 pr-2">Subs</th>
+              <th class="py-1.5 pr-2">Ações</th>
+            </tr>
+          </thead>
+          <tbody id="admin-chars"></tbody>
+        </table>
+      </div>
+      <div id="admin-msg" class="text-[11px] text-muted mt-2"></div>
+    </div>
+
     <div class="bg-panel border border-border rounded-xl p-5">
       <h2 class="text-xs uppercase tracking-widest text-muted mb-3">Alertas</h2>
       <ul id="sub-list" class="divide-y divide-border"></ul>
@@ -477,6 +502,10 @@ function renderDash() {
   const u = state.user;
   const display = u.first_name || (u.username ? "@" + u.username : "Telegram");
   $("me-phone").textContent = display;
+  if (u.is_admin) {
+    $("admin-card").classList.remove("hidden");
+    loadAdminChars();
+  }
 
   const cl = $("char-list");
   cl.innerHTML = "";
@@ -836,6 +865,76 @@ $("add-sub").onclick = async (e) => {
   } catch (err) {
     toast(err.message, "err");
   }
+};
+
+// ---- Admin panel ----
+async function loadAdminChars() {
+  const tbody = $("admin-chars");
+  if (!tbody) return;
+  tbody.innerHTML = '<tr><td colspan="8" class="py-2 text-muted">carregando…</td></tr>';
+  try {
+    const data = await fetchJSON("/api/admin/chars");
+    const chars = data.characters || [];
+    if (chars.length === 0) {
+      tbody.innerHTML = '<tr><td colspan="8" class="py-2 text-muted">nenhum char</td></tr>';
+      return;
+    }
+    tbody.innerHTML = chars.map(adminCharRowHtml).join("");
+    for (const c of chars) wireAdminCharActions(c);
+  } catch (e) {
+    tbody.innerHTML = '<tr><td colspan="8" class="py-2 text-danger">' + escapeHtml(e.message) + '</td></tr>';
+  }
+}
+function adminCharRowHtml(c) {
+  const owner = c.owner_first_name || (c.owner_username ? "@" + c.owner_username : "user " + c.user_id);
+  const status = c.last_status
+    ? (c.last_status === "Online"
+        ? '<span class="text-ok">Online</span>'
+        : '<span class="text-muted">Offline</span>')
+    : '<span class="text-muted">—</span>';
+  const blockedBadge = c.blocked ? ' <span class="px-1.5 py-0.5 rounded bg-danger/20 text-danger text-[10px] uppercase">blocked</span>' : '';
+  return '<tr class="border-b border-border/60" data-row="' + c.id + '">' +
+    '<td class="py-1.5 pr-2 text-muted">' + c.id + '</td>' +
+    '<td class="py-1.5 pr-2 text-goldsoft font-semibold">' + escapeHtml(c.name) + blockedBadge + (c.is_gm ? ' <span class="text-[10px] text-gold uppercase">GM</span>' : '') + '</td>' +
+    '<td class="py-1.5 pr-2">' + escapeHtml(owner) + ' <span class="text-muted">#' + c.user_id + '</span></td>' +
+    '<td class="py-1.5 pr-2">' + (c.class ? escapeHtml(c.class) : '<span class="text-muted">—</span>') + '</td>' +
+    '<td class="py-1.5 pr-2">' + (c.last_level != null ? c.last_level : '<span class="text-muted">—</span>') + '</td>' +
+    '<td class="py-1.5 pr-2">' + status + '</td>' +
+    '<td class="py-1.5 pr-2">' + (c.sub_count ?? 0) + '</td>' +
+    '<td class="py-1.5 pr-2 whitespace-nowrap">' +
+      '<button class="px-2 py-1 rounded border border-border hover:bg-bg" data-action="block">' + (c.blocked ? "Desbloquear" : "Bloquear") + '</button>' +
+      ' <button class="px-2 py-1 rounded border border-border hover:bg-bg ml-1" data-action="refresh">↻</button>' +
+    '</td>' +
+    '</tr>';
+}
+function wireAdminCharActions(c) {
+  const row = document.querySelector('tr[data-row="' + c.id + '"]');
+  if (!row) return;
+  row.querySelector('[data-action="block"]').onclick = async () => {
+    try {
+      await fetchJSON("/api/admin/chars/" + c.id, {
+        method: "PATCH",
+        body: JSON.stringify({ blocked: !c.blocked }),
+      });
+      toast(c.blocked ? "desbloqueado" : "bloqueado", "ok");
+      loadAdminChars();
+    } catch (e) { toast(e.message, "err"); }
+  };
+  row.querySelector('[data-action="refresh"]').onclick = async () => {
+    try {
+      await fetchJSON("/api/admin/chars/" + c.id + "/refresh", { method: "POST" });
+      toast("dados atualizados", "ok");
+      loadAdminChars();
+    } catch (e) { toast(e.message, "err"); }
+  };
+}
+$("admin-poll").onclick = async (e) => {
+  const btn = e.currentTarget;
+  try {
+    const r = await withSpinner(btn, () => fetchJSON("/api/admin/poll", { method: "POST" }));
+    toast("cron rodado: scraped=" + r.scraped + " fired=" + r.fired, "ok");
+    loadAdminChars();
+  } catch (err) { toast(err.message, "err"); }
 };
 
 // ---- Boot ----

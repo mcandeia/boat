@@ -20,7 +20,8 @@ export async function pollOnce(env: Env): Promise<{ scraped: number; fired: numb
       `SELECT DISTINCT c.name
          FROM characters c
          JOIN subscriptions s
-           ON s.character_id = c.id AND s.active = 1`,
+           ON s.character_id = c.id AND s.active = 1
+        WHERE c.blocked = 0`,
     )
     .all<{ name: string }>();
 

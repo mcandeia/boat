@@ -28,6 +28,7 @@ export interface UserRow {
   telegram_username: string | null;
   first_name: string | null;
   created_at: number;
+  admin: number;
 }
 
 export interface PendingLoginRow {
@@ -58,6 +59,7 @@ export interface CharacterRow {
   class_code: string | null;
   next_target_name: string | null;
   next_target_resets: number | null;
+  blocked: number;
 }
 
 export interface SubscriptionRow {

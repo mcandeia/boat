@@ -16,6 +16,12 @@ import {
   toggleSubscription,
 } from "./routes/subscriptions";
 import { me } from "./routes/me";
+import {
+  adminListChars,
+  adminRefreshChar,
+  adminRunCron,
+  adminSetBlocked,
+} from "./routes/admin";
 import { telegramWebhook } from "./routes/telegram-webhook";
 import { pollOnce } from "./poll";
 import { setTelegramWebhook } from "./telegram";
@@ -81,15 +87,28 @@ export default {
         return await toggleSubscription(env, userId, Number(subMatch[1]), req);
       }
 
-      // ---- admin (Bearer SESSION_SECRET) ----
+      // ---- admin routes (gated by users.admin = 1) ----
+      if (pathname.startsWith("/api/admin/")) {
+        const isAdmin = await env.DB
+          .prepare("SELECT admin FROM users WHERE id = ?")
+          .bind(userId)
+          .first<{ admin: number }>()
+          .then((r) => !!r?.admin);
+        if (!isAdmin) return bad(403, "acesso restrito a admins");
+
+        if (pathname === "/api/admin/chars" && method === "GET") return await adminListChars(env);
+        const charSet = pathname.match(/^\/api\/admin\/chars\/(\d+)$/);
+        if (charSet && method === "PATCH") return await adminSetBlocked(env, Number(charSet[1]), req);
+        const charRefresh = pathname.match(/^\/api\/admin\/chars\/(\d+)\/refresh$/);
+        if (charRefresh && method === "POST") return await adminRefreshChar(env, Number(charRefresh[1]));
+        if (pathname === "/api/admin/poll" && method === "POST") return await adminRunCron(env);
+      }
+
+      // ---- maintenance (Bearer SESSION_SECRET) — for ops/CI use ----
       if (pathname.startsWith("/admin/")) {
         const auth = req.headers.get("authorization");
         if (!env.SESSION_SECRET || auth !== `Bearer ${env.SESSION_SECRET}`) {
           return bad(403, "proibido");
-        }
-        if (pathname === "/admin/poll" && method === "POST") {
-          const r = await pollOnce(env);
-          return json({ ok: true, ...r });
         }
         if (pathname === "/admin/telegram/set-webhook" && method === "POST") {
           const webhookUrl = `${url.origin}/api/telegram/webhook`;
