@@ -899,7 +899,10 @@ function adminCharRowHtml(c) {
   const historyBtn = '<button class="px-2 py-1 rounded border border-border hover:bg-bg ml-1" data-action="history" title="Histórico">📈</button>';
   return '<tr class="border-b border-border/60" data-row="' + c.id + '">' +
     '<td class="py-1.5 pr-2 text-muted">' + c.id + '</td>' +
-    '<td class="py-1.5 pr-2 text-goldsoft font-semibold">' + escapeHtml(c.name) + blockedBadge + (c.is_gm ? ' <span class="text-[10px] text-gold uppercase">GM</span>' : '') + '</td>' +
+    '<td class="py-1.5 pr-2 font-semibold">' +
+      '<a href="https://mupatos.com.br/site/profile/character/' + encodeURIComponent(c.name) + '" target="_blank" rel="noopener" class="text-goldsoft hover:underline">' + escapeHtml(c.name) + '</a>' +
+      blockedBadge + (c.is_gm ? ' <span class="text-[10px] text-gold uppercase">GM</span>' : '') +
+    '</td>' +
     '<td class="py-1.5 pr-2">' + escapeHtml(owner) + ' <span class="text-muted">#' + c.user_id + '</span></td>' +
     '<td class="py-1.5 pr-2">' + (c.class ? escapeHtml(c.class) : '<span class="text-muted">—</span>') + '</td>' +
     '<td class="py-1.5 pr-2">' + (c.last_level != null ? c.last_level : '<span class="text-muted">—</span>') + '</td>' +
