@@ -37,6 +37,9 @@ export async function createSubscription(env: Env, userId: number, req: Request)
   let threshold: string | null = (body.threshold ?? "").trim() || null;
   let characterId: number | null = body.character_id ?? null;
   let customMessage: string | null = (body.custom_message ?? "").trim() || null;
+  if (customMessage && customMessage.length > 200) {
+    return bad(400, "mensagem customizada muito longa (máx 200 caracteres)");
+  }
 
   if (eventType === "level_gte") {
     const n = Number(threshold);

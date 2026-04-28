@@ -280,7 +280,7 @@ export const INDEX_HTML = /* html */ `<!doctype html>
         <div id="sub-fields"></div>
         <div class="mt-3 mb-4">
           <label class="text-[11px] text-muted block mb-1">Mensagem customizada (opcional)</label>
-          <input id="sub-custom-message" type="text" placeholder="ex.: {username} upou para o nivel {lv}!" class="h-10 w-full bg-bg border border-border rounded-md px-3 outline-none focus:border-gold/60" />
+          <input id="sub-custom-message" type="text" maxlength="200" placeholder="ex.: {username} upou para o nivel {lv}!" class="h-10 w-full bg-bg border border-border rounded-md px-3 outline-none focus:border-gold/60" />
           <div class="text-[11px] text-muted mt-1">Use <span class="text-goldsoft">{username}</span> e <span class="text-goldsoft">{lv}</span> para inserir dados.</div>
         </div>
         <button id="add-sub" class="gold-btn block px-5 rounded-md bg-gold text-bg font-semibold text-center border border-transparent hover:brightness-110 transition">Adicionar alerta</button>
