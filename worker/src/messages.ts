@@ -134,7 +134,7 @@ function serverEventEntryReq(eventNameRaw: string): EntryReq | null {
     return { itemLabel: "Armor of Guardsman", itemTiered: true, npc: { name: "Chaos Goblin", map: "Noria", coords: "168,96" } };
   }
   if (n.includes("blood castle")) {
-    return { itemLabel: "Blood Bone", itemTiered: true, npc: { name: "Archangel Messenger", map: "Devias", coords: "198,47" } };
+    return { itemLabel: "Invisibility Cloak", itemTiered: true, npc: { name: "Archangel Messenger", map: "Devias", coords: "198,47" } };
   }
   if (n.includes("devil square")) {
     return { itemLabel: "Devil's Invitation", itemTiered: true, npc: { name: "Charon", map: "Noria", coords: "167,90" } };

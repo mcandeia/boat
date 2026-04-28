@@ -1335,7 +1335,7 @@ function updateSubFormUi() {
     }
     if (n.includes("blood castle")) {
       return {
-        itemLabel: "Blood Bone",
+        itemLabel: "Invisibility Cloak",
         itemTiered: true,
         npc: { name: "Archangel Messenger", map: "Devias", coords: "198,47" },
       };
