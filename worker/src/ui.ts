@@ -1014,12 +1014,17 @@ function renderHistoryChart(data, charName) {
   const rMin = Math.min(...samples.map((s) => s.resets ?? 0));
   const rMax = Math.max(...samples.map((s) => s.resets ?? 0));
   const rSpan = Math.max(rMax - rMin, 1);
+  const lMin = Math.min(...samples.map((s) => s.level ?? 0));
+  const lMax = Math.max(...samples.map((s) => s.level ?? 0));
+  const lSpan = Math.max(lMax - lMin, 1);
 
-  const W = 720, H = 220, padL = 36, padR = 8, padT = 12, padB = 24;
+  // Padding on the right grew because we now show level ticks there too.
+  const W = 720, H = 240, padL = 36, padR = 36, padT = 22, padB = 26;
   const innerW = W - padL - padR, innerH = H - padT - padB;
 
   const xOf = (t) => padL + ((t - tMin) / span) * innerW;
-  const yOf = (r) => padT + innerH - ((r - rMin) / rSpan) * innerH;
+  const yOf  = (r) => padT + innerH - ((r - rMin) / rSpan) * innerH;
+  const yOfL = (l) => padT + innerH - ((l - lMin) / lSpan) * innerH;
 
   // Step path (horizontal then vertical).
   let d = "";
@@ -1038,27 +1043,51 @@ function renderHistoryChart(data, charName) {
     const pad = (n) => String(n).padStart(2, "0");
     return pad(d.getDate()) + "/" + pad(d.getMonth() + 1) + " " + pad(d.getHours()) + ":" + pad(d.getMinutes());
   };
+  // Level path: smooth line through samples (no step). Drops naturally on
+  // each reset since level resets to a low number — produces the sawtooth
+  // look user wants for "progression inside each reset".
+  let lDp = "";
+  samples.forEach((s, i) => {
+    const x = xOf(s.ts), y = yOfL(s.level ?? lMin);
+    lDp += (i === 0 ? "M" : " L") + x + "," + y;
+  });
+
   const dots = samples.map((s) => {
-    const x = xOf(s.ts), y = yOf(s.resets ?? 0);
+    const x = xOf(s.ts);
+    const yR = yOf(s.resets ?? 0);
+    const yL = yOfL(s.level ?? lMin);
     const tip =
       fmtFull(s.ts) + " · resets " + (s.resets ?? "?") +
       " · lv " + (s.level ?? "?") +
       (s.map ? " · " + s.map : "") +
       (s.status ? " · " + s.status : "");
-    return '<circle cx="' + x + '" cy="' + y + '" r="4" fill="#f0a93b" stroke="#0b0d12" stroke-width="1.5" class="hist-dot cursor-pointer" data-tip="' + escapeHtml(tip) + '"></circle>';
+    const safeTip = escapeHtml(tip);
+    return '<circle cx="' + x + '" cy="' + yR + '" r="3.5" fill="#f0a93b" stroke="#0b0d12" stroke-width="1.2" class="hist-dot cursor-pointer" data-tip="' + safeTip + '"></circle>' +
+           '<circle cx="' + x + '" cy="' + yL + '" r="3" fill="#7aa2f7" stroke="#0b0d12" stroke-width="1.2" class="hist-dot cursor-pointer" data-tip="' + safeTip + '"></circle>';
   }).join("");
 
-  // Y-axis ticks (every reset, but cap at 6 labels)
-  const ticks = [];
-  const tickCount = Math.min(rSpan + 1, 6);
+  // Tiny legend in the top-right of the chart area.
+  const legend =
+    '<g transform="translate(' + (padL + 6) + ',' + (padT - 6) + ')" font-size="10" font-family="Inter,system-ui,sans-serif">' +
+      '<circle cx="0" cy="0" r="3" fill="#f0a93b" />' +
+      '<text x="6" y="3" fill="#f7c779">resets</text>' +
+      '<circle cx="56" cy="0" r="3" fill="#7aa2f7" />' +
+      '<text x="62" y="3" fill="#7aa2f7">level</text>' +
+    '</g>';
+
+  // Left Y axis: resets ticks. Right Y axis: level ticks.
+  const tickCount = 5;
+  const rTicks = [], lTicks = [];
   for (let i = 0; i < tickCount; i++) {
-    const v = Math.round(rMin + (rSpan * i) / Math.max(tickCount - 1, 1));
-    ticks.push(v);
+    rTicks.push(Math.round(rMin + (rSpan * i) / (tickCount - 1)));
+    lTicks.push(Math.round(lMin + (lSpan * i) / (tickCount - 1)));
   }
-  const yTickLines = ticks.map((v) => {
+  const yTickLines = rTicks.map((v, i) => {
     const y = yOf(v);
+    const lv = lTicks[i];
     return '<line x1="' + padL + '" x2="' + (W - padR) + '" y1="' + y + '" y2="' + y + '" stroke="#252a36" stroke-dasharray="2,3" />' +
-           '<text x="' + (padL - 4) + '" y="' + (y + 3) + '" fill="#8a93a3" font-size="10" text-anchor="end">' + v + '</text>';
+           '<text x="' + (padL - 4) + '" y="' + (y + 3) + '" fill="#f0a93b" font-size="10" text-anchor="end">' + v + '</text>' +
+           '<text x="' + (W - padR + 4) + '" y="' + (y + 3) + '" fill="#7aa2f7" font-size="10" text-anchor="start">' + lv + '</text>';
   }).join("");
 
   // X labels — start, mid, end timestamps
@@ -1081,9 +1110,11 @@ function renderHistoryChart(data, charName) {
   return stats +
     '<svg viewBox="0 0 ' + W + ' ' + H + '" class="w-full h-auto bg-bg border border-border rounded-md">' +
       yTickLines +
+      '<path d="' + lDp + '" fill="none" stroke="#7aa2f7" stroke-width="1.5" stroke-opacity="0.85" />' +
       '<path d="' + d + '" fill="none" stroke="#f0a93b" stroke-width="2" />' +
       dots +
       xLabels +
+      legend +
     '</svg>';
 }
 
