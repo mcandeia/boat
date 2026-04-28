@@ -24,6 +24,7 @@ interface AdminCharRow {
   owner_first_name: string | null;
   owner_username: string | null;
   sub_count: number;
+  avg_reset_time?: number | null;
 }
 
 export async function adminListChars(env: Env): Promise<Response> {
@@ -35,7 +36,10 @@ export async function adminListChars(env: Env): Promise<Response> {
          c.class_code, c.is_gm, c.created_at, c.user_id,
          u.first_name AS owner_first_name,
          u.telegram_username AS owner_username,
-         (SELECT COUNT(*) FROM subscriptions s WHERE s.character_id = c.id AND s.active = 1) AS sub_count
+         (SELECT COUNT(*) FROM subscriptions s WHERE s.character_id = c.id AND s.active = 1) AS sub_count,
+         (SELECT (MAX(start_ts) - MIN(start_ts)) / NULLIF(MAX(resets) - MIN(resets), 0)
+          FROM (SELECT resets, MIN(ts) as start_ts FROM char_snapshots WHERE char_id = c.id GROUP BY resets)
+         ) AS avg_reset_time
        FROM characters c
        JOIN users u ON u.id = c.user_id
        ORDER BY c.id DESC`,

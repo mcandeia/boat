@@ -404,6 +404,14 @@ function relativeTime(unixSeconds) {
   if (diff < 86400) return Math.floor(diff / 3600) + "h atrás";
   return Math.floor(diff / 86400) + " d atrás";
 }
+function formatDuration(seconds) {
+  if (seconds == null || isNaN(seconds)) return null;
+  const s = Math.round(seconds);
+  const h = Math.floor(s / 3600);
+  const m = Math.floor((s % 3600) / 60);
+  if (h > 0) return h + "h " + m + "m";
+  return m + "m";
+}
 function escapeHtml(s) {
   return String(s).replace(/[&<>]/g, (c) => c === "&" ? "&amp;" : c === "<" ? "&lt;" : "&gt;");
 }
@@ -434,6 +442,7 @@ function renderCharLeft(container, c) {
   const rows = [];
   rows.push(statRow("Classe", c.class ? escapeHtml(c.class) : dash));
   rows.push(statRow("Resets", typeof c.resets === "number" ? String(c.resets) : dash));
+  rows.push(statRow("Média/Reset", c.avg_reset_time ? formatDuration(c.avg_reset_time) : dash));
   rows.push(statRow("Level", c.last_level != null ? '<b class="text-goldsoft">' + c.last_level + '</b>' : dash));
   rows.push(statRow("Mapa", c.last_map ? escapeHtml(c.last_map) : dash));
   rows.push(statRow("Situação", statusBadge));
@@ -912,7 +921,7 @@ function adminCharRowHtml(c) {
     '</td>' +
     '<td class="py-1.5 pr-2">' + escapeHtml(owner) + ' <span class="text-muted">#' + c.user_id + '</span></td>' +
     '<td class="py-1.5 pr-2">' + (c.class ? escapeHtml(c.class) : '<span class="text-muted">—</span>') + '</td>' +
-    '<td class="py-1.5 pr-2">' + (c.last_level != null ? c.last_level : '<span class="text-muted">—</span>') + '</td>' +
+    '<td class="py-1.5 pr-2">' + (c.last_level != null ? c.last_level : '<span class="text-muted">—</span>') + ' <span class="text-muted text-[10px]">lvl</span> / ' + (typeof c.resets === "number" ? c.resets : "—") + ' <span class="text-muted text-[10px]">rr</span>' + (c.avg_reset_time ? '<br><span class="text-muted text-[10px]">~' + formatDuration(c.avg_reset_time) + '/rr</span>' : '') + '</td>' +
     '<td class="py-1.5 pr-2">' + status + '</td>' +
     '<td class="py-1.5 pr-2">' + subBtn + '</td>' +
     '<td class="py-1.5 pr-2 whitespace-nowrap">' +

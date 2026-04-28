@@ -7,7 +7,14 @@ const INVALID_NAME = "nome de personagem inválido";
 
 export async function listCharacters(env: Env, userId: number): Promise<Response> {
   const rows = await env.DB
-    .prepare("SELECT * FROM characters WHERE user_id = ? ORDER BY name COLLATE NOCASE")
+    .prepare(`
+      SELECT c.*,
+        (SELECT (MAX(start_ts) - MIN(start_ts)) / NULLIF(MAX(resets) - MIN(resets), 0)
+         FROM (SELECT resets, MIN(ts) as start_ts FROM char_snapshots WHERE char_id = c.id GROUP BY resets)
+        ) AS avg_reset_time
+      FROM characters c 
+      WHERE user_id = ? ORDER BY name COLLATE NOCASE
+    `)
     .bind(userId)
     .all<CharacterRow>();
   return json({ characters: rows.results ?? [] });

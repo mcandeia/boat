@@ -57,6 +57,27 @@ export default {
         return await telegramWebhook(env, req);
       }
 
+      // ---- Local dev login backdoor ----
+      if (pathname === "/dev-login" && (url.hostname === "localhost" || url.hostname === "127.0.0.1")) {
+        await env.DB.prepare(`
+          INSERT INTO users (telegram_chat_id, telegram_username, first_name, created_at, admin)
+          VALUES (123456789, 'dev_user', 'Dev Local', 0, 1)
+          ON CONFLICT(telegram_chat_id) DO UPDATE SET admin = 1
+        `).run();
+        const user = await env.DB.prepare("SELECT id FROM users WHERE telegram_chat_id = 123456789").first<{id: number}>();
+        if (user) {
+          const { createSession, setCookieHeader } = await import("./session");
+          const token = await createSession(env, user.id);
+          return new Response("Redirecionando...", {
+            status: 302,
+            headers: {
+              "Location": "/",
+              "Set-Cookie": setCookieHeader(env, token)
+            }
+          });
+        }
+      }
+
 
       // ---- everything below requires a session ----
       const sess = await readSession(env, cookie);
