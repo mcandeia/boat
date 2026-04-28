@@ -1263,7 +1263,9 @@ function wireHistoryTooltips(cell) {
   const tip = $("chart-tip");
   if (!tip) return;
   const setBarsHighlight = (on) => {
-    cell.querySelectorAll(".cycle-bar").forEach((b) => {
+    // Only the visible (pointer-events-none) bars get restyled — the wide
+    // transparent hit-zones stay 14px so they're still easy to grab.
+    cell.querySelectorAll(".cycle-bar.pointer-events-none").forEach((b) => {
       b.setAttribute("stroke-opacity", on ? "1" : (b.getAttribute("stroke") === "#f0a93b" ? "0.85" : "0.5"));
       b.setAttribute("stroke-width", on ? "1.8" : (b.getAttribute("stroke") === "#f0a93b" ? "1.6" : "1.2"));
     });
@@ -1353,8 +1355,8 @@ function renderHistoryChart(data, charName) {
       (s.map ? " · " + s.map : "") +
       (s.status ? " · " + s.status : "");
     const safeTip = escapeHtml(tip);
-    return '<circle cx="' + x + '" cy="' + yR + '" r="3.5" fill="#f0a93b" stroke="#0b0d12" stroke-width="1.2" class="hist-dot cursor-pointer" data-tip="' + safeTip + '"></circle>' +
-           '<circle cx="' + x + '" cy="' + yL + '" r="3" fill="#7aa2f7" stroke="#0b0d12" stroke-width="1.2" class="hist-dot cursor-pointer" data-tip="' + safeTip + '"></circle>';
+    return '<circle cx="' + x + '" cy="' + yR + '" r="5" fill="#f0a93b" stroke="#0b0d12" stroke-width="1.2" class="hist-dot cursor-pointer" data-tip="' + safeTip + '"></circle>' +
+           '<circle cx="' + x + '" cy="' + yL + '" r="4" fill="#7aa2f7" stroke="#0b0d12" stroke-width="1.2" class="hist-dot cursor-pointer" data-tip="' + safeTip + '"></circle>';
   }).join("");
 
   // "Cycle benchmark" markers — one for the current cycle, one for the
@@ -1395,7 +1397,12 @@ function renderHistoryChart(data, charName) {
     const color = isCurrent ? "#f0a93b" : "#8a93a3";
     const opacity = isCurrent ? "0.85" : "0.5";
     const w = isCurrent ? "1.6" : "1.2";
-    return '<line x1="' + x + '" x2="' + x + '" y1="' + padT + '" y2="' + (H - padB) + '" stroke="' + color + '" stroke-width="' + w + '" stroke-dasharray="4,3" stroke-opacity="' + opacity + '" class="cycle-bar cursor-pointer" data-tip="' + tip + '"></line>';
+    // Wide invisible hit-zone behind the visible dashed line — makes the
+    // bar trivial to hover even on dense charts. Both share the .cycle-bar
+    // class so the existing hover handler treats them identically.
+    const hit = '<line x1="' + x + '" x2="' + x + '" y1="' + padT + '" y2="' + (H - padB) + '" stroke="transparent" stroke-width="14" class="cycle-bar cursor-pointer" data-tip="' + tip + '"></line>';
+    const visible = '<line x1="' + x + '" x2="' + x + '" y1="' + padT + '" y2="' + (H - padB) + '" stroke="' + color + '" stroke-width="' + w + '" stroke-dasharray="4,3" stroke-opacity="' + opacity + '" class="cycle-bar pointer-events-none"></line>';
+    return hit + visible;
   }
   let markers = "";
   let inlineLabels = "";
