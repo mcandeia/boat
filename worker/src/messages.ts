@@ -52,7 +52,14 @@ export function formatAlert(
 ): string {
   const n = escHtml(charName);
   const thr = escHtml(sub.threshold ?? "");
-  const map = escHtml(snap.map ?? "");
+  const mapName = escHtml(snap.mapName ?? snap.map ?? "");
+  const coords = (snap.mapX != null && snap.mapY != null) ? `${snap.mapX}/${snap.mapY}` : null;
+  const where = mapName
+    ? (coords ? `<b>${mapName}</b> (${escHtml(coords)})` : `<b>${mapName}</b>`)
+    : `<span class="text-muted">?</span>`;
+  const lv = snap.level != null ? String(snap.level) : "?";
+  const rr = snap.resets != null ? String(snap.resets) : "?";
+  const status = escHtml(snap.status ?? "");
   if (sub.custom_message) {
     const dict: Record<string, string> = {
       username: n,
@@ -71,19 +78,19 @@ export function formatAlert(
   }
   switch (sub.event_type) {
     case "level_gte":
-      return `🎯 <b>${n}</b> chegou no nível <b>${snap.level}</b> (alvo ${thr}).`;
+      return `🎯 <b>${n}</b> chegou no nível <b>${lv}</b> (alvo ${thr}).\n📍 Local: ${where}.\n♻️ Resets: <b>${rr}</b>.`;
     case "map_eq":
-      return `📍 <b>${n}</b> entrou em <b>${map}</b>.`;
+      return `📍 <b>${n}</b> entrou em ${where}.\n🎚️ Level: <b>${lv}</b> • ♻️ Resets: <b>${rr}</b>.`;
     case "coords_in":
-      return `📍 <b>${n}</b> está em <b>${map}</b> (zona ${thr}).`;
+      return `📍 <b>${n}</b> está em ${where}.\n🧭 Zona do alerta: <b>${thr}</b>.\n🎚️ Level: <b>${lv}</b> • ♻️ Resets: <b>${rr}</b>.`;
     case "status_eq":
-      return `🟢 <b>${n}</b> agora está <b>${escHtml(snap.status ?? "")}</b>.`;
+      return `🟢 <b>${n}</b> agora está <b>${status}</b>.\n📍 Local: ${where}.\n🎚️ Level: <b>${lv}</b> • ♻️ Resets: <b>${rr}</b>.`;
     case "gm_online":
-      return `🛡️ GM <b>${n}</b> acabou de ficar online.`;
+      return `🛡️ GM <b>${n}</b> acabou de ficar online.\n📍 Local: ${where}.\n🎚️ Level: <b>${lv}</b> • ♻️ Resets: <b>${rr}</b>.`;
     case "server_event":
       return `📣 Evento do servidor: <b>${thr}</b>.`;
     case "level_stale":
-      return `⏸️ <b>${n}</b> sem subir level há <b>${thr} min</b> (lv ${snap.level ?? "?"}). Caiu? AFK?`;
+      return `⏸️ <b>${n}</b> sem subir level há <b>${thr} min</b>.\n🟢 Status: <b>${status || "?"}</b> • 📍 Local: ${where}.\n🎚️ Level: <b>${lv}</b> • ♻️ Resets: <b>${rr}</b>.`;
   }
 }
 

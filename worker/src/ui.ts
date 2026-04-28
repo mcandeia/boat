@@ -1,4 +1,4 @@
-// Single-page UI served from the Worker. No bundler — Tailwind via CDN.
+// Single-page UI served from the Worker. No bundler - Tailwind via CDN.
 // pt-BR strings throughout.
 
 export const INDEX_HTML = /* html */ `<!doctype html>
@@ -1309,24 +1309,41 @@ function updateSubFormUi() {
 
   err.textContent = "";
   hint.textContent = "";
+  function tierForLevelClient(level) {
+    if (level == null || !Number.isFinite(level)) return null;
+    const ranges = [
+      { tier: 1, min: 15, max: 49 },
+      { tier: 2, min: 50, max: 119 },
+      { tier: 3, min: 120, max: 179 },
+      { tier: 4, min: 180, max: 239 },
+      { tier: 5, min: 240, max: 299 },
+      { tier: 6, min: 300, max: 349 },
+      { tier: 7, min: 350, max: 9999 },
+    ];
+    for (const r of ranges) if (level >= r.min && level <= r.max) return r;
+    return null;
+  }
   function serverEventEntryReqClient(eventNameRaw) {
     const n = String(eventNameRaw || "").toLowerCase();
     if (!n) return null;
     if (n.includes("chaos castle")) {
       return {
-        itemExample: "<b>Armor of Guardsman +3</b>",
+        itemLabel: "Armor of Guardsman",
+        itemTiered: true,
         npc: { name: "Chaos Goblin", map: "Noria", coords: "168,96" },
       };
     }
     if (n.includes("blood castle")) {
       return {
-        itemExample: "<b>Blood Bone +2</b>",
+        itemLabel: "Blood Bone",
+        itemTiered: true,
         npc: { name: "Archangel Messenger", map: "Devias", coords: "198,47" },
       };
     }
     if (n.includes("devil square")) {
       return {
-        itemExample: "<b>Devil's Invitation +4</b>",
+        itemLabel: "Devil's Invitation",
+        itemTiered: true,
         npc: { name: "Charon", map: "Noria", coords: "167,90" },
       };
     }
@@ -1346,13 +1363,107 @@ function updateSubFormUi() {
 
     const custom = (payload.custom_message || "").trim();
     if (!custom) {
-      prev.innerHTML = '<span class="text-slate-200">' + label + "</span>";
-      hint.textContent = "Mensagem padrão será usada.";
+      const char = payload.character_id
+        ? state.characters.find((c) => c.id === payload.character_id)
+        : null;
+      const charName = char ? (char.name || "") : "";
+      const charMap = char ? (char.last_map || "") : "";
+      const charLevel = char && typeof char.last_level === "number" ? char.last_level : null;
+      const charResets = char && typeof char.resets === "number" ? char.resets : null;
+      const charStatus = char ? (char.last_status || "") : "";
+
+      function parseMapStr(s) {
+        const raw = String(s || "").trim();
+        if (!raw) return { mapName: "", coords: "" };
+        // NOTE: this script is embedded inside a template string, so we must
+        // escape backslashes to keep the regex intact in the browser.
+        const m = raw.match(/^(.+?)\\s*\\((\\d+)\\s*\\/\\s*(\\d+)\\)\\s*$/);
+        if (m) return { mapName: (m[1] || "").trim(), coords: String(m[2]) + "/" + String(m[3]) };
+        return { mapName: raw, coords: "" };
+      }
+
+      const { mapName, coords } = parseMapStr(charMap);
+      const where = mapName
+        ? (coords ? "<b>" + escapeHtml(mapName) + "</b> (" + escapeHtml(coords) + ")" : "<b>" + escapeHtml(mapName) + "</b>")
+        : '<span class="text-muted">?</span>';
+      const lv = charLevel != null ? String(charLevel) : "?";
+      const rr = charResets != null ? String(charResets) : "?";
+      const status = escapeHtml(charStatus);
+
+      let defaultMsg = "";
+      if (payload.event_type === "level_gte") {
+        defaultMsg = "🎯 <b>" + escapeHtml(charName) + "</b> chegou no nivel <b>" + escapeHtml(lv) + "</b> (alvo " + escapeHtml(payload.threshold || "") + ").\\n" +
+          "📍 Local: " + where + ".\\n♻️ Resets: <b>" + escapeHtml(rr) + "</b>.";
+      } else if (payload.event_type === "map_eq") {
+        defaultMsg = "📍 <b>" + escapeHtml(charName) + "</b> entrou em " + where + ".\\n" +
+          "🎚️ Level: <b>" + escapeHtml(lv) + "</b> • ♻️ Resets: <b>" + escapeHtml(rr) + "</b>.";
+      } else if (payload.event_type === "coords_in") {
+        defaultMsg = "📍 <b>" + escapeHtml(charName) + "</b> está em " + where + ".\\n" +
+          "🧭 Zona do alerta: <b>" + escapeHtml(payload.threshold || "") + "</b>.\\n" +
+          "🎚️ Level: <b>" + escapeHtml(lv) + "</b> • ♻️ Resets: <b>" + escapeHtml(rr) + "</b>.";
+      } else if (payload.event_type === "status_eq") {
+        defaultMsg = "🟢 <b>" + escapeHtml(charName) + "</b> agora está <b>" + escapeHtml(status || "?") + "</b>.\\n" +
+          "📍 Local: " + where + ".\\n🎚️ Level: <b>" + escapeHtml(lv) + "</b> • ♻️ Resets: <b>" + escapeHtml(rr) + "</b>.";
+      } else if (payload.event_type === "gm_online") {
+        defaultMsg = "🛡️ GM <b>" + escapeHtml(charName) + "</b> acabou de ficar online.\\n" +
+          "📍 Local: " + where + ".\\n🎚️ Level: <b>" + escapeHtml(lv) + "</b> • ♻️ Resets: <b>" + escapeHtml(rr) + "</b>.";
+      } else if (payload.event_type === "level_stale") {
+        defaultMsg = "⏸️ <b>" + escapeHtml(charName) + "</b> sem subir level há <b>" + escapeHtml(payload.threshold || "") + " min</b>.\\n" +
+          "🟢 Status: <b>" + escapeHtml(status || "?") + "</b> • 📍 Local: " + where + ".\\n" +
+          "🎚️ Level: <b>" + escapeHtml(lv) + "</b> • ♻️ Resets: <b>" + escapeHtml(rr) + "</b>.";
+      } else if (payload.event_type === "server_event") {
+        const parts = String(payload.threshold || "").split("|");
+        const evName = (parts[0] || "").trim();
+        const room = (parts[1] || "").trim().toUpperCase();
+        const lead = String(Number(parts[2]) || 0);
+
+        const req = serverEventEntryReqClient(evName);
+        let itemLine = "";
+        let npcLine = "";
+        if (req) {
+          const userMaxLevel = Math.max(
+            ...state.characters
+              .map((c) => (typeof c.last_level === "number" ? c.last_level : null))
+              .filter((n) => n != null),
+          );
+          const tier = Number.isFinite(userMaxLevel) ? tierForLevelClient(userMaxLevel) : null;
+          if (req.itemTiered) {
+            if (tier) {
+              itemLine = "Entrada: <b>" + escapeHtml(req.itemLabel) + " +" + tier.tier + "</b> (lvl " + tier.min + "–" + tier.max + ").";
+            } else {
+              itemLine = "Entrada: <b>" + escapeHtml(req.itemLabel) + " +N</b> (depende do level; +1…+7).";
+            }
+          } else {
+            itemLine = "Entrada: <b>" + escapeHtml(req.itemLabel) + "</b>.";
+          }
+          if (req.npc) {
+            const loc = String(req.npc.map || "") + (req.npc.coords ? " (" + req.npc.coords + ")" : "");
+            npcLine = "NPC: <b>" + escapeHtml(req.npc.name) + "</b> — " + escapeHtml(loc) + ".";
+          }
+        }
+        defaultMsg = "📣 <b>" + escapeHtml(evName || "?") + "</b> (" + escapeHtml(room || "?") + ") começa em <b>" + escapeHtml(lead) + " min</b>." +
+          (itemLine ? "\\n" + itemLine : "") +
+          (npcLine ? "\\n" + npcLine : "");
+      } else {
+        defaultMsg = label;
+      }
+
+      prev.innerHTML =
+        '<div class="space-y-2">' +
+          '<div><div class="text-[11px] uppercase tracking-widest text-muted mb-1">Regra do alerta</div><div class="text-sm text-slate-200">' + label + "</div></div>" +
+          '<div><div class="text-[11px] uppercase tracking-widest text-muted mb-1">Mensagem padrao (preview)</div><div class="text-sm text-slate-200 whitespace-pre-line">' + defaultMsg + "</div></div>" +
+        "</div>";
+      hint.textContent = "Preview da mensagem padrao (sem custom message).";
     } else {
       // Build a best-effort token dict for preview using current form values + last known character snapshot.
       const char = payload.character_id
         ? state.characters.find((c) => c.id === payload.character_id)
         : null;
+      const charName = char ? (char.name || "") : "";
+      const charMap = char ? (char.last_map || "") : "";
+      const charLevel = char && typeof char.last_level === "number" ? char.last_level : null;
+      const charResets = char && typeof char.resets === "number" ? char.resets : null;
+      const charStatus = char ? (char.last_status || "") : "";
       const isServerEvent = payload.event_type === "server_event";
       const thrParts = String(payload.threshold || "").split("|");
       const evNameRaw = isServerEvent ? (thrParts[0] || "") : "";
@@ -1364,27 +1475,49 @@ function updateSubFormUi() {
       let npc_map = "";
       let npc_coords = "";
       if (isServerEvent) {
+        const leadNum = Number(leadRaw) || 0;
         const req = serverEventEntryReqClient(evNameRaw);
         if (req) {
-          item = req.itemExample || "";
+          // Mirror backend: use user's MAX level to suggest ticket tier.
+          const userMaxLevel = Math.max(
+            ...state.characters
+              .map((c) => (typeof c.last_level === "number" ? c.last_level : null))
+              .filter((n) => n != null),
+          );
+          const tier = Number.isFinite(userMaxLevel) ? tierForLevelClient(userMaxLevel) : null;
+
+          let itemLine = "";
+          if (req.itemTiered) {
+            if (tier) {
+              itemLine = "🎟️ Entrada: <b>" + escapeHtml(req.itemLabel) + " +" + tier.tier + "</b> (lvl " + tier.min + "–" + tier.max + ").";
+            } else {
+              itemLine = "🎟️ Entrada: <b>" + escapeHtml(req.itemLabel) + " +N</b> (depende do level; +1…+7).";
+            }
+          } else {
+            itemLine = "🎟️ Entrada: <b>" + escapeHtml(req.itemLabel) + "</b>.";
+          }
+          item = itemLine ? itemLine.replace(/^🎟️ Entrada:\s*/i, "").replace(/\.$/, "") : "";
           if (req.npc) {
             npc = req.npc.name || "";
             npc_map = req.npc.map || "";
             npc_coords = req.npc.coords || "";
           }
         }
+        // Normalize lead like backend does (Number(...) || 0).
+        // Keep room lowercased in threshold like backend does.
+        leadRaw = String(leadNum);
       }
       const normalizedServerThreshold = isServerEvent
         ? (evNameRaw + "|" + String(roomRaw || "").toLowerCase() + "|" + leadRaw)
         : String(payload.threshold || "");
       const dict = {
-        username: escapeHtml(char?.name || ""),
-        char: escapeHtml(char?.name || ""),
-        lv: char?.last_level != null ? String(char.last_level) : "?",
-        level: char?.last_level != null ? String(char.last_level) : "?",
-        resets: typeof char?.resets === "number" ? String(char.resets) : "?",
-        map: escapeHtml(char?.last_map || ""),
-        status: escapeHtml(char?.last_status || ""),
+        username: escapeHtml(charName),
+        char: escapeHtml(charName),
+        lv: charLevel != null ? String(charLevel) : "?",
+        level: charLevel != null ? String(charLevel) : "?",
+        resets: charResets != null ? String(charResets) : "?",
+        map: escapeHtml(charMap),
+        status: escapeHtml(charStatus),
         threshold: escapeHtml(normalizedServerThreshold),
         coords: escapeHtml(payload.threshold || ""),
         // server_event extras (best-effort from threshold)
