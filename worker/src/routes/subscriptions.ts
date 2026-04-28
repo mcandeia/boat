@@ -11,6 +11,7 @@ const EVENT_TYPES: ReadonlySet<EventType> = new Set([
   "status_eq",
   "gm_online",
   "server_event",
+  "level_stale",
 ]);
 
 const COORDS_RE = /^[A-Za-z][A-Za-z0-9 _-]{0,30}:\d{1,3}-\d{1,3}:\d{1,3}-\d{1,3}$/;
@@ -69,6 +70,11 @@ export async function createSubscription(env: Env, userId: number, req: Request)
   } else if (eventType === "server_event") {
     if (!threshold) return bad(400, "nome do evento obrigatório");
     characterId = null;
+  } else if (eventType === "level_stale") {
+    const n = Number(threshold);
+    if (!Number.isInteger(n) || n < 1 || n > 1440) return bad(400, "minutos sem subir level deve estar entre 1 e 1440");
+    threshold = String(n);
+    if (!characterId) return bad(400, "selecione um personagem");
   }
 
   if (characterId !== null) {
@@ -142,7 +148,10 @@ async function maybeFireOnCreate(
     scraped: true,
   };
 
-  if (!currentlyMatches(sub, snap, !!char.is_gm)) return;
+  if (!currentlyMatches(sub, snap, !!char.is_gm, {
+    last_level_change_at: char.last_level_change_at,
+    now: now(),
+  })) return;
 
   const owner = await env.DB
     .prepare("SELECT telegram_chat_id FROM users WHERE id = ?")

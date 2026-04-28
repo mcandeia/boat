@@ -94,7 +94,10 @@ export async function pollOnce(env: Env): Promise<{ scraped: number; fired: numb
 
     for (const sub of subsByChar.get(char.id) ?? []) {
       if (sub.cooldown_until > t) continue;
-      const trigger = evaluate(sub, prev, snap, !!char.is_gm);
+      const trigger = evaluate(sub, prev, snap, !!char.is_gm, {
+        last_level_change_at: char.last_level_change_at,
+        now: t,
+      });
       if (!trigger) continue;
 
       const msg = formatAlert(char.name, sub, snap);
@@ -115,6 +118,9 @@ export async function pollOnce(env: Env): Promise<{ scraped: number; fired: numb
     }
 
     const ranks = enrichRanks(snap, rankings);
+    // Track when level last changed so the level_stale alert can fire after
+    // N minutes of no progress. Only bump it if the level actually moved.
+    const levelChangedAt = snap.level !== prev.level && snap.level != null ? t : null;
     await env.DB
       .prepare(
         `UPDATE characters
@@ -124,6 +130,7 @@ export async function pollOnce(env: Env): Promise<{ scraped: number; fired: numb
                 last_map = COALESCE(?, last_map),
                 last_status = COALESCE(?, last_status),
                 last_checked_at = ?,
+                last_level_change_at = COALESCE(?, last_level_change_at),
                 class_code = ?,
                 rank_overall = ?,
                 rank_class = ?,
@@ -133,6 +140,7 @@ export async function pollOnce(env: Env): Promise<{ scraped: number; fired: numb
       )
       .bind(
         snap.class, snap.resets, snap.level, snap.map, snap.status, t,
+        levelChangedAt,
         ranks.classCode, ranks.rankOverall, ranks.rankClass,
         ranks.nextTargetName, ranks.nextTargetResets,
         char.name,
@@ -168,6 +176,7 @@ function evaluate(
   prev: ProfileSnapshot,
   next: ProfileSnapshot,
   isGm: boolean,
+  ctx: { last_level_change_at: number | null; now: number },
 ): boolean {
   switch (sub.event_type) {
     case "level_gte": {
@@ -201,6 +210,16 @@ function evaluate(
     case "server_event":
       // Not yet wired to a data source. Skipped silently for now.
       return false;
+    case "level_stale": {
+      // Fire if no level change in the configured number of minutes.
+      // Cooldown (1h) prevents re-fire while still idle. The fire-on-create
+      // path catches an already-stale char on subscription creation.
+      const minutes = Number(sub.threshold);
+      if (!Number.isFinite(minutes) || minutes < 1) return false;
+      if (ctx.last_level_change_at == null) return false;
+      const idleSecs = ctx.now - ctx.last_level_change_at;
+      return idleSecs >= minutes * 60;
+    }
   }
 }
 

@@ -275,6 +275,7 @@ export const INDEX_HTML = /* html */ `<!doctype html>
               <option value="map_eq">Entrou no mapa</option>
               <option value="status_eq">Online / offline</option>
               <option value="gm_online">GM online (este personagem)</option>
+              <option value="level_stale">Sem subir level (idle)</option>
               <option value="server_event" disabled>Evento do servidor (em breve)</option>
             </select>
           </div>
@@ -590,6 +591,7 @@ function renderDash() {
     else if (s.event_type === "coords_in") label = charName + ' — entra na zona <b class="text-goldsoft">' + s.threshold + '</b>';
     else if (s.event_type === "status_eq") label = charName + ' — fica <b class="text-goldsoft">' + s.threshold + '</b>';
     else if (s.event_type === "gm_online") label = "GM " + charName + " — online";
+    else if (s.event_type === "level_stale") label = charName + ' — sem subir level por <b class="text-goldsoft">' + s.threshold + ' min</b>';
     else if (s.event_type === "server_event") label = "evento do servidor: " + s.threshold;
     const activeBadge = s.active
       ? '<span class="px-2 py-0.5 rounded-full bg-ok/10 text-ok border border-ok/20 text-xs">ativo</span>'
@@ -787,6 +789,18 @@ const subFieldsEl = $("sub-fields");
 
 const ctrlClass = "h-10 w-full bg-bg border border-border rounded-md px-3 outline-none focus:border-gold/60";
 
+// Hand-curated coordinate boxes for known maps. When the user types one
+// of these as the map name on a "Entrou no mapa" alert, we offer a
+// checkbox that auto-fills the coords instead of forcing manual entry.
+// Add more presets here as we identify them.
+const SAFE_ZONES = {
+  stadium: { x1: 60, x2: 70, y1: 39, y2: 50, label: "Área segura / Respawn (baú)" },
+};
+function safeZoneFor(mapName) {
+  const k = (mapName || "").trim().toLowerCase();
+  return SAFE_ZONES[k] || null;
+}
+
 function renderSubFields() {
   const t = subTypeEl.value;
   let html = "";
@@ -797,7 +811,14 @@ function renderSubFields() {
     html =
       '<label class="text-[11px] text-muted block mb-1">Nome do mapa</label>' +
       '<input id="sf-map" type="text" placeholder="ex.: Stadium" class="' + ctrlClass + '" />' +
-      '<details class="mt-2 text-sm">' +
+      '<div id="sf-safezone-wrap" class="hidden mt-2">' +
+        '<label class="inline-flex items-center gap-2 text-sm text-slate-300 cursor-pointer">' +
+          '<input id="sf-safezone" type="checkbox" class="accent-gold" />' +
+          '<span id="sf-safezone-label">Área segura</span>' +
+        '</label>' +
+        '<div class="text-[11px] text-muted mt-1">Marca quando o personagem aparece na área de respawn (útil pra detectar morte / AFK).</div>' +
+      '</div>' +
+      '<details id="sf-coords-details" class="mt-2 text-sm">' +
         '<summary class="cursor-pointer text-muted hover:text-goldsoft">Filtrar por coordenadas (opcional)</summary>' +
         '<div class="mt-2 grid grid-cols-2 sm:grid-cols-4 gap-2">' +
           '<div><label class="text-[11px] text-muted block mb-1">X mínimo</label><input id="sf-x1" type="number" min="0" max="255" placeholder="60" class="' + ctrlClass + '" /></div>' +
@@ -805,7 +826,7 @@ function renderSubFields() {
           '<div><label class="text-[11px] text-muted block mb-1">Y mínimo</label><input id="sf-y1" type="number" min="0" max="255" placeholder="80" class="' + ctrlClass + '" /></div>' +
           '<div><label class="text-[11px] text-muted block mb-1">Y máximo</label><input id="sf-y2" type="number" min="0" max="255" placeholder="100" class="' + ctrlClass + '" /></div>' +
         '</div>' +
-        '<div class="text-[11px] text-muted mt-2">Para uma posição exata, use o mesmo número em mín e máx (ex.: respawn de Stadium num pixel específico).</div>' +
+        '<div class="text-[11px] text-muted mt-2">Para uma posição exata, use o mesmo número em mín e máx.</div>' +
       '</details>';
   } else if (t === "status_eq") {
     html =
@@ -816,10 +837,39 @@ function renderSubFields() {
       '</select>';
   } else if (t === "gm_online") {
     html = '<div class="text-xs text-muted bg-bg border border-border rounded-md px-3 py-2">Sem campos extras. O personagem precisa estar marcado como <b class="text-goldsoft">GM</b> na lista de personagens.</div>';
+  } else if (t === "level_stale") {
+    html =
+      '<label class="text-[11px] text-muted block mb-1">Minutos sem subir de nível</label>' +
+      '<input id="sf-stale" type="number" min="1" max="1440" placeholder="ex.: 5" class="' + ctrlClass + '" />' +
+      '<div class="text-[11px] text-muted mt-1">Avisa se o personagem ficou esse tempo sem subir level (provavelmente AFK, morreu ou desconectou).</div>';
   } else if (t === "server_event") {
     html = '<div class="text-xs text-muted bg-bg border border-border rounded-md px-3 py-2">Evento do servidor ainda não está conectado a uma fonte. Em breve.</div>';
   }
   subFieldsEl.innerHTML = html;
+
+  // map_eq: react to map-name typing → toggle the safe-zone checkbox.
+  // When the checkbox is on, hide the manual-coords details so the user
+  // isn't confused which one wins.
+  const mapEl = $("sf-map");
+  const wrap = $("sf-safezone-wrap");
+  const cb = $("sf-safezone");
+  const lbl = $("sf-safezone-label");
+  const details = $("sf-coords-details");
+  if (mapEl && wrap && cb && lbl && details) {
+    const sync = () => {
+      const z = safeZoneFor(mapEl.value);
+      if (z) {
+        wrap.classList.remove("hidden");
+        lbl.textContent = z.label;
+      } else {
+        wrap.classList.add("hidden");
+        cb.checked = false;
+      }
+      details.classList.toggle("hidden", !!cb.checked);
+    };
+    mapEl.addEventListener("input", sync);
+    cb.addEventListener("change", sync);
+  }
 }
 subTypeEl.addEventListener("change", renderSubFields);
 renderSubFields();
@@ -837,6 +887,18 @@ function readSubFormPayload() {
   if (t === "map_eq") {
     const map = ($("sf-map").value || "").trim();
     if (!map) throw new Error("informe o mapa");
+    // Preset wins if it's checked: send the canned coord box.
+    const safezoneOn = !!($("sf-safezone") && $("sf-safezone").checked);
+    if (safezoneOn) {
+      const z = safeZoneFor(map);
+      if (z) {
+        return {
+          ...base,
+          event_type: "coords_in",
+          threshold: map + ":" + z.x1 + "-" + z.x2 + ":" + z.y1 + "-" + z.y2,
+        };
+      }
+    }
     const x1 = ($("sf-x1") || {}).value, x2 = ($("sf-x2") || {}).value;
     const y1 = ($("sf-y1") || {}).value, y2 = ($("sf-y2") || {}).value;
     const anyCoord = [x1, x2, y1, y2].some((v) => (v ?? "").toString().trim() !== "");
@@ -857,6 +919,11 @@ function readSubFormPayload() {
   }
   if (t === "gm_online") {
     return { ...base, event_type: "gm_online" };
+  }
+  if (t === "level_stale") {
+    const v = ($("sf-stale").value || "").trim();
+    if (!v) throw new Error("informe os minutos");
+    return { ...base, event_type: "level_stale", threshold: v };
   }
   throw new Error("evento do servidor ainda não disponível");
 }
@@ -1230,6 +1297,7 @@ function renderAdminSubs(subs) {
     else if (s.event_type === "coords_in") label = "zona <b class=\\"text-goldsoft\\">" + escapeHtml(s.threshold ?? "") + "</b>";
     else if (s.event_type === "status_eq") label = "fica <b class=\\"text-goldsoft\\">" + escapeHtml(s.threshold ?? "") + "</b>";
     else if (s.event_type === "gm_online") label = "GM online";
+    else if (s.event_type === "level_stale") label = "sem subir level por <b class=\\"text-goldsoft\\">" + escapeHtml(s.threshold ?? "") + " min</b>";
     else if (s.event_type === "server_event") label = "evento: " + escapeHtml(s.threshold ?? "");
     else label = escapeHtml(s.event_type);
     const status = s.active
