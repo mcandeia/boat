@@ -276,7 +276,7 @@ export const INDEX_HTML = /* html */ `<!doctype html>
               <option value="status_eq">Online / offline</option>
               <option value="gm_online">GM online (este personagem)</option>
               <option value="level_stale">Sem subir level (idle)</option>
-              <option value="server_event" disabled>Evento do servidor (em breve)</option>
+              <option value="server_event">Evento do servidor (Chaos Castle, invasões, etc.)</option>
             </select>
           </div>
         </div>
@@ -604,7 +604,10 @@ function renderDash() {
     else if (s.event_type === "status_eq") label = charName + ' — fica <b class="text-goldsoft">' + s.threshold + '</b>';
     else if (s.event_type === "gm_online") label = "GM " + charName + " — online";
     else if (s.event_type === "level_stale") label = charName + ' — sem subir level por <b class="text-goldsoft">' + s.threshold + ' min</b>';
-    else if (s.event_type === "server_event") label = "evento do servidor: " + s.threshold;
+    else if (s.event_type === "server_event") {
+      const parts = (s.threshold || "").split("|");
+      label = '📣 <b class="text-goldsoft">' + (parts[0] || "?") + '</b> (' + (parts[1] || "?").toUpperCase() + ') — ' + (parts[2] || "?") + ' min antes';
+    }
     const activeBadge = s.active
       ? '<span class="px-2 py-0.5 rounded-full bg-ok/10 text-ok border border-ok/20 text-xs">ativo</span>'
       : '<span class="px-2 py-0.5 rounded-full bg-border text-muted border border-border text-xs">pausado</span>';
@@ -855,7 +858,13 @@ function renderSubFields() {
       '<input id="sf-stale" type="number" min="1" max="1440" placeholder="ex.: 5" class="' + ctrlClass + '" />' +
       '<div class="text-[11px] text-muted mt-1">Avisa se o personagem ficou esse tempo sem subir level (provavelmente AFK, morreu ou desconectou).</div>';
   } else if (t === "server_event") {
-    html = '<div class="text-xs text-muted bg-bg border border-border rounded-md px-3 py-2">Evento do servidor ainda não está conectado a uma fonte. Em breve.</div>';
+    html =
+      '<div class="grid sm:grid-cols-3 gap-2">' +
+        '<div class="sm:col-span-2"><label class="text-[11px] text-muted block mb-1">Evento</label><select id="sf-event" class="' + ctrlClass + '"><option value="">carregando…</option></select></div>' +
+        '<div><label class="text-[11px] text-muted block mb-1">Sala</label><select id="sf-room" class="' + ctrlClass + '"><option value="free">Free</option><option value="vip">VIP</option></select></div>' +
+      '</div>' +
+      '<div class="mt-2"><label class="text-[11px] text-muted block mb-1">Avisar quantos minutos antes</label><input id="sf-lead" type="number" min="0" max="120" placeholder="ex.: 5" class="' + ctrlClass + '" /></div>' +
+      '<div class="text-[11px] text-muted mt-1">Os horários vêm de mupatos.net/eventos e mupatos.net/invasoes (atualizados de hora em hora).</div>';
   }
   subFieldsEl.innerHTML = html;
 
@@ -881,6 +890,33 @@ function renderSubFields() {
     };
     mapEl.addEventListener("input", sync);
     cb.addEventListener("change", sync);
+  }
+
+  // server_event: lazy-load the options the first time the user picks
+  // this type. Cache the result so type-flips don't re-fetch.
+  const evSelect = $("sf-event");
+  if (evSelect) {
+    fetchJSON("/api/events").then((data) => {
+      const events = data.events || [];
+      if (events.length === 0) {
+        evSelect.innerHTML = '<option value="">(nenhum evento — ainda não foi sincronizado)</option>';
+        return;
+      }
+      const byCat = { event: [], invasion: [] };
+      for (const e of events) (byCat[e.category] || (byCat[e.category] = [])).push(e);
+      let html = "";
+      for (const [cat, list] of Object.entries(byCat)) {
+        if (!list.length) continue;
+        const seen = new Set();
+        const names = list.map((e) => e.name).filter((n) => !seen.has(n) && seen.add(n));
+        html += '<optgroup label="' + (cat === "event" ? "Eventos" : "Invasões") + '">';
+        for (const n of names) html += '<option value="' + n.replace(/"/g, '&quot;') + '">' + n + '</option>';
+        html += '</optgroup>';
+      }
+      evSelect.innerHTML = html;
+    }).catch(() => {
+      evSelect.innerHTML = '<option value="">(falha ao carregar eventos)</option>';
+    });
   }
 }
 subTypeEl.addEventListener("change", renderSubFields);
@@ -936,6 +972,16 @@ function readSubFormPayload() {
     const v = ($("sf-stale").value || "").trim();
     if (!v) throw new Error("informe os minutos");
     return { ...base, event_type: "level_stale", threshold: v };
+  }
+  if (t === "server_event") {
+    const ev = ($("sf-event").value || "").trim();
+    const room = ($("sf-room").value || "").trim();
+    const lead = ($("sf-lead").value || "").trim();
+    if (!ev) throw new Error("selecione um evento");
+    if (!room) throw new Error("selecione a sala");
+    if (!lead) throw new Error("informe quantos minutos antes");
+    // server_event ignores character_id.
+    return { event_type: "server_event", threshold: ev + "|" + room + "|" + lead };
   }
   throw new Error("evento do servidor ainda não disponível");
 }
@@ -1329,7 +1375,10 @@ function renderAdminSubs(subs) {
     else if (s.event_type === "status_eq") label = "fica <b class=\\"text-goldsoft\\">" + escapeHtml(s.threshold ?? "") + "</b>";
     else if (s.event_type === "gm_online") label = "GM online";
     else if (s.event_type === "level_stale") label = "sem subir level por <b class=\\"text-goldsoft\\">" + escapeHtml(s.threshold ?? "") + " min</b>";
-    else if (s.event_type === "server_event") label = "evento: " + escapeHtml(s.threshold ?? "");
+    else if (s.event_type === "server_event") {
+      const parts = (s.threshold || "").split("|");
+      label = "evento " + escapeHtml(parts[0] || "?") + " (" + escapeHtml((parts[1] || "?").toUpperCase()) + ") · " + escapeHtml(parts[2] || "?") + "min antes";
+    }
     else label = escapeHtml(s.event_type);
     const status = s.active
       ? '<span class="text-ok">ativo</span>'

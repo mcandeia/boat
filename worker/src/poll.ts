@@ -4,6 +4,13 @@ import { now } from "./util";
 import { sendTelegram } from "./telegram";
 import { formatAlert } from "./messages";
 import { classCodeFor, fetchRankings, findRank, type RankingMap } from "./rankings";
+import {
+  brNowParts,
+  parseSchedule,
+  refreshServerEvents,
+  shouldFireServerAlert,
+  shouldRefreshServerEvents,
+} from "./server-events";
 
 // One pass (10-minute cron):
 //   1. Pick every distinct character name that has at least one active sub.
@@ -166,6 +173,81 @@ export async function pollOnce(env: Env): Promise<{ scraped: number; fired: numb
   }
 
   return { scraped: snapshots.size, fired };
+}
+
+// Server-event scheduling pass. Two responsibilities:
+//   1. Refresh the scraped schedules at most once per hour.
+//   2. For every active server_event subscription whose threshold is encoded
+//      as "<event>|<room>|<minutesBefore>", fire a Telegram message in the
+//      minute that hits "scheduled - minutesBefore" in BR local time.
+export async function pollServerEvents(env: Env): Promise<{ refreshed: boolean; fired: number }> {
+  const t = now();
+  let refreshed = false;
+  if (await shouldRefreshServerEvents(env)) {
+    const r = await refreshServerEvents(env);
+    refreshed = true;
+    console.log(`server-events refresh: entries=${r.entries}`);
+  }
+
+  type SubAndOwner = SubscriptionRow & { owner_chat_id: number };
+  const subsRes = await env.DB
+    .prepare(
+      `SELECT s.*, u.telegram_chat_id AS owner_chat_id
+         FROM subscriptions s
+         JOIN users u ON u.id = s.user_id
+        WHERE s.event_type = 'server_event' AND s.active = 1`,
+    )
+    .all<SubAndOwner>();
+  const subs = subsRes.results ?? [];
+  if (subs.length === 0) return { refreshed, fired: 0 };
+
+  const cooldown = Number(env.COOLDOWN_SECONDS || "3600");
+  const br = brNowParts(t);
+  let fired = 0;
+
+  for (const sub of subs) {
+    if (sub.cooldown_until > t) continue;
+    const parsed = parseServerEventThreshold(sub.threshold);
+    if (!parsed) continue;
+    const ev = await env.DB
+      .prepare(
+        "SELECT schedule FROM server_events WHERE name = ? AND room = ? COLLATE NOCASE",
+      )
+      .bind(parsed.name, parsed.room)
+      .first<{ schedule: string }>();
+    if (!ev?.schedule) continue;
+    const schedule = parseSchedule(ev.schedule);
+    if (!shouldFireServerAlert(schedule, parsed.lead, br)) continue;
+
+    const msg = `📣 <b>${parsed.name}</b> (${parsed.room.toUpperCase()}) começa em ${parsed.lead} min.`;
+    const send = await sendTelegram(env, sub.owner_chat_id, msg);
+    if (!send.ok) {
+      console.log(`telegram send FAILED server-event sub=${sub.id} status=${send.status}`);
+      continue;
+    }
+    await env.DB
+      .prepare("UPDATE subscriptions SET cooldown_until = ?, last_fired_at = ? WHERE id = ?")
+      .bind(t + cooldown, t, sub.id)
+      .run();
+    fired++;
+  }
+
+  return { refreshed, fired };
+}
+
+// Threshold format: "<EventName>|<room>|<leadMinutes>", e.g.
+// "Chaos Castle|vip|5". Returns null on malformed input.
+export function parseServerEventThreshold(threshold: string | null):
+  | { name: string; room: string; lead: number }
+  | null {
+  if (!threshold) return null;
+  const parts = threshold.split("|").map((p) => p.trim());
+  if (parts.length !== 3) return null;
+  const lead = Number(parts[2]);
+  if (!Number.isFinite(lead) || lead < 0 || lead > 1440) return null;
+  const room = parts[1].toLowerCase();
+  if (!parts[0] || !room) return null;
+  return { name: parts[0], room, lead };
 }
 
 // True iff the subscription should fire given old vs new snapshot.
