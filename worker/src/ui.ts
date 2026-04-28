@@ -205,11 +205,12 @@ export const INDEX_HTML = /* html */ `<!doctype html>
             <div class="font-semibold text-goldsoft mb-1">🍏 iPhone (Telegram)</div>
             <ol class="list-decimal list-inside space-y-1 text-slate-300">
               <li>Abra o chat do bot.</li>
-              <li>Toque no nome no topo → <b>Notificações</b>.</li>
-              <li>Em <b>Som</b>, escolha um som exclusivo.</li>
-              <li>Em <b>Personalizar Notificações</b>, marque o som e ative o badge.</li>
-              <li>Volte aos <b>Ajustes do iPhone</b> → <b>Foco</b> → seu Foco ativo → <b>Pessoas</b> → adicione o bot em <b>Permitir notificações de</b>.</li>
-              <li>Em <b>Ajustes do iPhone</b> → <b>Notificações</b> → <b>Telegram</b>, ative <b>Notificações Sensíveis ao Tempo</b>.</li>
+              <li>Toque no nome / avatar do bot no topo da conversa pra abrir o perfil.</li>
+              <li>Toque em <b>Notificações</b>.</li>
+              <li>Em <b>Som</b>, escolha um toque diferente do padrão (pode ser um dos da lista do Telegram ou um som que você adicionou no iPhone).</li>
+              <li>(Opcional) Em <b>Tom de Aviso</b>, ative pra repetir caso você ignore.</li>
+              <li>(Opcional) Volte ao chat, deslize pra direita na lista de conversas e toque <b>Fixar</b> — fica sempre no topo.</li>
+              <li>Em <b>Ajustes do iPhone</b> → <b>Notificações</b> → <b>Telegram</b>: confirme que <b>Permitir Notificações</b>, <b>Sons</b> e <b>Pré-visualizações</b> estão ligados.</li>
             </ol>
           </div>
         </div>
