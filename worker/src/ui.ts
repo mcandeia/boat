@@ -1309,6 +1309,29 @@ function updateSubFormUi() {
 
   err.textContent = "";
   hint.textContent = "";
+  function serverEventEntryReqClient(eventNameRaw) {
+    const n = String(eventNameRaw || "").toLowerCase();
+    if (!n) return null;
+    if (n.includes("chaos castle")) {
+      return {
+        itemExample: "<b>Armor of Guardsman +3</b>",
+        npc: { name: "Chaos Goblin", map: "Noria", coords: "168,96" },
+      };
+    }
+    if (n.includes("blood castle")) {
+      return {
+        itemExample: "<b>Blood Bone +2</b>",
+        npc: { name: "Archangel Messenger", map: "Devias", coords: "198,47" },
+      };
+    }
+    if (n.includes("devil square")) {
+      return {
+        itemExample: "<b>Devil's Invitation +4</b>",
+        npc: { name: "Charon", map: "Noria", coords: "167,90" },
+      };
+    }
+    return null;
+  }
   function applyTemplateClient(tpl, dict) {
     let out = escapeHtml(tpl || "");
     for (const [k, v] of Object.entries(dict || {})) {
@@ -1330,6 +1353,30 @@ function updateSubFormUi() {
       const char = payload.character_id
         ? state.characters.find((c) => c.id === payload.character_id)
         : null;
+      const isServerEvent = payload.event_type === "server_event";
+      const thrParts = String(payload.threshold || "").split("|");
+      const evNameRaw = isServerEvent ? (thrParts[0] || "") : "";
+      const roomRaw = isServerEvent ? (thrParts[1] || "") : "";
+      const leadRaw = isServerEvent ? (thrParts[2] || "") : "";
+
+      let item = "";
+      let npc = "";
+      let npc_map = "";
+      let npc_coords = "";
+      if (isServerEvent) {
+        const req = serverEventEntryReqClient(evNameRaw);
+        if (req) {
+          item = req.itemExample || "";
+          if (req.npc) {
+            npc = req.npc.name || "";
+            npc_map = req.npc.map || "";
+            npc_coords = req.npc.coords || "";
+          }
+        }
+      }
+      const normalizedServerThreshold = isServerEvent
+        ? (evNameRaw + "|" + String(roomRaw || "").toLowerCase() + "|" + leadRaw)
+        : String(payload.threshold || "");
       const dict = {
         username: escapeHtml(char?.name || ""),
         char: escapeHtml(char?.name || ""),
@@ -1338,17 +1385,18 @@ function updateSubFormUi() {
         resets: typeof char?.resets === "number" ? String(char.resets) : "?",
         map: escapeHtml(char?.last_map || ""),
         status: escapeHtml(char?.last_status || ""),
-        threshold: escapeHtml(payload.threshold || ""),
+        threshold: escapeHtml(normalizedServerThreshold),
         coords: escapeHtml(payload.threshold || ""),
         // server_event extras (best-effort from threshold)
-        event: escapeHtml(String(payload.threshold || "").split("|")[0] || ""),
-        room: escapeHtml(String(payload.threshold || "").split("|")[1]?.toUpperCase?.() ? String(payload.threshold || "").split("|")[1].toUpperCase() : ""),
-        lead: escapeHtml(String(payload.threshold || "").split("|")[2] || ""),
-        leadMinutes: escapeHtml(String(payload.threshold || "").split("|")[2] || ""),
-        item: "",
-        npc: "",
-        npc_map: "",
-        npc_coords: "",
+        event: escapeHtml(evNameRaw),
+        room: escapeHtml(roomRaw ? roomRaw.toUpperCase() : ""),
+        lead: escapeHtml(leadRaw),
+        leadMinutes: escapeHtml(leadRaw),
+        // item may contain <b>..</b> (same as backend token behavior).
+        item,
+        npc: escapeHtml(npc),
+        npc_map: escapeHtml(npc_map),
+        npc_coords: escapeHtml(npc_coords),
       };
       const rendered = applyTemplateClient(custom, dict);
       prev.innerHTML =
