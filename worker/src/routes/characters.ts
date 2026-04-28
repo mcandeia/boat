@@ -6,17 +6,21 @@ const VALID_NAME = /^[A-Za-z0-9_-]{1,15}$/;
 const INVALID_NAME = "nome de personagem inválido";
 
 export async function listCharacters(env: Env, userId: number): Promise<Response> {
+  type Row = CharacterRow & { is_gm: number; avg_reset_time?: number | null };
   const rows = await env.DB
     .prepare(`
       SELECT c.*,
+        uc.is_gm AS is_gm,
         (SELECT (MAX(start_ts) - MIN(start_ts)) / NULLIF(MAX(resets) - MIN(resets), 0)
          FROM (SELECT resets, MIN(ts) as start_ts FROM char_snapshots WHERE char_id = c.id GROUP BY resets)
         ) AS avg_reset_time
-      FROM characters c 
-      WHERE user_id = ? ORDER BY name COLLATE NOCASE
+      FROM user_characters uc
+      JOIN characters c ON c.id = uc.character_id
+      WHERE uc.user_id = ?
+      ORDER BY c.name COLLATE NOCASE
     `)
     .bind(userId)
-    .all<CharacterRow>();
+    .all<Row>();
   return json({ characters: rows.results ?? [] });
 }
 
@@ -35,52 +39,78 @@ export async function createCharacter(env: Env, userId: number, req: Request): P
   const name = (body.name ?? "").trim();
   if (!VALID_NAME.test(name)) return bad(400, INVALID_NAME);
 
-  const dup = await env.DB
-    .prepare("SELECT id FROM characters WHERE user_id = ? AND name = ?")
-    .bind(userId, name)
-    .first<{ id: number }>();
-  if (dup) return bad(409, "personagem já cadastrado");
+  const t = now();
+  // Find or create the global character row.
+  const existing = await env.DB
+    .prepare("SELECT * FROM characters WHERE name = ? COLLATE NOCASE")
+    .bind(name)
+    .first<CharacterRow>();
 
   // Best-effort scrape with a tight budget. If it succeeds we prefill the
   // row; if it times out we register the char anyway and let the cron's
   // next pass fill in stats. Only a *successful* scrape that found no
   // profile table blocks creation.
-  const snap = await scrapeOne(env, name, { totalTimeoutMs: 25_000 });
-  if (snap.scraped && !snap.exists) {
-    return bad(404, "personagem não encontrado no Mu Patos");
+  let id: number;
+  let snapshot = null as unknown;
+  if (existing) {
+    id = existing.id;
+  } else {
+    const snap = await scrapeOne(env, name, { totalTimeoutMs: 25_000 });
+    snapshot = snap;
+    if (snap.scraped && !snap.exists) {
+      return bad(404, "personagem não encontrado no Mu Patos");
+    }
+
+    const result = await env.DB
+      .prepare(
+        `INSERT INTO characters
+          (name, class, resets, last_level, last_map, last_status, last_checked_at, last_level_change_at, next_check_at, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?)`,
+      )
+      .bind(
+        name,
+        snap.class,
+        snap.resets,
+        snap.level,
+        snap.map,
+        snap.status,
+        snap.exists ? t : null,
+        snap.exists ? t : null,
+        t,
+      )
+      .run();
+    id = Number(result.meta.last_row_id);
   }
 
-  const t = now();
-  const result = await env.DB
+  // Create the user<->character link (idempotent).
+  await env.DB
     .prepare(
-      `INSERT INTO characters
-        (user_id, name, class, resets, is_gm, last_level, last_map, last_status, last_checked_at, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT OR IGNORE INTO user_characters (user_id, character_id, is_gm, created_at)
+       VALUES (?, ?, ?, ?)`,
     )
-    .bind(
-      userId,
-      name,
-      snap.class,
-      snap.resets,
-      body.is_gm ? 1 : 0,
-      snap.level,
-      snap.map,
-      snap.status,
-      snap.exists ? t : null,
-      t,
-    )
+    .bind(userId, id, body.is_gm ? 1 : 0, t)
     .run();
 
-  const id = result.meta.last_row_id;
-  return json({ ok: true, id, snapshot: snap });
+  return json({ ok: true, id, snapshot });
 }
 
 export async function deleteCharacter(env: Env, userId: number, id: number): Promise<Response> {
+  // Remove the link for this user.
   const r = await env.DB
-    .prepare("DELETE FROM characters WHERE id = ? AND user_id = ?")
+    .prepare("DELETE FROM user_characters WHERE character_id = ? AND user_id = ?")
     .bind(id, userId)
     .run();
   if (r.meta.changes === 0) return bad(404, "não encontrado");
+
+  // Optional cleanup: if no more users link this character, delete it.
+  const stillLinked = await env.DB
+    .prepare("SELECT 1 AS ok FROM user_characters WHERE character_id = ? LIMIT 1")
+    .bind(id)
+    .first<{ ok: number }>();
+  if (!stillLinked) {
+    await env.DB.prepare("DELETE FROM characters WHERE id = ?").bind(id).run();
+  }
+
   return json({ ok: true });
 }
 
@@ -94,7 +124,7 @@ export async function userCharHistory(
   req: Request,
 ): Promise<Response> {
   const owned = await env.DB
-    .prepare("SELECT id FROM characters WHERE id = ? AND user_id = ?")
+    .prepare("SELECT id FROM user_characters WHERE character_id = ? AND user_id = ?")
     .bind(charId, userId)
     .first<{ id: number }>();
   if (!owned) return bad(404, "personagem não encontrado");
@@ -135,20 +165,26 @@ export async function buildHistoryResponse(env: Env, charId: number, req: Reques
 // in stats lazily after a slow add, or when the user taps "Atualizar".
 // Returns the freshly stored row so the UI can redraw.
 export async function refreshCharacter(env: Env, userId: number, id: number): Promise<Response> {
-  const owned = await env.DB
-    .prepare("SELECT * FROM characters WHERE id = ? AND user_id = ?")
+  const linked = await env.DB
+    .prepare("SELECT 1 AS ok FROM user_characters WHERE character_id = ? AND user_id = ?")
     .bind(id, userId)
-    .first<CharacterRow>();
-  if (!owned) return bad(404, "não encontrado");
+    .first<{ ok: number }>();
+  if (!linked) return bad(404, "não encontrado");
 
-  const snap = await scrapeOne(env, owned.name, { totalTimeoutMs: 25_000 });
+  const row = await env.DB
+    .prepare("SELECT * FROM characters WHERE id = ?")
+    .bind(id)
+    .first<CharacterRow>();
+  if (!row) return bad(404, "não encontrado");
+
+  const snap = await scrapeOne(env, row.name, { totalTimeoutMs: 25_000 });
   if (!snap.scraped) {
-    return json({ scraped: false, character: owned });
+    return json({ scraped: false, character: row });
   }
   if (!snap.exists) {
     // Char vanished from the server (renamed, deleted). Don't touch the row;
     // just tell the caller.
-    return json({ scraped: true, exists: false, character: owned });
+    return json({ scraped: true, exists: false, character: row });
   }
 
   const t = now();

@@ -83,9 +83,9 @@ export async function createSubscription(env: Env, userId: number, req: Request)
 
   if (characterId !== null) {
     const owned = await env.DB
-      .prepare("SELECT id, is_gm FROM characters WHERE id = ? AND user_id = ?")
+      .prepare("SELECT id, is_gm FROM user_characters WHERE character_id = ? AND user_id = ?")
       .bind(characterId, userId)
-      .first<Pick<CharacterRow, "id" | "is_gm">>();
+      .first<{ id: number; is_gm: number }>();
     if (!owned) return bad(404, "personagem não encontrado");
     if (eventType === "gm_online" && !owned.is_gm) {
       return bad(400, "personagem não está marcado como GM");
@@ -131,9 +131,15 @@ async function maybeFireOnCreate(
 ): Promise<void> {
   if (!sub.character_id) return;             // server_event only
 
-  const char = await env.DB
-    .prepare("SELECT * FROM characters WHERE id = ? AND user_id = ?")
+  const link = await env.DB
+    .prepare("SELECT is_gm FROM user_characters WHERE character_id = ? AND user_id = ?")
     .bind(sub.character_id, userId)
+    .first<{ is_gm: number }>();
+  if (!link) return;
+
+  const char = await env.DB
+    .prepare("SELECT * FROM characters WHERE id = ?")
+    .bind(sub.character_id)
     .first<CharacterRow>();
   if (!char || char.last_checked_at == null) return;   // never scraped, nothing to evaluate
 
@@ -152,7 +158,7 @@ async function maybeFireOnCreate(
     scraped: true,
   };
 
-  if (!currentlyMatches(sub, snap, !!char.is_gm, {
+  if (!currentlyMatches(sub, snap, !!link.is_gm, {
     last_level_change_at: char.last_level_change_at,
     now: now(),
   })) return;

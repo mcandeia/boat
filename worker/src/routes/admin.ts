@@ -19,9 +19,7 @@ interface AdminCharRow {
   rank_overall: number | null;
   rank_class: number | null;
   class_code: string | null;
-  is_gm: number;
   created_at: number;
-  user_id: number;
   owner_first_name: string | null;
   owner_username: string | null;
   sub_count: number;
@@ -34,15 +32,25 @@ export async function adminListChars(env: Env): Promise<Response> {
       `SELECT
          c.id, c.name, c.blocked, c.class, c.resets, c.last_level,
          c.last_status, c.last_checked_at, c.rank_overall, c.rank_class,
-         c.class_code, c.is_gm, c.created_at, c.user_id,
-         u.first_name AS owner_first_name,
-         u.telegram_username AS owner_username,
+         c.class_code, c.created_at,
+         -- best-effort: show one owner (latest link) for display
+         (SELECT u.first_name
+            FROM user_characters uc
+            JOIN users u ON u.id = uc.user_id
+           WHERE uc.character_id = c.id
+           ORDER BY uc.created_at DESC
+           LIMIT 1) AS owner_first_name,
+         (SELECT u.telegram_username
+            FROM user_characters uc
+            JOIN users u ON u.id = uc.user_id
+           WHERE uc.character_id = c.id
+           ORDER BY uc.created_at DESC
+           LIMIT 1) AS owner_username,
          (SELECT COUNT(*) FROM subscriptions s WHERE s.character_id = c.id AND s.active = 1) AS sub_count,
          (SELECT (MAX(start_ts) - MIN(start_ts)) / NULLIF(MAX(resets) - MIN(resets), 0)
           FROM (SELECT resets, MIN(ts) as start_ts FROM char_snapshots WHERE char_id = c.id GROUP BY resets)
          ) AS avg_reset_time
        FROM characters c
-       JOIN users u ON u.id = c.user_id
        ORDER BY c.id DESC`,
     )
     .all<AdminCharRow>();
