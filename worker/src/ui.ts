@@ -1001,10 +1001,28 @@ function renderHistoryChart(data, charName) {
     const x = xOf(s.ts), y = yOf(s.resets ?? 0);
     if (i === 0) d += "M" + x + "," + y;
     else {
-      const px = xOf(samples[i - 1].ts), py = yOf(samples[i - 1].resets ?? 0);
-      d += " L" + x + "," + py + " L" + x + "," + y;
+      d += " L" + x + "," + yOf(samples[i - 1].resets ?? 0) + " L" + x + "," + y;
     }
   });
+
+  // One small dot per sample with a native <title> tooltip — hover shows the
+  // exact time, level, and reset count.
+  const fmtFull = (ts) => {
+    const d = new Date(ts * 1000);
+    const pad = (n) => String(n).padStart(2, "0");
+    return pad(d.getDate()) + "/" + pad(d.getMonth() + 1) + " " + pad(d.getHours()) + ":" + pad(d.getMinutes());
+  };
+  const dots = samples.map((s) => {
+    const x = xOf(s.ts), y = yOf(s.resets ?? 0);
+    const tooltip =
+      fmtFull(s.ts) + " · resets " + (s.resets ?? "?") +
+      " · lv " + (s.level ?? "?") +
+      (s.map ? " · " + s.map : "") +
+      (s.status ? " · " + s.status : "");
+    return '<circle cx="' + x + '" cy="' + y + '" r="3" fill="#f0a93b" stroke="#0b0d12" stroke-width="1" class="cursor-pointer hover:r-4">' +
+      '<title>' + escapeHtml(tooltip) + '</title>' +
+    '</circle>';
+  }).join("");
 
   // Y-axis ticks (every reset, but cap at 6 labels)
   const ticks = [];
@@ -1040,6 +1058,7 @@ function renderHistoryChart(data, charName) {
     '<svg viewBox="0 0 ' + W + ' ' + H + '" class="w-full h-auto bg-bg border border-border rounded-md">' +
       yTickLines +
       '<path d="' + d + '" fill="none" stroke="#f0a93b" stroke-width="2" />' +
+      dots +
       xLabels +
     '</svg>';
 }
