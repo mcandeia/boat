@@ -42,7 +42,11 @@ export default {
     try {
       if (pathname === "/" || pathname === "/index.html") {
         return new Response(INDEX_HTML, {
-          headers: { "content-type": "text/html; charset=utf-8" },
+          headers: {
+            "content-type": "text/html; charset=utf-8",
+            // Avoid stale UI after deploy/dev reload.
+            "cache-control": "no-store, max-age=0",
+          },
         });
       }
 
@@ -67,6 +71,36 @@ export default {
           .prepare("SELECT category, name, room, schedule, meta, updated_at FROM server_events ORDER BY category, name, room")
           .all<{ category: string; name: string; room: string; schedule: string; meta: string | null; updated_at: number }>();
         return json({ events: rs.results ?? [] });
+      }
+
+      // ---- Local-only admin login helper (dev) ----
+      // Creates/promotes a local admin user and mints a session cookie.
+      // Guarded by hostname so it only works on `wrangler dev`.
+      if (pathname === "/local-admin-login" && method === "GET" && (url.hostname === "localhost" || url.hostname === "127.0.0.1")) {
+        const DEV_CHAT_ID = 123456789;
+        await env.DB.prepare(`
+          INSERT INTO users (telegram_chat_id, telegram_username, first_name, created_at, admin)
+          VALUES (?, 'local_admin', 'Local Admin', 0, 1)
+          ON CONFLICT(telegram_chat_id) DO UPDATE SET admin = 1
+        `).bind(DEV_CHAT_ID).run();
+
+        const user = await env.DB
+          .prepare("SELECT id FROM users WHERE telegram_chat_id = ?")
+          .bind(DEV_CHAT_ID)
+          .first<{ id: number }>();
+
+        if (user?.id) {
+          const { createSession, setCookieHeader } = await import("./session");
+          const token = await createSession(env, user.id);
+          return new Response("Redirecionando...", {
+            status: 302,
+            headers: {
+              Location: "/",
+              "Set-Cookie": setCookieHeader(env, token),
+            },
+          });
+        }
+        return bad(500, "falha ao criar usuário local");
       }
 
       // ---- everything below requires a session ----
