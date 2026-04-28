@@ -207,8 +207,15 @@ export async function pollServerEvents(env: Env): Promise<{ refreshed: boolean; 
   if (subs.length === 0) return { refreshed, fired: 0 };
 
   // Precompute user's max char level to tailor entry requirements in messages.
+  // Post-migration to global characters: user_id no longer lives on `characters`,
+  // so we go through user_characters → characters.
   const maxLevelRes = await env.DB
-    .prepare(`SELECT user_id, MAX(last_level) AS max_level FROM characters GROUP BY user_id`)
+    .prepare(
+      `SELECT uc.user_id AS user_id, MAX(c.last_level) AS max_level
+         FROM user_characters uc
+         JOIN characters c ON c.id = uc.character_id
+        GROUP BY uc.user_id`,
+    )
     .all<{ user_id: number; max_level: number | null }>();
   const maxLevelByUser = new Map<number, number | null>();
   for (const r of maxLevelRes.results ?? []) maxLevelByUser.set(r.user_id, r.max_level);
