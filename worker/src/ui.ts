@@ -535,6 +535,11 @@ function renderDash() {
     refreshBtn.title = "Atualizar dados";
     refreshBtn.innerHTML = "↻";
     refreshBtn.onclick = () => refreshCharacterRow(li, c.id);
+    const histBtn = document.createElement("button");
+    histBtn.className = "h-8 w-8 rounded-md border border-border text-sm hover:bg-bg transition flex items-center justify-center";
+    histBtn.title = "Histórico";
+    histBtn.innerHTML = "📈";
+    histBtn.onclick = () => toggleUserCharHistory(c.id, c.name);
     const del = document.createElement("button");
     del.className = "px-3 py-1.5 rounded-md border border-border text-danger text-sm hover:bg-bg transition";
     del.textContent = "Remover";
@@ -544,10 +549,17 @@ function renderDash() {
       refresh();
     };
     right.appendChild(refreshBtn);
+    right.appendChild(histBtn);
     right.appendChild(del);
     li.appendChild(left);
     li.appendChild(right);
     cl.appendChild(li);
+    // Hidden expansion <li> for the history chart, toggled by histBtn.
+    const histLi = document.createElement("li");
+    histLi.className = "hidden border-t border-border/60";
+    histLi.dataset.userHistFor = c.id;
+    histLi.innerHTML = '<div class="px-2 py-3" data-history-body></div>';
+    cl.appendChild(histLi);
     if (c.last_checked_at == null) stale.push(c.id);
   }
 
@@ -1021,6 +1033,25 @@ function wireAdminCharActions(c) {
   if (subsBtn) subsBtn.onclick = () => toggleAdminSubs(c.id);
   const historyBtnEl = row.querySelector('[data-action="history"]');
   if (historyBtnEl) historyBtnEl.onclick = () => toggleAdminHistory(c.id, c.name);
+}
+
+async function toggleUserCharHistory(charId, charName) {
+  const expansion = document.querySelector('li[data-user-hist-for="' + charId + '"]');
+  if (!expansion) return;
+  if (!expansion.classList.contains("hidden")) {
+    expansion.classList.add("hidden");
+    return;
+  }
+  expansion.classList.remove("hidden");
+  const cell = expansion.querySelector('[data-history-body]');
+  cell.innerHTML = '<span class="text-muted text-xs">carregando histórico…</span>';
+  try {
+    const data = await fetchJSON("/api/characters/" + charId + "/history?days=7");
+    cell.innerHTML = renderHistoryChart(data, charName);
+    wireHistoryTooltips(cell);
+  } catch (e) {
+    cell.innerHTML = '<span class="text-danger text-xs">' + escapeHtml(e.message) + '</span>';
+  }
 }
 
 async function toggleAdminHistory(charId, charName) {

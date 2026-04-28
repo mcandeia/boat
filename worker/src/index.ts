@@ -8,6 +8,7 @@ import {
   listCharacters,
   lookupCharacter,
   refreshCharacter,
+  userCharHistory,
 } from "./routes/characters";
 import {
   createSubscription,
@@ -77,6 +78,10 @@ export default {
       const charRefresh = pathname.match(/^\/api\/characters\/(\d+)\/refresh$/);
       if (charRefresh && method === "POST") {
         return await refreshCharacter(env, userId, Number(charRefresh[1]));
+      }
+      const charHistoryUser = pathname.match(/^\/api\/characters\/(\d+)\/history$/);
+      if (charHistoryUser && method === "GET") {
+        return await userCharHistory(env, userId, Number(charHistoryUser[1]), req);
       }
 
       if (pathname === "/api/subscriptions" && method === "GET") return await listSubscriptions(env, userId);

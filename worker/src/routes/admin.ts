@@ -2,6 +2,7 @@ import type { Env, UserRow } from "../types";
 import { bad, json, now } from "../util";
 import { scrapeOne } from "../scraper";
 import { pollOnce } from "../poll";
+import { buildHistoryResponse } from "./characters";
 
 // Every admin route assumes the gate in index.ts already verified the
 // caller has users.admin = 1.
@@ -103,47 +104,9 @@ interface AdminSubRow {
   owner_username: string | null;
 }
 
-interface SnapshotRow {
-  ts: number;
-  level: number | null;
-  resets: number | null;
-  map: string | null;
-  status: string | null;
-}
-
-// Default window is the last 7 days. Caller can override with ?days=N
-// (capped at 90). We bucket the response by reset cycle so the UI can
-// plot one line per reset run.
+// Admin variant — no ownership check, can view any char's history.
 export async function adminCharHistory(env: Env, charId: number, req: Request): Promise<Response> {
-  const url = new URL(req.url);
-  const days = Math.min(Math.max(Number(url.searchParams.get("days") || 7), 1), 90);
-  const since = Math.floor(Date.now() / 1000) - days * 86400;
-
-  const rs = await env.DB
-    .prepare(
-      `SELECT ts, level, resets, map, status
-         FROM char_snapshots
-        WHERE char_id = ? AND ts >= ?
-        ORDER BY ts ASC`,
-    )
-    .bind(charId, since)
-    .all<SnapshotRow>();
-  const snaps = rs.results ?? [];
-
-  // Group by reset count. Each cycle gets startTs (first sample's ts) so
-  // the client can plot "minutes since reset start" on the X axis to
-  // compare leveling speed cycle-vs-cycle.
-  const cycles: Array<{ resets: number; start_ts: number; samples: SnapshotRow[] }> = [];
-  for (const s of snaps) {
-    const r = s.resets ?? 0;
-    let cur = cycles[cycles.length - 1];
-    if (!cur || cur.resets !== r) {
-      cur = { resets: r, start_ts: s.ts, samples: [] };
-      cycles.push(cur);
-    }
-    cur.samples.push(s);
-  }
-  return json({ days, count: snaps.length, cycles });
+  return await buildHistoryResponse(env, charId, req);
 }
 
 export async function adminListCharSubs(env: Env, charId: number): Promise<Response> {
