@@ -89,3 +89,40 @@ export async function adminRunCron(env: Env): Promise<Response> {
   const r = await pollOnce(env);
   return json({ ok: true, ...r });
 }
+
+interface AdminSubRow {
+  id: number;
+  event_type: string;
+  threshold: string | null;
+  active: number;
+  cooldown_until: number;
+  last_fired_at: number | null;
+  created_at: number;
+  user_id: number;
+  owner_first_name: string | null;
+  owner_username: string | null;
+}
+
+export async function adminListCharSubs(env: Env, charId: number): Promise<Response> {
+  const owner = await env.DB
+    .prepare("SELECT id FROM characters WHERE id = ?")
+    .bind(charId)
+    .first<{ id: number }>();
+  if (!owner) return bad(404, "personagem não encontrado");
+  const rs = await env.DB
+    .prepare(
+      `SELECT
+         s.id, s.event_type, s.threshold, s.active,
+         s.cooldown_until, s.last_fired_at, s.created_at,
+         s.user_id,
+         u.first_name AS owner_first_name,
+         u.telegram_username AS owner_username
+       FROM subscriptions s
+       JOIN users u ON u.id = s.user_id
+       WHERE s.character_id = ?
+       ORDER BY s.id DESC`,
+    )
+    .bind(charId)
+    .all<AdminSubRow>();
+  return json({ subscriptions: rs.results ?? [] });
+}

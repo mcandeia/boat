@@ -893,6 +893,9 @@ function adminCharRowHtml(c) {
         : '<span class="text-muted">Offline</span>')
     : '<span class="text-muted">—</span>';
   const blockedBadge = c.blocked ? ' <span class="px-1.5 py-0.5 rounded bg-danger/20 text-danger text-[10px] uppercase">blocked</span>' : '';
+  const subBtn = (c.sub_count ?? 0) > 0
+    ? '<button class="text-goldsoft hover:underline cursor-pointer" data-action="subs">' + c.sub_count + '</button>'
+    : '<span class="text-muted">0</span>';
   return '<tr class="border-b border-border/60" data-row="' + c.id + '">' +
     '<td class="py-1.5 pr-2 text-muted">' + c.id + '</td>' +
     '<td class="py-1.5 pr-2 text-goldsoft font-semibold">' + escapeHtml(c.name) + blockedBadge + (c.is_gm ? ' <span class="text-[10px] text-gold uppercase">GM</span>' : '') + '</td>' +
@@ -900,11 +903,14 @@ function adminCharRowHtml(c) {
     '<td class="py-1.5 pr-2">' + (c.class ? escapeHtml(c.class) : '<span class="text-muted">—</span>') + '</td>' +
     '<td class="py-1.5 pr-2">' + (c.last_level != null ? c.last_level : '<span class="text-muted">—</span>') + '</td>' +
     '<td class="py-1.5 pr-2">' + status + '</td>' +
-    '<td class="py-1.5 pr-2">' + (c.sub_count ?? 0) + '</td>' +
+    '<td class="py-1.5 pr-2">' + subBtn + '</td>' +
     '<td class="py-1.5 pr-2 whitespace-nowrap">' +
       '<button class="px-2 py-1 rounded border border-border hover:bg-bg" data-action="block">' + (c.blocked ? "Desbloquear" : "Bloquear") + '</button>' +
       ' <button class="px-2 py-1 rounded border border-border hover:bg-bg ml-1" data-action="refresh">↻</button>' +
     '</td>' +
+    '</tr>' +
+    '<tr class="hidden bg-bg/50" data-subs-for="' + c.id + '">' +
+      '<td colspan="8" class="px-3 py-2 text-[11px]" data-subs-body></td>' +
     '</tr>';
 }
 function wireAdminCharActions(c) {
@@ -927,6 +933,61 @@ function wireAdminCharActions(c) {
       loadAdminChars();
     } catch (e) { toast(e.message, "err"); }
   };
+  const subsBtn = row.querySelector('[data-action="subs"]');
+  if (subsBtn) subsBtn.onclick = () => toggleAdminSubs(c.id);
+}
+
+async function toggleAdminSubs(charId) {
+  const expansion = document.querySelector('tr[data-subs-for="' + charId + '"]');
+  if (!expansion) return;
+  if (!expansion.classList.contains("hidden")) {
+    expansion.classList.add("hidden");
+    return;
+  }
+  expansion.classList.remove("hidden");
+  const cell = expansion.querySelector('[data-subs-body]');
+  cell.innerHTML = '<span class="text-muted">carregando…</span>';
+  try {
+    const data = await fetchJSON("/api/admin/chars/" + charId + "/subs");
+    const subs = data.subscriptions || [];
+    if (subs.length === 0) {
+      cell.innerHTML = '<span class="text-muted">nenhum alerta</span>';
+      return;
+    }
+    cell.innerHTML = renderAdminSubs(subs);
+  } catch (e) {
+    cell.innerHTML = '<span class="text-danger">' + escapeHtml(e.message) + '</span>';
+  }
+}
+
+function renderAdminSubs(subs) {
+  const nowSec = Math.floor(Date.now() / 1000);
+  const items = subs.map((s) => {
+    const owner = s.owner_first_name || (s.owner_username ? "@" + s.owner_username : "user " + s.user_id);
+    let label = "";
+    if (s.event_type === "level_gte") label = "nível ≥ <b class=\\"text-goldsoft\\">" + escapeHtml(s.threshold ?? "") + "</b>";
+    else if (s.event_type === "map_eq") label = "entra em <b class=\\"text-goldsoft\\">" + escapeHtml(s.threshold ?? "") + "</b>";
+    else if (s.event_type === "coords_in") label = "zona <b class=\\"text-goldsoft\\">" + escapeHtml(s.threshold ?? "") + "</b>";
+    else if (s.event_type === "status_eq") label = "fica <b class=\\"text-goldsoft\\">" + escapeHtml(s.threshold ?? "") + "</b>";
+    else if (s.event_type === "gm_online") label = "GM online";
+    else if (s.event_type === "server_event") label = "evento: " + escapeHtml(s.threshold ?? "");
+    else label = escapeHtml(s.event_type);
+    const status = s.active
+      ? '<span class="text-ok">ativo</span>'
+      : '<span class="text-muted">pausado</span>';
+    let fired;
+    if (s.cooldown_until && s.cooldown_until > nowSec) fired = '<span class="text-gold">cooldown ' + relativeTime(s.cooldown_until) + '</span>';
+    else if (s.last_fired_at) fired = '<span class="text-ok">disparou ' + relativeTime(s.last_fired_at) + '</span>';
+    else fired = '<span class="text-muted">ainda não</span>';
+    return '<li class="flex flex-wrap gap-x-3 gap-y-0.5 py-1 border-b border-border/40 last:border-0">' +
+      '<span class="text-muted">#' + s.id + '</span>' +
+      '<span>' + label + '</span>' +
+      '<span>' + status + '</span>' +
+      '<span>' + fired + '</span>' +
+      '<span class="text-muted">por ' + escapeHtml(owner) + '</span>' +
+      '</li>';
+  });
+  return '<ul class="leading-snug">' + items.join("") + '</ul>';
 }
 $("admin-poll").onclick = async (e) => {
   const btn = e.currentTarget;
