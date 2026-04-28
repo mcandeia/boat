@@ -46,6 +46,11 @@ export function formatAlert(
   const n = escHtml(charName);
   const thr = escHtml(sub.threshold ?? "");
   const map = escHtml(snap.map ?? "");
+  if (sub.custom_message) {
+    return escHtml(sub.custom_message)
+      .replace(/\{username\}/g, n)
+      .replace(/\{lv\}/g, snap.level != null ? String(snap.level) : "?");
+  }
   switch (sub.event_type) {
     case "level_gte":
       return `🎯 <b>${n}</b> chegou no nível <b>${snap.level}</b> (alvo ${thr}).`;

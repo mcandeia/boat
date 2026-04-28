@@ -28,6 +28,7 @@ export async function createSubscription(env: Env, userId: number, req: Request)
     character_id?: number;
     event_type?: string;
     threshold?: string;
+    custom_message?: string;
   };
   const eventType = body.event_type as EventType;
   if (!EVENT_TYPES.has(eventType)) return bad(400, "tipo de evento inválido");
@@ -35,6 +36,7 @@ export async function createSubscription(env: Env, userId: number, req: Request)
   // Validate threshold per event type, and verify char ownership when used.
   let threshold: string | null = (body.threshold ?? "").trim() || null;
   let characterId: number | null = body.character_id ?? null;
+  let customMessage: string | null = (body.custom_message ?? "").trim() || null;
 
   if (eventType === "level_gte") {
     const n = Number(threshold);
@@ -81,10 +83,10 @@ export async function createSubscription(env: Env, userId: number, req: Request)
   const r = await env.DB
     .prepare(
       `INSERT INTO subscriptions
-         (user_id, character_id, event_type, threshold, active, cooldown_until, created_at)
-       VALUES (?, ?, ?, ?, 1, 0, ?)`,
+         (user_id, character_id, event_type, threshold, active, cooldown_until, created_at, custom_message)
+       VALUES (?, ?, ?, ?, 1, 0, ?, ?)`
     )
-    .bind(userId, characterId, eventType, threshold, t)
+    .bind(userId, characterId, eventType, threshold, t, customMessage)
     .run();
 
   // If the alert's condition already holds with the data we have on file,
@@ -101,6 +103,7 @@ export async function createSubscription(env: Env, userId: number, req: Request)
     cooldown_until: 0,
     last_fired_at: null,
     created_at: t,
+    custom_message: customMessage,
     id: Number(subId),
   });
 
