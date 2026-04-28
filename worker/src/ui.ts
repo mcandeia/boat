@@ -1066,6 +1066,23 @@ function renderHistoryChart(data, charName) {
            '<circle cx="' + x + '" cy="' + yL + '" r="3" fill="#7aa2f7" stroke="#0b0d12" stroke-width="1.2" class="hist-dot cursor-pointer" data-tip="' + safeTip + '"></circle>';
   }).join("");
 
+  // "Last cycle benchmark" — a vertical dashed line at the moment in the
+  // PREVIOUS reset cycle where the char first reached the current level.
+  // Distance to the chart's right edge ≈ leveling speed delta this cycle.
+  const last = samples[samples.length - 1];
+  let marker = "";
+  if (last.resets != null && last.level != null && last.resets > 0) {
+    const prevR = last.resets - 1;
+    const firstHit = samples.find((s) => s.resets === prevR && (s.level ?? -1) >= (last.level ?? 0));
+    if (firstHit) {
+      const x = xOf(firstHit.ts);
+      const labelTs = fmtFull(firstHit.ts);
+      marker =
+        '<line x1="' + x + '" x2="' + x + '" y1="' + padT + '" y2="' + (H - padB) + '" stroke="#8a93a3" stroke-width="1" stroke-dasharray="4,3" />' +
+        '<text x="' + (x + 4) + '" y="' + (padT + 10) + '" fill="#8a93a3" font-size="10">↩ lv ' + last.level + ' no reset ' + prevR + ' (' + labelTs + ')</text>';
+    }
+  }
+
   // Tiny legend in the top-right of the chart area.
   const legend =
     '<g transform="translate(' + (padL + 6) + ',' + (padT - 6) + ')" font-size="10" font-family="Inter,system-ui,sans-serif">' +
@@ -1073,6 +1090,8 @@ function renderHistoryChart(data, charName) {
       '<text x="6" y="3" fill="#f7c779">resets</text>' +
       '<circle cx="56" cy="0" r="3" fill="#7aa2f7" />' +
       '<text x="62" y="3" fill="#7aa2f7">level</text>' +
+      '<line x1="100" x2="116" y1="0" y2="0" stroke="#8a93a3" stroke-dasharray="4,3" />' +
+      '<text x="120" y="3" fill="#8a93a3">ciclo anterior</text>' +
     '</g>';
 
   // Gridlines at uniform fractions of the plot height; cap at 5, fewer
@@ -1113,6 +1132,7 @@ function renderHistoryChart(data, charName) {
   return stats +
     '<svg viewBox="0 0 ' + W + ' ' + H + '" class="w-full h-auto bg-bg border border-border rounded-md">' +
       yTickLines.join("") +
+      marker +
       '<path d="' + lDp + '" fill="none" stroke="#7aa2f7" stroke-width="1.5" stroke-opacity="0.85" />' +
       '<path d="' + d + '" fill="none" stroke="#f0a93b" stroke-width="2" />' +
       dots +
