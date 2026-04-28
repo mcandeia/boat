@@ -318,12 +318,15 @@ function evaluate(
       // Not yet wired to a data source. Skipped silently for now.
       return false;
     case "level_stale": {
-      // Fire if no level change in the configured number of minutes.
-      // Cooldown (1h) prevents re-fire while still idle. The fire-on-create
-      // path catches an already-stale char on subscription creation.
+      // Fire when the char has been idle for the configured number of
+      // minutes. Edge-trigger: don't re-fire if last_level_change_at
+      // hasn't advanced past the previous fire — i.e., we already
+      // alerted for THIS idle run; only the next idle run (after a
+      // level-up) should trigger again.
       const minutes = Number(sub.threshold);
       if (!Number.isFinite(minutes) || minutes < 1) return false;
       if (ctx.last_level_change_at == null) return false;
+      if (sub.last_fired_at != null && ctx.last_level_change_at <= sub.last_fired_at) return false;
       const idleSecs = ctx.now - ctx.last_level_change_at;
       return idleSecs >= minutes * 60;
     }

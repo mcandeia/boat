@@ -37,6 +37,9 @@ export function currentlyMatches(
       if (!ctx || ctx.last_level_change_at == null) return false;
       const minutes = Number(sub.threshold);
       if (!Number.isFinite(minutes) || minutes < 1) return false;
+      // Edge-trigger: same guard as the cron's evaluate() — don't fire
+      // for an idle run we've already alerted on.
+      if (sub.last_fired_at != null && ctx.last_level_change_at <= sub.last_fired_at) return false;
       return (ctx.now - ctx.last_level_change_at) >= minutes * 60;
     }
   }

@@ -31,9 +31,11 @@ export async function scrapeMany(
   const result = new Map<string, ProfileSnapshot>();
   if (names.length === 0) return result;
 
-  // Per-character timeout — small enough that the total pass stays bounded
-  // even with many characters.
-  const perCharTimeoutMs = Math.min(options.totalTimeoutMs ?? 25_000, 15_000);
+  // Per-character timeout. We've observed mupatos taking ~12 s for some
+  // chars (first uncached render, slow Wix/LiteSpeed responses), so 15 s
+  // was tripping the abort on a chunk of users. Bump to 25 s — total
+  // pass is still bounded by the parallel batch size.
+  const perCharTimeoutMs = Math.min(options.totalTimeoutMs ?? 25_000, 25_000);
   // Concurrency cap — politeness toward mupatos and a hedge against
   // blowing the per-invocation subrequest budget on huge passes.
   const CONCURRENCY = 20;
