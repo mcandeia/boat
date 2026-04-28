@@ -8,18 +8,22 @@ export async function me(env: Env, userId: number): Promise<Response> {
     .first<UserRow>();
   if (!user) return bad(401, "sessão inválida");
 
+  type Row = CharacterRow & { is_gm: number; avg_reset_time?: number | null };
   const characters = (
     await env.DB
       .prepare(`
         SELECT c.*,
+          uc.is_gm AS is_gm,
           (SELECT (MAX(start_ts) - MIN(start_ts)) / NULLIF(MAX(resets) - MIN(resets), 0)
            FROM (SELECT resets, MIN(ts) as start_ts FROM char_snapshots WHERE char_id = c.id GROUP BY resets)
           ) AS avg_reset_time
-        FROM characters c 
-        WHERE user_id = ? ORDER BY name COLLATE NOCASE
+        FROM user_characters uc
+        JOIN characters c ON c.id = uc.character_id
+        WHERE uc.user_id = ?
+        ORDER BY c.name COLLATE NOCASE
       `)
       .bind(userId)
-      .all<CharacterRow>()
+      .all<Row>()
   ).results ?? [];
 
   const subscriptions = (

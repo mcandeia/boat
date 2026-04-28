@@ -46,29 +46,34 @@ export async function pollOnce(env: Env): Promise<{ scraped: number; fired: numb
   const placeholders = names.map(() => "?").join(",");
   const charsRes = await env.DB
     .prepare(
-      `SELECT c.*, u.telegram_chat_id AS owner_chat_id
+      `SELECT c.*
          FROM characters c
-         JOIN users u ON u.id = c.user_id
         WHERE c.name IN (${placeholders})`,
     )
     .bind(...names)
-    .all<CharacterRow & { owner_chat_id: number }>();
+    .all<CharacterRow>();
 
+  type SubRow = SubscriptionRow & { owner_chat_id: number; is_gm: number };
   const subsRes = await env.DB
     .prepare(
-      `SELECT * FROM subscriptions
-        WHERE active = 1
-          AND character_id IN (
-            SELECT id FROM characters WHERE name IN (${placeholders})
-          )`,
+      `SELECT
+         s.*,
+         u.telegram_chat_id AS owner_chat_id,
+         COALESCE(uc.is_gm, 0) AS is_gm
+       FROM subscriptions s
+       JOIN users u ON u.id = s.user_id
+       LEFT JOIN user_characters uc
+         ON uc.user_id = s.user_id AND uc.character_id = s.character_id
+      WHERE s.active = 1
+        AND s.character_id IN (SELECT id FROM characters WHERE name IN (${placeholders}))`,
     )
     .bind(...names)
-    .all<SubscriptionRow>();
+    .all<SubRow>();
 
-  const charsById = new Map<number, CharacterRow & { owner_chat_id: number }>();
+  const charsById = new Map<number, CharacterRow>();
   for (const c of charsRes.results ?? []) charsById.set(c.id, c);
 
-  const subsByChar = new Map<number, SubscriptionRow[]>();
+  const subsByChar = new Map<number, SubRow[]>();
   for (const s of subsRes.results ?? []) {
     if (s.character_id == null) continue;
     const arr = subsByChar.get(s.character_id) ?? [];
@@ -101,15 +106,15 @@ export async function pollOnce(env: Env): Promise<{ scraped: number; fired: numb
 
     for (const sub of subsByChar.get(char.id) ?? []) {
       if (sub.cooldown_until > t) continue;
-      const trigger = evaluate(sub, prev, snap, !!char.is_gm, {
+      const trigger = evaluate(sub, prev, snap, !!sub.is_gm, {
         last_level_change_at: char.last_level_change_at,
         now: t,
       });
       if (!trigger) continue;
 
       const msg = formatAlert(char.name, sub, snap);
-      console.log(`fire sub=${sub.id} type=${sub.event_type} char=${char.name} chat=${char.owner_chat_id} prevLevel=${prev.level} nextLevel=${snap.level} prevStatus=${prev.status} nextStatus=${snap.status}`);
-      const sendRes = await sendTelegram(env, char.owner_chat_id, msg);
+      console.log(`fire sub=${sub.id} type=${sub.event_type} char=${char.name} chat=${sub.owner_chat_id} prevLevel=${prev.level} nextLevel=${snap.level} prevStatus=${prev.status} nextStatus=${snap.status}`);
+      const sendRes = await sendTelegram(env, sub.owner_chat_id, msg);
       if (!sendRes.ok) {
         console.log(`telegram send FAILED sub=${sub.id} status=${sendRes.status} body=${sendRes.body}`);
         continue;

@@ -44,11 +44,9 @@ export interface PendingLoginRow {
 
 export interface CharacterRow {
   id: number;
-  user_id: number;
   name: string;
   class: string | null;
   resets: number | null;
-  is_gm: number;
   last_level: number | null;
   last_map: string | null;
   last_status: string | null;
@@ -63,6 +61,14 @@ export interface CharacterRow {
   blocked: number;
   avg_reset_time?: number | null;
   last_level_change_at: number | null;
+}
+
+export interface UserCharacterRow {
+  id: number;
+  user_id: number;
+  character_id: number;
+  is_gm: number;
+  created_at: number;
 }
 
 export interface SubscriptionRow {
