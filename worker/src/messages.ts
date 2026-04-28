@@ -9,6 +9,7 @@ export function currentlyMatches(
   sub: SubscriptionRow,
   snap: ProfileSnapshot,
   isGm: boolean,
+  ctx?: { last_level_change_at: number | null; now: number },
 ): boolean {
   switch (sub.event_type) {
     case "level_gte": {
@@ -32,6 +33,12 @@ export function currentlyMatches(
       return isGm && snap.status === "Online";
     case "server_event":
       return false;
+    case "level_stale": {
+      if (!ctx || ctx.last_level_change_at == null) return false;
+      const minutes = Number(sub.threshold);
+      if (!Number.isFinite(minutes) || minutes < 1) return false;
+      return (ctx.now - ctx.last_level_change_at) >= minutes * 60;
+    }
   }
 }
 
@@ -64,6 +71,8 @@ export function formatAlert(
       return `🛡️ GM <b>${n}</b> acabou de ficar online.`;
     case "server_event":
       return `📣 Evento do servidor: <b>${thr}</b>.`;
+    case "level_stale":
+      return `⏸️ <b>${n}</b> sem subir level há <b>${thr} min</b> (lv ${snap.level ?? "?"}). Caiu? AFK?`;
   }
 }
 

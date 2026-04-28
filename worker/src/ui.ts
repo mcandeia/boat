@@ -47,6 +47,7 @@ export const INDEX_HTML = /* html */ `<!doctype html>
 <!-- Toast host. Stacks notifications top-right; each toast slides in and
      auto-removes after a few seconds. -->
 <div id="toasts" class="fixed top-4 right-4 z-[60] flex flex-col items-end gap-2 pointer-events-none max-w-[calc(100%-2rem)]"></div>
+<div id="chart-tip" class="hidden fixed z-[70] pointer-events-none px-2 py-1 rounded bg-bg border border-gold/40 text-xs text-slate-100 shadow-lg whitespace-nowrap"></div>
 <style>
   @keyframes mlw-toast-in {
     from { transform: translateX(120%); opacity: 0; }
@@ -204,11 +205,12 @@ export const INDEX_HTML = /* html */ `<!doctype html>
             <div class="font-semibold text-goldsoft mb-1">🍏 iPhone (Telegram)</div>
             <ol class="list-decimal list-inside space-y-1 text-slate-300">
               <li>Abra o chat do bot.</li>
-              <li>Toque no nome no topo → <b>Notificações</b>.</li>
-              <li>Em <b>Som</b>, escolha um som exclusivo.</li>
-              <li>Em <b>Personalizar Notificações</b>, marque o som e ative o badge.</li>
-              <li>Volte aos <b>Ajustes do iPhone</b> → <b>Foco</b> → seu Foco ativo → <b>Pessoas</b> → adicione o bot em <b>Permitir notificações de</b>.</li>
-              <li>Em <b>Ajustes do iPhone</b> → <b>Notificações</b> → <b>Telegram</b>, ative <b>Notificações Sensíveis ao Tempo</b>.</li>
+              <li>Toque no nome / avatar do bot no topo da conversa pra abrir o perfil.</li>
+              <li>Toque em <b>Notificações</b>.</li>
+              <li>Em <b>Som</b>, escolha um toque diferente do padrão (pode ser um dos da lista do Telegram ou um som que você adicionou no iPhone).</li>
+              <li>(Opcional) Em <b>Tom de Aviso</b>, ative pra repetir caso você ignore.</li>
+              <li>(Opcional) Volte ao chat, deslize pra direita na lista de conversas e toque <b>Fixar</b> — fica sempre no topo.</li>
+              <li>Em <b>Ajustes do iPhone</b> → <b>Notificações</b> → <b>Telegram</b>: confirme que <b>Permitir Notificações</b>, <b>Sons</b> e <b>Pré-visualizações</b> estão ligados.</li>
             </ol>
           </div>
         </div>
@@ -273,6 +275,7 @@ export const INDEX_HTML = /* html */ `<!doctype html>
               <option value="map_eq">Entrou no mapa</option>
               <option value="status_eq">Online / offline</option>
               <option value="gm_online">GM online (este personagem)</option>
+              <option value="level_stale">Sem subir level (idle)</option>
               <option value="server_event" disabled>Evento do servidor (em breve)</option>
             </select>
           </div>
@@ -541,6 +544,11 @@ function renderDash() {
     refreshBtn.title = "Atualizar dados";
     refreshBtn.innerHTML = "↻";
     refreshBtn.onclick = () => refreshCharacterRow(li, c.id);
+    const histBtn = document.createElement("button");
+    histBtn.className = "h-8 w-8 rounded-md border border-border text-sm hover:bg-bg transition flex items-center justify-center";
+    histBtn.title = "Histórico";
+    histBtn.innerHTML = "📈";
+    histBtn.onclick = () => toggleUserCharHistory(c.id, c.name);
     const del = document.createElement("button");
     del.className = "px-3 py-1.5 rounded-md border border-border text-danger text-sm hover:bg-bg transition";
     del.textContent = "Remover";
@@ -550,10 +558,17 @@ function renderDash() {
       refresh();
     };
     right.appendChild(refreshBtn);
+    right.appendChild(histBtn);
     right.appendChild(del);
     li.appendChild(left);
     li.appendChild(right);
     cl.appendChild(li);
+    // Hidden expansion <li> for the history chart, toggled by histBtn.
+    const histLi = document.createElement("li");
+    histLi.className = "hidden border-t border-border/60";
+    histLi.dataset.userHistFor = c.id;
+    histLi.innerHTML = '<div class="px-2 py-3" data-history-body></div>';
+    cl.appendChild(histLi);
     if (c.last_checked_at == null) stale.push(c.id);
   }
 
@@ -597,6 +612,7 @@ function renderDash() {
     else if (s.event_type === "coords_in") label = charName + ' — entra na zona <b class="text-goldsoft">' + s.threshold + '</b>';
     else if (s.event_type === "status_eq") label = charName + ' — fica <b class="text-goldsoft">' + s.threshold + '</b>';
     else if (s.event_type === "gm_online") label = "GM " + charName + " — online";
+    else if (s.event_type === "level_stale") label = charName + ' — sem subir level por <b class="text-goldsoft">' + s.threshold + ' min</b>';
     else if (s.event_type === "server_event") label = "evento do servidor: " + s.threshold;
     const activeBadge = s.active
       ? '<span class="px-2 py-0.5 rounded-full bg-ok/10 text-ok border border-ok/20 text-xs">ativo</span>'
@@ -794,6 +810,18 @@ const subFieldsEl = $("sub-fields");
 
 const ctrlClass = "h-10 w-full bg-bg border border-border rounded-md px-3 outline-none focus:border-gold/60";
 
+// Hand-curated coordinate boxes for known maps. When the user types one
+// of these as the map name on a "Entrou no mapa" alert, we offer a
+// checkbox that auto-fills the coords instead of forcing manual entry.
+// Add more presets here as we identify them.
+const SAFE_ZONES = {
+  stadium: { x1: 60, x2: 70, y1: 39, y2: 50, label: "Área segura / Respawn (baú)" },
+};
+function safeZoneFor(mapName) {
+  const k = (mapName || "").trim().toLowerCase();
+  return SAFE_ZONES[k] || null;
+}
+
 function renderSubFields() {
   const t = subTypeEl.value;
   let html = "";
@@ -804,7 +832,14 @@ function renderSubFields() {
     html =
       '<label class="text-[11px] text-muted block mb-1">Nome do mapa</label>' +
       '<input id="sf-map" type="text" placeholder="ex.: Stadium" class="' + ctrlClass + '" />' +
-      '<details class="mt-2 text-sm">' +
+      '<div id="sf-safezone-wrap" class="hidden mt-2">' +
+        '<label class="inline-flex items-center gap-2 text-sm text-slate-300 cursor-pointer">' +
+          '<input id="sf-safezone" type="checkbox" class="accent-gold" />' +
+          '<span id="sf-safezone-label">Área segura</span>' +
+        '</label>' +
+        '<div class="text-[11px] text-muted mt-1">Marca quando o personagem aparece na área de respawn (útil pra detectar morte / AFK).</div>' +
+      '</div>' +
+      '<details id="sf-coords-details" class="mt-2 text-sm">' +
         '<summary class="cursor-pointer text-muted hover:text-goldsoft">Filtrar por coordenadas (opcional)</summary>' +
         '<div class="mt-2 grid grid-cols-2 sm:grid-cols-4 gap-2">' +
           '<div><label class="text-[11px] text-muted block mb-1">X mínimo</label><input id="sf-x1" type="number" min="0" max="255" placeholder="60" class="' + ctrlClass + '" /></div>' +
@@ -812,7 +847,7 @@ function renderSubFields() {
           '<div><label class="text-[11px] text-muted block mb-1">Y mínimo</label><input id="sf-y1" type="number" min="0" max="255" placeholder="80" class="' + ctrlClass + '" /></div>' +
           '<div><label class="text-[11px] text-muted block mb-1">Y máximo</label><input id="sf-y2" type="number" min="0" max="255" placeholder="100" class="' + ctrlClass + '" /></div>' +
         '</div>' +
-        '<div class="text-[11px] text-muted mt-2">Para uma posição exata, use o mesmo número em mín e máx (ex.: respawn de Stadium num pixel específico).</div>' +
+        '<div class="text-[11px] text-muted mt-2">Para uma posição exata, use o mesmo número em mín e máx.</div>' +
       '</details>';
   } else if (t === "status_eq") {
     html =
@@ -823,10 +858,39 @@ function renderSubFields() {
       '</select>';
   } else if (t === "gm_online") {
     html = '<div class="text-xs text-muted bg-bg border border-border rounded-md px-3 py-2">Sem campos extras. O personagem precisa estar marcado como <b class="text-goldsoft">GM</b> na lista de personagens.</div>';
+  } else if (t === "level_stale") {
+    html =
+      '<label class="text-[11px] text-muted block mb-1">Minutos sem subir de nível</label>' +
+      '<input id="sf-stale" type="number" min="1" max="1440" placeholder="ex.: 5" class="' + ctrlClass + '" />' +
+      '<div class="text-[11px] text-muted mt-1">Avisa se o personagem ficou esse tempo sem subir level (provavelmente AFK, morreu ou desconectou).</div>';
   } else if (t === "server_event") {
     html = '<div class="text-xs text-muted bg-bg border border-border rounded-md px-3 py-2">Evento do servidor ainda não está conectado a uma fonte. Em breve.</div>';
   }
   subFieldsEl.innerHTML = html;
+
+  // map_eq: react to map-name typing → toggle the safe-zone checkbox.
+  // When the checkbox is on, hide the manual-coords details so the user
+  // isn't confused which one wins.
+  const mapEl = $("sf-map");
+  const wrap = $("sf-safezone-wrap");
+  const cb = $("sf-safezone");
+  const lbl = $("sf-safezone-label");
+  const details = $("sf-coords-details");
+  if (mapEl && wrap && cb && lbl && details) {
+    const sync = () => {
+      const z = safeZoneFor(mapEl.value);
+      if (z) {
+        wrap.classList.remove("hidden");
+        lbl.textContent = z.label;
+      } else {
+        wrap.classList.add("hidden");
+        cb.checked = false;
+      }
+      details.classList.toggle("hidden", !!cb.checked);
+    };
+    mapEl.addEventListener("input", sync);
+    cb.addEventListener("change", sync);
+  }
 }
 subTypeEl.addEventListener("change", renderSubFields);
 renderSubFields();
@@ -844,6 +908,18 @@ function readSubFormPayload() {
   if (t === "map_eq") {
     const map = ($("sf-map").value || "").trim();
     if (!map) throw new Error("informe o mapa");
+    // Preset wins if it's checked: send the canned coord box.
+    const safezoneOn = !!($("sf-safezone") && $("sf-safezone").checked);
+    if (safezoneOn) {
+      const z = safeZoneFor(map);
+      if (z) {
+        return {
+          ...base,
+          event_type: "coords_in",
+          threshold: map + ":" + z.x1 + "-" + z.x2 + ":" + z.y1 + "-" + z.y2,
+        };
+      }
+    }
     const x1 = ($("sf-x1") || {}).value, x2 = ($("sf-x2") || {}).value;
     const y1 = ($("sf-y1") || {}).value, y2 = ($("sf-y2") || {}).value;
     const anyCoord = [x1, x2, y1, y2].some((v) => (v ?? "").toString().trim() !== "");
@@ -864,6 +940,11 @@ function readSubFormPayload() {
   }
   if (t === "gm_online") {
     return { ...base, event_type: "gm_online" };
+  }
+  if (t === "level_stale") {
+    const v = ($("sf-stale").value || "").trim();
+    if (!v) throw new Error("informe os minutos");
+    return { ...base, event_type: "level_stale", threshold: v };
   }
   throw new Error("evento do servidor ainda não disponível");
 }
@@ -963,6 +1044,25 @@ function wireAdminCharActions(c) {
   if (historyBtnEl) historyBtnEl.onclick = () => toggleAdminHistory(c.id, c.name);
 }
 
+async function toggleUserCharHistory(charId, charName) {
+  const expansion = document.querySelector('li[data-user-hist-for="' + charId + '"]');
+  if (!expansion) return;
+  if (!expansion.classList.contains("hidden")) {
+    expansion.classList.add("hidden");
+    return;
+  }
+  expansion.classList.remove("hidden");
+  const cell = expansion.querySelector('[data-history-body]');
+  cell.innerHTML = '<span class="text-muted text-xs">carregando histórico…</span>';
+  try {
+    const data = await fetchJSON("/api/characters/" + charId + "/history?days=7");
+    cell.innerHTML = renderHistoryChart(data, charName);
+    wireHistoryTooltips(cell);
+  } catch (e) {
+    cell.innerHTML = '<span class="text-danger text-xs">' + escapeHtml(e.message) + '</span>';
+  }
+}
+
 async function toggleAdminHistory(charId, charName) {
   const expansion = document.querySelector('tr[data-history-for="' + charId + '"]');
   if (!expansion) return;
@@ -976,9 +1076,45 @@ async function toggleAdminHistory(charId, charName) {
   try {
     const data = await fetchJSON("/api/admin/chars/" + charId + "/history?days=7");
     cell.innerHTML = renderHistoryChart(data, charName);
+    wireHistoryTooltips(cell);
   } catch (e) {
     cell.innerHTML = '<span class="text-danger text-xs">' + escapeHtml(e.message) + '</span>';
   }
+}
+
+// Floating tooltip for the resets-over-time chart. One singleton tip div
+// (top of body), positioned near the cursor on dot mouseover; hidden on
+// mouseleave. Cheaper and more reliable than native <title> tooltips,
+// which have a 1.5s show delay and don't work on inline SVG in some
+// browsers (Chrome/macOS in particular).
+function wireHistoryTooltips(cell) {
+  const tip = $("chart-tip");
+  if (!tip) return;
+  const setBarsHighlight = (on) => {
+    cell.querySelectorAll(".cycle-bar").forEach((b) => {
+      b.setAttribute("stroke-opacity", on ? "1" : (b.getAttribute("stroke") === "#f0a93b" ? "0.85" : "0.5"));
+      b.setAttribute("stroke-width", on ? "1.8" : (b.getAttribute("stroke") === "#f0a93b" ? "1.6" : "1.2"));
+    });
+  };
+  cell.addEventListener("mousemove", (e) => {
+    const t = e.target;
+    const isHit = t instanceof Element && (t.classList.contains("hist-dot") || t.classList.contains("cycle-bar"));
+    if (!isHit) {
+      tip.classList.add("hidden");
+      setBarsHighlight(false);
+      return;
+    }
+    tip.textContent = t.getAttribute("data-tip") || "";
+    tip.style.top = (e.clientY - 28) + "px";
+    tip.style.left = (e.clientX + 12) + "px";
+    tip.classList.remove("hidden");
+    // Linked hover: any cycle-bar hovered → all of them highlight at once.
+    setBarsHighlight(t.classList.contains("cycle-bar"));
+  });
+  cell.addEventListener("mouseleave", () => {
+    tip.classList.add("hidden");
+    setBarsHighlight(false);
+  });
 }
 
 // Step-plot of resets over time. Resets only go up, so this shows progress
@@ -997,12 +1133,17 @@ function renderHistoryChart(data, charName) {
   const rMin = Math.min(...samples.map((s) => s.resets ?? 0));
   const rMax = Math.max(...samples.map((s) => s.resets ?? 0));
   const rSpan = Math.max(rMax - rMin, 1);
+  const lMin = Math.min(...samples.map((s) => s.level ?? 0));
+  const lMax = Math.max(...samples.map((s) => s.level ?? 0));
+  const lSpan = Math.max(lMax - lMin, 1);
 
-  const W = 720, H = 220, padL = 36, padR = 8, padT = 12, padB = 24;
+  // Padding on the right grew because we now show level ticks there too.
+  const W = 720, H = 240, padL = 36, padR = 36, padT = 22, padB = 26;
   const innerW = W - padL - padR, innerH = H - padT - padB;
 
   const xOf = (t) => padL + ((t - tMin) / span) * innerW;
-  const yOf = (r) => padT + innerH - ((r - rMin) / rSpan) * innerH;
+  const yOf  = (r) => padT + innerH - ((r - rMin) / rSpan) * innerH;
+  const yOfL = (l) => padT + innerH - ((l - lMin) / lSpan) * innerH;
 
   // Step path (horizontal then vertical).
   let d = "";
@@ -1010,23 +1151,128 @@ function renderHistoryChart(data, charName) {
     const x = xOf(s.ts), y = yOf(s.resets ?? 0);
     if (i === 0) d += "M" + x + "," + y;
     else {
-      const px = xOf(samples[i - 1].ts), py = yOf(samples[i - 1].resets ?? 0);
-      d += " L" + x + "," + py + " L" + x + "," + y;
+      d += " L" + x + "," + yOf(samples[i - 1].resets ?? 0) + " L" + x + "," + y;
     }
   });
 
-  // Y-axis ticks (every reset, but cap at 6 labels)
-  const ticks = [];
-  const tickCount = Math.min(rSpan + 1, 6);
-  for (let i = 0; i < tickCount; i++) {
-    const v = Math.round(rMin + (rSpan * i) / Math.max(tickCount - 1, 1));
-    ticks.push(v);
-  }
-  const yTickLines = ticks.map((v) => {
-    const y = yOf(v);
-    return '<line x1="' + padL + '" x2="' + (W - padR) + '" y1="' + y + '" y2="' + y + '" stroke="#252a36" stroke-dasharray="2,3" />' +
-           '<text x="' + (padL - 4) + '" y="' + (y + 3) + '" fill="#8a93a3" font-size="10" text-anchor="end">' + v + '</text>';
+  // One small dot per sample with a native <title> tooltip — hover shows the
+  // exact time, level, and reset count.
+  const fmtFull = (ts) => {
+    const d = new Date(ts * 1000);
+    const pad = (n) => String(n).padStart(2, "0");
+    return pad(d.getDate()) + "/" + pad(d.getMonth() + 1) + " " + pad(d.getHours()) + ":" + pad(d.getMinutes());
+  };
+  // Level path: smooth line through samples (no step). Drops naturally on
+  // each reset since level resets to a low number — produces the sawtooth
+  // look user wants for "progression inside each reset".
+  let lDp = "";
+  samples.forEach((s, i) => {
+    const x = xOf(s.ts), y = yOfL(s.level ?? lMin);
+    lDp += (i === 0 ? "M" : " L") + x + "," + y;
+  });
+
+  const dots = samples.map((s) => {
+    const x = xOf(s.ts);
+    const yR = yOf(s.resets ?? 0);
+    const yL = yOfL(s.level ?? lMin);
+    const tip =
+      fmtFull(s.ts) + " · resets " + (s.resets ?? "?") +
+      " · lv " + (s.level ?? "?") +
+      (s.map ? " · " + s.map : "") +
+      (s.status ? " · " + s.status : "");
+    const safeTip = escapeHtml(tip);
+    return '<circle cx="' + x + '" cy="' + yR + '" r="3.5" fill="#f0a93b" stroke="#0b0d12" stroke-width="1.2" class="hist-dot cursor-pointer" data-tip="' + safeTip + '"></circle>' +
+           '<circle cx="' + x + '" cy="' + yL + '" r="3" fill="#7aa2f7" stroke="#0b0d12" stroke-width="1.2" class="hist-dot cursor-pointer" data-tip="' + safeTip + '"></circle>';
   }).join("");
+
+  // "Cycle benchmark" markers — one for the current cycle, one for the
+  // previous (when applicable). Each marker is a vertical dashed line at
+  // the moment the cycle first reached the current level, with a tooltip
+  // showing how long that took from the cycle's local-min level. Linked
+  // hover (any bar hovered → both highlight) makes side-by-side speed
+  // comparison obvious.
+  const last = samples[samples.length - 1];
+  function cycleStats(resetCount, targetLevel) {
+    const samp = samples.filter((s) => s.resets === resetCount);
+    if (samp.length === 0) return null;
+    let lowest = Infinity, fromTs = 0;
+    for (const s of samp) {
+      const lv = s.level ?? Infinity;
+      if (lv < lowest) { lowest = lv; fromTs = s.ts; }
+    }
+    if (!isFinite(lowest)) return null;
+    const hit = samp.find((s) => (s.level ?? -Infinity) >= targetLevel && s.ts >= fromTs);
+    if (!hit) return null;
+    return { fromLevel: lowest, fromTs, hitTs: hit.ts, duration: hit.ts - fromTs };
+  }
+  function fmtDur(secs) {
+    if (secs < 60) return secs + "s";
+    const m = Math.floor(secs / 60);
+    if (m < 60) return m + "min";
+    const h = Math.floor(m / 60), r = m % 60;
+    return h + "h" + (r ? " " + r + "min" : "");
+  }
+  function bar(stats, resetCount, isCurrent) {
+    if (!stats) return "";
+    const x = xOf(stats.hitTs);
+    const tip =
+      "R" + resetCount + (isCurrent ? " (atual)" : "") +
+      " · lv " + last.level + " em " +
+      escapeHtml(fmtDur(stats.duration)) +
+      " (desde lv " + stats.fromLevel + ")";
+    const color = isCurrent ? "#f0a93b" : "#8a93a3";
+    const opacity = isCurrent ? "0.85" : "0.5";
+    const w = isCurrent ? "1.6" : "1.2";
+    return '<line x1="' + x + '" x2="' + x + '" y1="' + padT + '" y2="' + (H - padB) + '" stroke="' + color + '" stroke-width="' + w + '" stroke-dasharray="4,3" stroke-opacity="' + opacity + '" class="cycle-bar cursor-pointer" data-tip="' + tip + '"></line>';
+  }
+  let markers = "";
+  let inlineLabels = "";
+  if (last.resets != null && last.level != null) {
+    // One bar per distinct reset cycle visible in the window.
+    const distinctResets = [...new Set(samples.map((s) => s.resets).filter((r) => r != null))].sort((a, b) => a - b);
+    for (const r of distinctResets) {
+      const stats = cycleStats(r, last.level);
+      if (!stats) continue;
+      const isCurrent = r === last.resets;
+      markers += bar(stats, r, isCurrent);
+      // Tiny duration label above each bar — gold for current cycle, muted
+      // for past ones. Lets users scan-compare without hovering.
+      const x = xOf(stats.hitTs);
+      const fill = isCurrent ? "#f7c779" : "#8a93a3";
+      inlineLabels += '<text x="' + (x + 3) + '" y="' + (padT + 10) + '" fill="' + fill + '" font-size="9">' + fmtDur(stats.duration) + '</text>';
+    }
+  }
+
+  // Tiny legend in the top-right of the chart area.
+  const legend =
+    '<g transform="translate(' + (padL + 6) + ',' + (padT - 6) + ')" font-size="10" font-family="Inter,system-ui,sans-serif">' +
+      '<circle cx="0" cy="0" r="3" fill="#f0a93b" />' +
+      '<text x="6" y="3" fill="#f7c779">resets</text>' +
+      '<circle cx="56" cy="0" r="3" fill="#7aa2f7" />' +
+      '<text x="62" y="3" fill="#7aa2f7">level</text>' +
+      '<line x1="100" x2="116" y1="0" y2="0" stroke="#f0a93b" stroke-dasharray="4,3" />' +
+      '<text x="120" y="3" fill="#f7c779">ciclo atual</text>' +
+      '<line x1="166" x2="182" y1="0" y2="0" stroke="#8a93a3" stroke-dasharray="4,3" />' +
+      '<text x="186" y="3" fill="#8a93a3">ciclos passados</text>' +
+    '</g>';
+
+  // Gridlines at uniform fractions of the plot height; cap at 5, fewer
+  // when the resets range is tiny (e.g. only 32→33). At each gridline the
+  // left axis shows the resets value and the right shows level. Stable
+  // even when both spans are small or huge.
+  const tickCount = Math.max(2, Math.min(5, rSpan + 1));
+  const yTickLines = [];
+  for (let i = 0; i < tickCount; i++) {
+    const frac = i / (tickCount - 1);          // 0=bottom, 1=top
+    const y = padT + innerH * (1 - frac);
+    const rVal = Math.round(rMin + rSpan * frac);
+    const lVal = Math.round(lMin + lSpan * frac);
+    yTickLines.push(
+      '<line x1="' + padL + '" x2="' + (W - padR) + '" y1="' + y + '" y2="' + y + '" stroke="#252a36" stroke-dasharray="2,3" />' +
+      '<text x="' + (padL - 4) + '" y="' + (y + 3) + '" fill="#f0a93b" font-size="10" text-anchor="end">' + rVal + '</text>' +
+      '<text x="' + (W - padR + 4) + '" y="' + (y + 3) + '" fill="#7aa2f7" font-size="10" text-anchor="start">' + lVal + '</text>',
+    );
+  }
 
   // X labels — start, mid, end timestamps
   const fmt = (ts) => {
@@ -1047,9 +1293,14 @@ function renderHistoryChart(data, charName) {
 
   return stats +
     '<svg viewBox="0 0 ' + W + ' ' + H + '" class="w-full h-auto bg-bg border border-border rounded-md">' +
-      yTickLines +
+      yTickLines.join("") +
+      markers +
+      '<path d="' + lDp + '" fill="none" stroke="#7aa2f7" stroke-width="1.5" stroke-opacity="0.85" />' +
       '<path d="' + d + '" fill="none" stroke="#f0a93b" stroke-width="2" />' +
+      dots +
+      inlineLabels +
       xLabels +
+      legend +
     '</svg>';
 }
 
@@ -1086,6 +1337,7 @@ function renderAdminSubs(subs) {
     else if (s.event_type === "coords_in") label = "zona <b class=\\"text-goldsoft\\">" + escapeHtml(s.threshold ?? "") + "</b>";
     else if (s.event_type === "status_eq") label = "fica <b class=\\"text-goldsoft\\">" + escapeHtml(s.threshold ?? "") + "</b>";
     else if (s.event_type === "gm_online") label = "GM online";
+    else if (s.event_type === "level_stale") label = "sem subir level por <b class=\\"text-goldsoft\\">" + escapeHtml(s.threshold ?? "") + " min</b>";
     else if (s.event_type === "server_event") label = "evento: " + escapeHtml(s.threshold ?? "");
     else label = escapeHtml(s.event_type);
     const status = s.active

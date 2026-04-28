@@ -20,7 +20,8 @@ export type EventType =
   | "coords_in"
   | "status_eq"
   | "gm_online"
-  | "server_event";
+  | "server_event"
+  | "level_stale";
 
 export interface UserRow {
   id: number;
@@ -61,6 +62,7 @@ export interface CharacterRow {
   next_target_resets: number | null;
   blocked: number;
   avg_reset_time?: number | null;
+  last_level_change_at: number | null;
 }
 
 export interface SubscriptionRow {

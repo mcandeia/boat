@@ -84,6 +84,53 @@ export async function deleteCharacter(env: Env, userId: number, id: number): Pro
   return json({ ok: true });
 }
 
+// Snapshot history for a single character, scoped to the caller's
+// ownership. Mirrors the admin variant but enforces the user_id check
+// here so we don't have to duplicate the auth in two places.
+export async function userCharHistory(
+  env: Env,
+  userId: number,
+  charId: number,
+  req: Request,
+): Promise<Response> {
+  const owned = await env.DB
+    .prepare("SELECT id FROM characters WHERE id = ? AND user_id = ?")
+    .bind(charId, userId)
+    .first<{ id: number }>();
+  if (!owned) return bad(404, "personagem não encontrado");
+  return await buildHistoryResponse(env, charId, req);
+}
+
+// Shared between the user-facing /api/characters/:id/history and the
+// admin route. Same shape as before: cycles[] grouped by reset count.
+export async function buildHistoryResponse(env: Env, charId: number, req: Request): Promise<Response> {
+  const url = new URL(req.url);
+  const days = Math.min(Math.max(Number(url.searchParams.get("days") || 7), 1), 90);
+  const since = Math.floor(Date.now() / 1000) - days * 86400;
+  type Snap = { ts: number; level: number | null; resets: number | null; map: string | null; status: string | null };
+  const rs = await env.DB
+    .prepare(
+      `SELECT ts, level, resets, map, status
+         FROM char_snapshots
+        WHERE char_id = ? AND ts >= ?
+        ORDER BY ts ASC`,
+    )
+    .bind(charId, since)
+    .all<Snap>();
+  const snaps = rs.results ?? [];
+  const cycles: Array<{ resets: number; start_ts: number; samples: Snap[] }> = [];
+  for (const s of snaps) {
+    const r = s.resets ?? 0;
+    let cur = cycles[cycles.length - 1];
+    if (!cur || cur.resets !== r) {
+      cur = { resets: r, start_ts: s.ts, samples: [] };
+      cycles.push(cur);
+    }
+    cur.samples.push(s);
+  }
+  return json({ days, count: snaps.length, cycles });
+}
+
 // On-demand re-scrape for a single character. Used by the dashboard to fill
 // in stats lazily after a slow add, or when the user taps "Atualizar".
 // Returns the freshly stored row so the UI can redraw.
