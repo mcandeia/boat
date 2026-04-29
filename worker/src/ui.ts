@@ -2594,9 +2594,13 @@ function wireItemTypeahead(scope) {
 
 // Route mupatos sprite URLs through our same-origin proxy. Anything else
 // passes through unchanged (e.g. user-supplied URLs we don't host).
+// startsWith over a regex on purpose — INDEX_HTML is a template literal,
+// so a regex literal like /\/foo\// gets its backslashes stripped at
+// template-render time and the served JS parses as a syntax error.
 function proxyImg(url) {
   if (!url) return url;
-  if (/^https:\/\/mupatos\.com\.br\/site\/resources\/images\//i.test(url)) {
+  const prefix = "https://mupatos.com.br/site/resources/images/";
+  if (url.toLowerCase().indexOf(prefix) === 0) {
     return "/img-proxy?u=" + encodeURIComponent(url);
   }
   return url;
