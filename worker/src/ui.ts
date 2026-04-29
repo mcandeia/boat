@@ -2549,11 +2549,20 @@ const marketState = { sort: "hot", side: "", q: "", listings: [], pdpId: null };
 let marketSearchTimer = null;
 
 function detectPdpId() {
-  const m = location.pathname.match(/^\/m\/(\d+)$/);
-  if (m) return Number(m[1]);
-  // Legacy: ?market=N still works (older Telegram pings) — same effect.
+  // Plain string ops — INDEX_HTML is a template literal and a regex like
+  // /^\/m\/(\d+)$/ has its single-backslash escapes stripped at render
+  // time, so it'd ship to the browser as /^/m/(d+)$/ and crash on parse.
+  const path = location.pathname || "";
+  if (path.indexOf("/m/") === 0) {
+    const id = Number(path.slice(3));
+    if (Number.isInteger(id) && id > 0) return id;
+  }
+  // Legacy alias: /?market=N still works for old Telegram pings.
   const q = new URLSearchParams(location.search).get("market");
-  if (q && /^\d+$/.test(q)) return Number(q);
+  if (q) {
+    const id = Number(q);
+    if (Number.isInteger(id) && id > 0) return id;
+  }
   return null;
 }
 
