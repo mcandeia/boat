@@ -102,7 +102,7 @@ function applyTemplate(tpl: string, dict: Record<string, string>): string {
   // substitute whitelisted tokens.
   let out = escHtml(tpl);
   for (const [k, v] of Object.entries(dict)) {
-    const re = new RegExp("\\\\{" + k + "\\\\}", "gi");
+    const re = new RegExp("\\{" + k + "\\}", "gi");
     out = out.replace(re, v);
   }
   return out;
