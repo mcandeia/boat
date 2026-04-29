@@ -166,9 +166,9 @@ export async function buildHistoryResponse(env: Env, charId: number, req: Reques
 // Returns the freshly stored row so the UI can redraw.
 export async function refreshCharacter(env: Env, userId: number, id: number): Promise<Response> {
   const linked = await env.DB
-    .prepare("SELECT 1 AS ok FROM user_characters WHERE character_id = ? AND user_id = ?")
+    .prepare("SELECT id, is_gm FROM user_characters WHERE character_id = ? AND user_id = ?")
     .bind(id, userId)
-    .first<{ ok: number }>();
+    .first<{ id: number; is_gm: number }>();
   if (!linked) return bad(404, "não encontrado");
 
   const row = await env.DB
@@ -179,12 +179,36 @@ export async function refreshCharacter(env: Env, userId: number, id: number): Pr
 
   const snap = await scrapeOne(env, row.name, { totalTimeoutMs: 25_000 });
   if (!snap.scraped) {
-    return json({ scraped: false, character: row });
+    const withComputed = await env.DB
+      .prepare(`
+        SELECT c.*,
+          ? AS is_gm,
+          (SELECT (MAX(start_ts) - MIN(start_ts)) / NULLIF(MAX(resets) - MIN(resets), 0)
+           FROM (SELECT resets, MIN(ts) as start_ts FROM char_snapshots WHERE char_id = c.id GROUP BY resets)
+          ) AS avg_reset_time
+        FROM characters c
+        WHERE c.id = ?
+      `)
+      .bind(linked.is_gm, id)
+      .first<CharacterRow & { is_gm: number; avg_reset_time?: number | null }>();
+    return json({ scraped: false, character: withComputed ?? row });
   }
   if (!snap.exists) {
     // Char vanished from the server (renamed, deleted). Don't touch the row;
     // just tell the caller.
-    return json({ scraped: true, exists: false, character: row });
+    const withComputed = await env.DB
+      .prepare(`
+        SELECT c.*,
+          ? AS is_gm,
+          (SELECT (MAX(start_ts) - MIN(start_ts)) / NULLIF(MAX(resets) - MIN(resets), 0)
+           FROM (SELECT resets, MIN(ts) as start_ts FROM char_snapshots WHERE char_id = c.id GROUP BY resets)
+          ) AS avg_reset_time
+        FROM characters c
+        WHERE c.id = ?
+      `)
+      .bind(linked.is_gm, id)
+      .first<CharacterRow & { is_gm: number; avg_reset_time?: number | null }>();
+    return json({ scraped: true, exists: false, character: withComputed ?? row });
   }
 
   const t = now();
@@ -203,8 +227,16 @@ export async function refreshCharacter(env: Env, userId: number, id: number): Pr
     .run();
 
   const updated = await env.DB
-    .prepare("SELECT * FROM characters WHERE id = ?")
-    .bind(id)
-    .first<CharacterRow>();
+    .prepare(`
+      SELECT c.*,
+        ? AS is_gm,
+        (SELECT (MAX(start_ts) - MIN(start_ts)) / NULLIF(MAX(resets) - MIN(resets), 0)
+         FROM (SELECT resets, MIN(ts) as start_ts FROM char_snapshots WHERE char_id = c.id GROUP BY resets)
+        ) AS avg_reset_time
+      FROM characters c
+      WHERE c.id = ?
+    `)
+    .bind(linked.is_gm, id)
+    .first<CharacterRow & { is_gm: number; avg_reset_time?: number | null }>();
   return json({ scraped: true, exists: true, character: updated });
 }
