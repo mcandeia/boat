@@ -2897,13 +2897,29 @@ function renderListingCard(l) {
     '<div class="flex flex-wrap items-center gap-1.5 mt-3">' +
       reactionsRow +
       (isMine
-        ? '<button data-action="edit" class="text-xs px-2 py-0.5 rounded border border-border text-muted hover:text-slate-200 ml-auto">editar</button>' +
-          '<button data-action="delete" class="text-xs px-2 py-0.5 rounded border border-border text-danger hover:bg-danger/10">remover</button>'
-        : '<button data-action="ping" class="text-xs px-2 py-0.5 rounded bg-gold text-bg font-semibold ml-auto hover:brightness-110">' + (
-            l.side === "donate" ? "🤝 quero receber"
-            : l.side === "buy"  ? "📣 tenho o item"
-            : "📣 tenho interesse"
-          ) + '</button>') +
+        ? (l.status === "closed"
+            // Owner of a closed listing — single action: reopen.
+            ? '<button data-action="reopen" class="text-xs px-2 py-0.5 rounded border border-emerald-500/40 text-emerald-300 hover:bg-emerald-500/10 ml-auto">↺ reabrir</button>' +
+              '<button data-action="delete" class="text-xs px-2 py-0.5 rounded border border-border text-danger hover:bg-danger/10">remover</button>'
+            // Open/held: edit + close (Vendido/Comprado/Doado) + remover.
+            : '<button data-action="edit" class="text-xs px-2 py-0.5 rounded border border-border text-muted hover:text-slate-200 ml-auto">editar</button>' +
+              '<button data-action="close" class="text-xs px-2 py-0.5 rounded border border-emerald-500/40 text-emerald-300 hover:bg-emerald-500/10">✓ ' + (
+                l.side === "donate" ? "doado"
+                : l.side === "buy"  ? "comprado"
+                : "vendido"
+              ) + '</button>' +
+              '<button data-action="delete" class="text-xs px-2 py-0.5 rounded border border-border text-danger hover:bg-danger/10">remover</button>'
+          )
+        // Non-owner viewer: hide the ping CTA on closed listings —
+        // server would reject it anyway (400 "anúncio fechado") and the
+        // big gold button next to a fechado badge is misleading.
+        : (l.status === "closed"
+            ? ""
+            : '<button data-action="ping" class="text-xs px-2 py-0.5 rounded bg-gold text-bg font-semibold ml-auto hover:brightness-110">' + (
+                l.side === "donate" ? "🤝 quero receber"
+                : l.side === "buy"  ? "📣 tenho o item"
+                : "📣 tenho interesse"
+              ) + '</button>')) +
       '<button data-action="toggle-detail" class="text-xs px-2 py-0.5 rounded border border-border text-muted hover:text-slate-200">💬 <span data-comment-count>' + (l.comment_count || 0) + '</span></button>' +
     '</div>' +
     '<div data-detail class="hidden mt-3 pt-3 border-t border-border/60"></div>';
@@ -2943,6 +2959,30 @@ async function handleListingAction(action, l, card, e) {
     try {
       await fetchJSON("/api/market/listings/" + l.id, { method: "DELETE" });
       toast("removido", "ok");
+      await loadMarket();
+    } catch (err) { toast(err.message, "err"); }
+    return;
+  }
+  if (action === "close") {
+    const verb = l.side === "donate" ? "doado" : l.side === "buy" ? "comprado" : "vendido";
+    if (!await confirmModal("Marcar como " + verb + "? O anúncio fica visível mas marcado como fechado.", { okLabel: "Sim, " + verb })) return;
+    try {
+      await fetchJSON("/api/market/listings/" + l.id, {
+        method: "PATCH",
+        body: JSON.stringify({ status: "closed" }),
+      });
+      toast("marcado como " + verb, "ok");
+      await loadMarket();
+    } catch (err) { toast(err.message, "err"); }
+    return;
+  }
+  if (action === "reopen") {
+    try {
+      await fetchJSON("/api/market/listings/" + l.id, {
+        method: "PATCH",
+        body: JSON.stringify({ status: "open" }),
+      });
+      toast("anúncio reaberto", "ok");
       await loadMarket();
     } catch (err) { toast(err.message, "err"); }
     return;
