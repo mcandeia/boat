@@ -111,6 +111,67 @@ export async function adminRunCron(env: Env): Promise<Response> {
   return json({ ok: true, ...r });
 }
 
+export async function adminHealth(env: Env): Promise<Response> {
+  const nowTs = now();
+
+  const counts = await env.DB
+    .prepare(
+      `SELECT
+         (SELECT COUNT(*) FROM users) AS users_count,
+         (SELECT COUNT(*) FROM characters) AS chars_count,
+         (SELECT COUNT(*) FROM user_characters) AS links_count,
+         (SELECT COUNT(*) FROM characters WHERE blocked = 1) AS blocked_count,
+         (SELECT COUNT(*) FROM subscriptions WHERE active = 1) AS active_subs_count,
+         (SELECT COUNT(*) FROM subscriptions WHERE active = 1 AND event_type = 'server_event') AS server_event_subs_count,
+         (SELECT COUNT(*) FROM server_events WHERE manual = 1) AS manual_events_count`
+    )
+    .first<{
+      users_count: number;
+      chars_count: number;
+      links_count: number;
+      blocked_count: number;
+      active_subs_count: number;
+      server_event_subs_count: number;
+      manual_events_count: number;
+    }>();
+
+  const latestSnapshot = await env.DB
+    .prepare("SELECT MAX(ts) AS ts FROM char_snapshots")
+    .first<{ ts: number | null }>();
+  const latestCharCheck = await env.DB
+    .prepare("SELECT MAX(last_checked_at) AS ts FROM characters")
+    .first<{ ts: number | null }>();
+  const latestEventSync = await env.DB
+    .prepare("SELECT MAX(updated_at) AS ts FROM server_events")
+    .first<{ ts: number | null }>();
+
+  const checkedChars = await env.DB
+    .prepare("SELECT COUNT(*) AS c FROM characters WHERE last_checked_at IS NOT NULL")
+    .first<{ c: number }>();
+
+  return json({
+    now: nowTs,
+    counts: counts ?? {
+      users_count: 0,
+      chars_count: 0,
+      links_count: 0,
+      blocked_count: 0,
+      active_subs_count: 0,
+      server_event_subs_count: 0,
+      manual_events_count: 0,
+    },
+    freshness: {
+      latest_snapshot_ts: latestSnapshot?.ts ?? null,
+      latest_char_check_ts: latestCharCheck?.ts ?? null,
+      latest_event_sync_ts: latestEventSync?.ts ?? null,
+    },
+    coverage: {
+      checked_chars: checkedChars?.c ?? 0,
+      total_chars: counts?.chars_count ?? 0,
+    },
+  });
+}
+
 interface AdminSubRow {
   id: number;
   event_type: string;

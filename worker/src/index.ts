@@ -32,6 +32,7 @@ import {
   warmupCatalog,
 } from "./routes/market";
 import {
+  adminHealth,
   adminCharHistory,
   adminClearCharSnapshots,
   adminListCharSubs,
@@ -192,6 +193,7 @@ export default {
           .then((r) => !!r?.admin);
         if (!isAdmin) return bad(403, "acesso restrito a admins");
 
+        if (pathname === "/api/admin/health" && method === "GET") return await adminHealth(env);
         if (pathname === "/api/admin/chars" && method === "GET") return await adminListChars(env);
         const charSet = pathname.match(/^\/api\/admin\/chars\/(\d+)$/);
         if (charSet && method === "PATCH") return await adminSetBlocked(env, Number(charSet[1]), req);
