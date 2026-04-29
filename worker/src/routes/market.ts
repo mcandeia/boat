@@ -137,27 +137,15 @@ async function loadListings(
   orderBinds: (string | number)[],
   limit: number,
 ): Promise<ListingDTO[]> {
-  // Owner presence: any of the listing owner's chars currently Online.
-  // Uses last_checked_at to ignore stale rows (cron runs every minute,
-  // so 5 min is generous). The subquery picks the most recently-checked
-  // online char so we can display its map alongside.
-  const PRESENCE_FRESH_SECS = 300;
-  const presenceCutoff = now() - PRESENCE_FRESH_SECS;
+  // Status comes from the listing's linked "contact char" — picked
+  // per-listing by the seller so the buyer knows who to PM in-game.
+  // Anything older than 5 min is stale; the cron runs every minute so
+  // this is comfortably generous.
   const sql =
     "SELECT l.*, " +
     "  u.nickname AS nickname, " +
     "  c.name AS char_name, c.last_level AS char_level, c.resets AS char_resets, " +
-    "  (SELECT c2.name FROM user_characters uc " +
-    "      JOIN characters c2 ON c2.id = uc.character_id " +
-    "     WHERE uc.user_id = l.user_id AND c2.last_status = 'Online' AND c2.last_checked_at > ? " +
-    "     ORDER BY c2.last_checked_at DESC LIMIT 1) AS owner_online_char, " +
-    "  (SELECT c2.last_map FROM user_characters uc " +
-    "      JOIN characters c2 ON c2.id = uc.character_id " +
-    "     WHERE uc.user_id = l.user_id AND c2.last_status = 'Online' AND c2.last_checked_at > ? " +
-    "     ORDER BY c2.last_checked_at DESC LIMIT 1) AS owner_online_map, " +
-    "  (SELECT MAX(c2.last_checked_at) FROM user_characters uc " +
-    "      JOIN characters c2 ON c2.id = uc.character_id " +
-    "     WHERE uc.user_id = l.user_id) AS owner_last_seen, " +
+    "  c.last_status AS char_status, c.last_map AS char_map, c.last_checked_at AS char_checked_at, " +
     "  COALESCE(rc.cnt, 0) AS react_count, " +
     "  COALESCE(cc.cnt, 0) AS comment_count " +
     "FROM listings l " +
@@ -172,14 +160,14 @@ async function loadListings(
     char_name: string | null;
     char_level: number | null;
     char_resets: number | null;
-    owner_online_char: string | null;
-    owner_online_map: string | null;
-    owner_last_seen: number | null;
+    char_status: string | null;
+    char_map: string | null;
+    char_checked_at: number | null;
     react_count: number;
     comment_count: number;
   };
   const rs = await env.DB.prepare(sql)
-    .bind(presenceCutoff, presenceCutoff, ...binds, ...orderBinds, limit)
+    .bind(...binds, ...orderBinds, limit)
     .all<Row>();
   const rows = rs.results ?? [];
   if (rows.length === 0) return [];

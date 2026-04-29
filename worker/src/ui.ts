@@ -2668,14 +2668,17 @@ function renderListingCard(l) {
   const attrs = fmtAttrs(l.item_attrs);
   const price = fmtPriceCurrency(l);
   const charLine = l.char_name ? "🎮 " + escapeHtml(l.char_name) + (l.char_level != null ? " (" + l.char_level + "/" + (l.char_resets ?? "?") + "rr)" : "") : "";
-  // Owner presence: any of the listing owner's chars currently online.
-  // Falls back to "offline" only when we have a recent check (otherwise
-  // we don't know — show nothing).
-  const charStatusBadge = l.owner_online_char
-    ? '<span class="px-1.5 py-0.5 rounded bg-emerald-500/15 text-emerald-300 border border-emerald-500/30 text-[10px]">🟢 online · ' + escapeHtml(l.owner_online_char) + (l.owner_online_map ? ' · ' + escapeHtml(l.owner_online_map) : '') + '</span>'
-    : (l.owner_last_seen && (Math.floor(Date.now()/1000) - l.owner_last_seen) < 600
-        ? '<span class="px-1.5 py-0.5 rounded bg-zinc-500/15 text-zinc-400 border border-zinc-500/30 text-[10px]">offline</span>'
-        : "");
+  // Linked-char presence: the seller picked one char as the in-game
+  // contact for this listing — show its status. Stale checks (>5min
+  // since last_checked_at) are ignored to avoid showing an old cached
+  // online state. No badge if no contact char or no recent check.
+  const nowSecs = Math.floor(Date.now() / 1000);
+  const fresh = l.char_checked_at != null && (nowSecs - l.char_checked_at) < 300;
+  const charStatusBadge = (l.char_id && fresh && l.char_status === "Online")
+    ? '<span class="px-1.5 py-0.5 rounded bg-emerald-500/15 text-emerald-300 border border-emerald-500/30 text-[10px]">🟢 online' + (l.char_map ? ' · ' + escapeHtml(l.char_map) : '') + '</span>'
+    : (l.char_id && fresh && l.char_status === "Offline")
+    ? '<span class="px-1.5 py-0.5 rounded bg-zinc-500/15 text-zinc-400 border border-zinc-500/30 text-[10px]">offline</span>'
+    : "";
   const isMine = state.user && l.user_id === state.user.id;
   const date = new Date(l.created_at * 1000);
   const ago = fmtAgo(state.now ? state.now - l.created_at : Math.floor(Date.now() / 1000) - l.created_at);
@@ -2876,10 +2879,11 @@ function openListingForm(existing) {
                 '<option value="buy"' + (isEdit && existing.side === "buy" ? " selected" : "") + '>comprar</option>' +
                 '<option value="donate"' + (isEdit && existing.side === "donate" ? " selected" : "") + '>doar</option>' +
               '</select></div>' +
-            '<div data-char-field><label class="text-[11px] text-muted block mb-1">Char vinculado</label>' +
+            '<div data-char-field><label class="text-[11px] text-muted block mb-1" data-char-label>Char pra contato no jogo</label>' +
               '<select data-f="char_id" class="w-full h-10 bg-bg border border-border rounded-md px-2">' +
                 '<option value="">— sem char —</option>' + charOpts +
-              '</select></div>' +
+              '</select>' +
+              '<div class="text-[11px] text-muted mt-1" data-char-hint>buyers veem o status online/mapa desse char pra saber se podem te chamar agora.</div></div>' +
           '</div>' +
           '<div data-item-fields class="space-y-3"><div><label class="text-[11px] text-muted block mb-1" data-item-label>Item</label>' +
             '<div class="relative">' +
@@ -2965,10 +2969,18 @@ function openListingForm(existing) {
     // combobox and item-attribute fields; they're pure free-form.
     const itemFields = overlay.querySelector('[data-item-fields]');
     const charFields = overlay.querySelector('[data-char-fields]');
+    const charLabelEl = overlay.querySelector('[data-char-label]');
+    const charHintEl = overlay.querySelector('[data-char-hint]');
     const syncKind = () => {
       const kind = (overlay.querySelector('input[name="kind"]:checked') || {}).value || "item";
       itemFields.classList.toggle("hidden", kind !== "item");
       charFields.classList.toggle("hidden", kind !== "char");
+      // The same char_id select means different things per kind: contact
+      // char (item listing) vs the char being sold (char listing).
+      if (charLabelEl) charLabelEl.textContent = kind === "char" ? "Char vinculado" : "Char pra contato no jogo";
+      if (charHintEl) charHintEl.textContent = kind === "char"
+        ? "se selecionar, preenchemos resets/level/classe do site automaticamente."
+        : "buyers veem o status online/mapa desse char pra saber se podem te chamar agora.";
     };
     overlay.querySelectorAll('input[name="kind"]').forEach((r) => r.addEventListener("change", syncKind));
     syncKind();
