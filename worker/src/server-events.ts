@@ -68,6 +68,11 @@ function parseTimes(line: string): string[] {
 
 interface Token { type: "h5" | "p"; text: string }
 
+// Known event names mupatos uses. Used to synthesize a header for any
+// section that lists schedules under <p> tags only (no <h5>) — Devil
+// Square is laid out exactly that way at the top of /eventos.
+const KNOWN_EVENT_NAMES = ["Devil Square", "Blood Castle", "Chaos Castle", "Castle Siege"];
+
 export function parseEventsHtml(html: string): ParsedEntry[] {
   // Walk h5 + p tags in document order.
   const tokens: Token[] = [];
@@ -88,16 +93,40 @@ export function parseEventsHtml(html: string): ParsedEntry[] {
       entries.push(cur);
       continue;
     }
-    if (!cur) continue;
-    // The label paragraph is followed by the times paragraph. Look ahead.
+    // Schedule/meta labels first — handled regardless of `cur` so the
+    // pre-h5 Devil Square block gets picked up.
     const next = tokens[i + 1];
-    if (/hor[áa]rio[s]?\s+sala\s+free/i.test(t.text) && next?.type === "p") {
-      const tt = parseTimes(next.text);
-      if (tt.length) cur.freeSchedule = cur.freeSchedule.length ? cur.freeSchedule : tt;
-    } else if (/hor[áa]rio[s]?\s+sala\s+vip/i.test(t.text) && next?.type === "p") {
-      const tt = parseTimes(next.text);
-      if (tt.length) cur.vipSchedule = cur.vipSchedule.length ? cur.vipSchedule : tt;
-    } else if (/domingo|s[áa]bado|semanal|toda semana/i.test(t.text) && !cur.meta) {
+    const isFreeLabel = /hor[áa]rio[s]?\s+sala\s+free/i.test(t.text);
+    const isVipLabel  = /hor[áa]rio[s]?\s+sala\s+vip/i.test(t.text);
+    if ((isFreeLabel || isVipLabel) && next?.type === "p") {
+      // No current entry? Synthesize one by sniffing prior <p> tokens
+      // for the first KNOWN_EVENT_NAMES match — Devil Square sits at
+      // the top of the page with paragraphs only, no <h5>.
+      if (!cur) {
+        for (let j = i - 1; j >= 0; j--) {
+          const prev = tokens[j].text;
+          const hit = KNOWN_EVENT_NAMES.find((n) => new RegExp("\\b" + n.replace(/\s+/g, "\\s+") + "\\b", "i").test(prev));
+          if (hit) {
+            // Don't reuse a name already produced from a real <h5>.
+            if (!entries.some((e) => e.name.toLowerCase() === hit.toLowerCase())) {
+              cur = { name: hit, freeSchedule: [], vipSchedule: [] };
+              entries.push(cur);
+            }
+            break;
+          }
+        }
+      }
+      if (cur) {
+        const tt = parseTimes(next.text);
+        if (tt.length) {
+          if (isFreeLabel && cur.freeSchedule.length === 0) cur.freeSchedule = tt;
+          else if (isVipLabel && cur.vipSchedule.length === 0) cur.vipSchedule = tt;
+        }
+      }
+      continue;
+    }
+    if (!cur) continue;
+    if (/domingo|s[áa]bado|semanal|toda semana/i.test(t.text) && !cur.meta) {
       cur.meta = t.text;
     }
   }
