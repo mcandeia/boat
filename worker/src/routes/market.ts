@@ -39,8 +39,27 @@ export async function listItems(env: Env, url: URL): Promise<Response> {
 // Allowed reaction kinds. Telegram-friendly emoji.
 const REACTION_KINDS = new Set(["👍", "❤️", "🔥", "👀", "🤝"]);
 const SIDE_VALUES: ReadonlySet<ListingSide> = new Set(["buy", "sell", "donate"]);
+const KIND_VALUES = new Set(["item", "char"]);
 const CURRENCY_VALUES = new Set(["zeny", "gold", "cash", "free"]);
 const STATUS_VALUES = new Set(["open", "held", "closed"]);
+
+// Render an item_attrs JSON blob as a one-line summary. Used in Telegram
+// pings — sending raw JSON looks ugly. Mirrors the UI's fmtAttrs.
+function formatAttrsLine(attrsJson: string | null): string | null {
+  if (!attrsJson) return null;
+  try {
+    const a = JSON.parse(attrsJson) as Record<string, unknown>;
+    const parts: string[] = [];
+    if (a.excellent) parts.push("Excellent");
+    if (a.refinement != null) parts.push("+" + a.refinement);
+    if (a.option != null) parts.push("opt+" + a.option);
+    if (a.luck) parts.push("luck");
+    if (a.skill) parts.push("skill");
+    if (a.ancient) parts.push("ancient: " + String(a.ancient));
+    if (a.extras) parts.push(String(a.extras));
+    return parts.length > 0 ? parts.join(" · ") : null;
+  } catch { return null; }
+}
 const PING_RATE_LIMIT_SEC = 3600;
 const COMMENT_MAX = 500;
 const NOTES_MAX = 1000;
@@ -84,6 +103,7 @@ async function loadListings(
     "SELECT l.*, " +
     "  u.nickname AS nickname, " +
     "  c.name AS char_name, c.last_level AS char_level, c.resets AS char_resets, " +
+    "  c.last_status AS char_status, c.last_map AS char_map, c.last_checked_at AS char_checked_at, " +
     "  COALESCE(rc.cnt, 0) AS react_count, " +
     "  COALESCE(cc.cnt, 0) AS comment_count " +
     "FROM listings l " +
@@ -98,6 +118,9 @@ async function loadListings(
     char_name: string | null;
     char_level: number | null;
     char_resets: number | null;
+    char_status: string | null;
+    char_map: string | null;
+    char_checked_at: number | null;
     react_count: number;
     comment_count: number;
   };
@@ -225,6 +248,7 @@ function sanitizeAttrs(raw: unknown): string | null {
   }
   if (obj.skill != null) out.skill = !!obj.skill;
   if (obj.luck != null) out.luck = !!obj.luck;
+  if (obj.excellent != null) out.excellent = !!obj.excellent;
   if (typeof obj.ancient === "string" && obj.ancient.trim()) {
     out.ancient = obj.ancient.trim().slice(0, 40);
   }
@@ -242,6 +266,7 @@ export async function createListing(env: Env, userId: number, req: Request): Pro
 
   const body = (await req.json().catch(() => ({}))) as {
     side?: string;
+    kind?: string;
     char_id?: number | null;
     item_name?: string;
     item_slug?: string | null;
@@ -254,8 +279,10 @@ export async function createListing(env: Env, userId: number, req: Request): Pro
 
   const side = body.side as ListingSide;
   if (!SIDE_VALUES.has(side)) return bad(400, "side inválido");
+  const kind = (body.kind ?? "item") as "item" | "char";
+  if (!KIND_VALUES.has(kind)) return bad(400, "kind inválido");
   const itemName = (body.item_name ?? "").trim();
-  if (!itemName || itemName.length > ITEM_NAME_MAX) return bad(400, "item_name obrigatório (1–" + ITEM_NAME_MAX + " chars)");
+  if (!itemName || itemName.length > ITEM_NAME_MAX) return bad(400, "campo obrigatório (1–" + ITEM_NAME_MAX + " chars)");
 
   const currency = body.currency ?? null;
   if (currency != null && !CURRENCY_VALUES.has(currency)) return bad(400, "currency inválida");
@@ -266,7 +293,8 @@ export async function createListing(env: Env, userId: number, req: Request): Pro
   if (currency === "free") price = null;
 
   const notes = body.notes ? String(body.notes).slice(0, NOTES_MAX) : null;
-  const attrs = sanitizeAttrs(body.item_attrs);
+  // Char listings don't have item attributes — pure free-form.
+  const attrs = kind === "char" ? null : sanitizeAttrs(body.item_attrs);
 
   let charId: number | null = body.char_id ?? null;
   if (charId != null) {
@@ -278,8 +306,8 @@ export async function createListing(env: Env, userId: number, req: Request): Pro
   }
 
   // Resolve item_slug → image_url if a slug was supplied. Slug is just a
-  // hint; we don't fail when it's stale.
-  let itemSlug: string | null = body.item_slug ?? null;
+  // hint; we don't fail when it's stale. Char listings never use a slug.
+  let itemSlug: string | null = kind === "char" ? null : (body.item_slug ?? null);
   let itemImageUrl: string | null = null;
   if (itemSlug) {
     const it = await env.DB
@@ -294,10 +322,10 @@ export async function createListing(env: Env, userId: number, req: Request): Pro
   const t = now();
   const r = await env.DB
     .prepare(
-      "INSERT INTO listings (user_id, char_id, side, item_name, item_slug, item_image_url, item_attrs, currency, price, notes, allow_message, status, created_at) " +
-      "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'open', ?)",
+      "INSERT INTO listings (user_id, char_id, kind, side, item_name, item_slug, item_image_url, item_attrs, currency, price, notes, allow_message, status, created_at) " +
+      "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'open', ?)",
     )
-    .bind(userId, charId, side, itemName, itemSlug, itemImageUrl, attrs, currency, price, notes, allowMessage, t)
+    .bind(userId, charId, kind, side, itemName, itemSlug, itemImageUrl, attrs, currency, price, notes, allowMessage, t)
     .run();
   return json({ ok: true, id: r.meta.last_row_id });
 }
@@ -518,7 +546,8 @@ export async function pingListing(
 
   // Status emoji per side.
   const sideLabel = listing.side === "buy" ? "querendo comprar" : listing.side === "donate" ? "doando" : "vendendo";
-  const itemLine = "<b>" + escHtml(listing.item_name) + "</b>" + (listing.item_attrs ? " <code>" + escHtml(listing.item_attrs) + "</code>" : "");
+  const attrsTxt = formatAttrsLine(listing.item_attrs);
+  const itemLine = "<b>" + escHtml(listing.item_name) + "</b>" + (attrsTxt ? " — " + escHtml(attrsTxt) : "");
   const priceLine = listing.currency
     ? "\n💰 " + (listing.currency === "free"
         ? "grátis"

@@ -679,6 +679,22 @@ function renderDash() {
     loadAdminEvents();
   }
 
+  // Initial tab on load: ?market=N from a Telegram link wins, else the
+  // last persisted choice, else the dashboard.
+  if (!window.__viewInitialized) {
+    window.__viewInitialized = true;
+    const params = new URLSearchParams(location.search);
+    let initial = "dashboard";
+    if (params.get("market")) initial = "market";
+    else {
+      try {
+        const saved = localStorage.getItem("mlw.tab");
+        if (saved === "market" || (saved === "admin" && u.is_admin) || saved === "dashboard") initial = saved;
+      } catch {}
+    }
+    setDashView(initial);
+  }
+
   const cl = $("char-list");
   cl.innerHTML = "";
   // User compare button only makes sense with 2+ chars.
@@ -908,6 +924,11 @@ function setDashView(view) {
   setBtn(dashBtn, !isAdminView && !isMarketView);
   setBtn(adminBtn, isAdminView);
   setBtn(marketBtn, isMarketView);
+
+  // Persist so F5 restores the active tab. Reset to dashboard if the
+  // user picked admin but isn't actually admin (defensive).
+  const persisted = isAdminView ? "admin" : isMarketView ? "market" : "dashboard";
+  try { localStorage.setItem("mlw.tab", persisted); } catch {}
 
   if (isMarketView) loadMarket();
 }
@@ -2576,6 +2597,7 @@ function fmtAttrs(attrsJson) {
   try {
     const a = JSON.parse(attrsJson);
     const parts = [];
+    if (a.excellent) parts.push("Excellent");
     if (a.refinement != null) parts.push("+" + a.refinement);
     if (a.option != null) parts.push("opt+" + a.option);
     if (a.luck) parts.push("luck");
@@ -2617,6 +2639,9 @@ function renderListingCard(l) {
     : l.side === "donate"
     ? '<span class="px-1.5 py-0.5 rounded bg-emerald-500/15 text-emerald-300 border border-emerald-500/30 text-[10px] uppercase">doação</span>'
     : '<span class="px-1.5 py-0.5 rounded bg-gold/15 text-goldsoft border border-gold/40 text-[10px] uppercase">vender</span>';
+  const kindBadge = l.kind === "char"
+    ? '<span class="px-1.5 py-0.5 rounded bg-purple-500/15 text-purple-300 border border-purple-500/30 text-[10px] uppercase">🎮 char</span>'
+    : "";
   const statusBadge = l.status === "open"
     ? ""
     : l.status === "held"
@@ -2625,6 +2650,11 @@ function renderListingCard(l) {
   const attrs = fmtAttrs(l.item_attrs);
   const price = fmtPriceCurrency(l);
   const charLine = l.char_name ? "🎮 " + escapeHtml(l.char_name) + (l.char_level != null ? " (" + l.char_level + "/" + (l.char_resets ?? "?") + "rr)" : "") : "";
+  const charStatusBadge = l.char_status === "Online"
+    ? '<span class="px-1.5 py-0.5 rounded bg-emerald-500/15 text-emerald-300 border border-emerald-500/30 text-[10px]">🟢 online' + (l.char_map ? ' · ' + escapeHtml(l.char_map) : '') + '</span>'
+    : l.char_status === "Offline"
+    ? '<span class="px-1.5 py-0.5 rounded bg-zinc-500/15 text-zinc-400 border border-zinc-500/30 text-[10px]">offline</span>'
+    : "";
   const isMine = state.user && l.user_id === state.user.id;
   const date = new Date(l.created_at * 1000);
   const ago = fmtAgo(state.now ? state.now - l.created_at : Math.floor(Date.now() / 1000) - l.created_at);
@@ -2635,17 +2665,30 @@ function renderListingCard(l) {
     '">' + r.kind + (r.count ? ' <span class="tabular-nums">' + r.count + '</span>' : "") + '</button>'
   ).join("");
 
+  // MU color rule: Excellent → emerald glow, Ancient → amber glow,
+  // Char listing → purple, otherwise default.
+  const titleClass = (() => {
+    if (l.kind === "char") return "text-purple-300";
+    try {
+      const at = l.item_attrs ? JSON.parse(l.item_attrs) : null;
+      if (at?.excellent) return "text-emerald-300 drop-shadow-[0_0_4px_rgba(16,185,129,0.6)]";
+      if (at?.ancient) return "text-amber-300 drop-shadow-[0_0_4px_rgba(245,158,11,0.5)]";
+    } catch {}
+    return "text-slate-100";
+  })();
+
   card.innerHTML =
     '<div class="flex flex-wrap items-center gap-2 text-xs mb-1.5">' +
-      sideBadge + statusBadge +
+      sideBadge + kindBadge + statusBadge +
       '<span class="text-muted">por <b class="text-goldsoft">' + escapeHtml(l.nickname ?? "?") + '</b></span>' +
       (charLine ? '<span class="text-muted">· ' + charLine + '</span>' : "") +
+      (charStatusBadge ? ' ' + charStatusBadge : '') +
       '<span class="text-muted ml-auto" title="' + escapeHtml(date.toLocaleString("pt-BR")) + '">' + escapeHtml(ago) + '</span>' +
     '</div>' +
     '<div class="flex gap-3 items-start">' +
       (l.item_image_url ? '<img src="' + escapeHtml(l.item_image_url) + '" class="w-12 h-12 object-contain shrink-0 mt-0.5" />' : "") +
       '<div class="min-w-0 flex-1">' +
-        '<div class="font-semibold text-slate-100">' + escapeHtml(l.item_name) + '</div>' +
+        '<div class="font-semibold ' + titleClass + ' whitespace-pre-wrap">' + escapeHtml(l.item_name) + '</div>' +
         (attrs ? '<div class="text-xs text-muted mt-0.5">' + escapeHtml(attrs) + '</div>' : "") +
         (price ? '<div class="text-sm text-goldsoft mt-1 tabular-nums">' + escapeHtml(price) + '</div>' : "") +
         (l.notes ? '<div class="text-sm text-slate-300 mt-2 whitespace-pre-wrap">' + escapeHtml(l.notes) + '</div>' : "") +
@@ -2786,10 +2829,17 @@ function openListingForm(existing) {
       '<option value="' + c.id + '"' + (isEdit && existing.char_id === c.id ? " selected" : "") + '>' + escapeHtml(c.name) + '</option>'
     ).join("");
     const a = isEdit && existing.item_attrs ? (() => { try { return JSON.parse(existing.item_attrs); } catch { return {}; } })() : {};
+    const isCharListing = isEdit && existing.kind === "char";
     overlay.innerHTML =
       '<div class="bg-panel border border-border rounded-xl p-5 w-full max-w-lg my-4">' +
         '<h3 class="text-sm uppercase tracking-widest text-muted mb-3">' + (isEdit ? "Editar anúncio" : "Novo anúncio") + '</h3>' +
         '<div class="space-y-3 text-sm">' +
+          '<div class="flex gap-2 text-xs">' +
+            '<label class="flex-1 cursor-pointer"><input data-f="kind" type="radio" name="kind" value="item" class="peer sr-only"' + (!isCharListing ? " checked" : "") + ' />' +
+              '<div class="px-3 py-2 rounded-md border border-border text-center peer-checked:border-goldsoft peer-checked:bg-gold/10 peer-checked:text-goldsoft hover:bg-bg/60">📦 Item</div></label>' +
+            '<label class="flex-1 cursor-pointer"><input data-f="kind" type="radio" name="kind" value="char" class="peer sr-only"' + (isCharListing ? " checked" : "") + ' />' +
+              '<div class="px-3 py-2 rounded-md border border-border text-center peer-checked:border-purple-400 peer-checked:bg-purple-500/15 peer-checked:text-purple-300 hover:bg-bg/60">🎮 Personagem</div></label>' +
+          '</div>' +
           '<div class="grid grid-cols-2 gap-2">' +
             '<div><label class="text-[11px] text-muted block mb-1">Tipo</label>' +
               '<select data-f="side" class="w-full h-10 bg-bg border border-border rounded-md px-2">' +
@@ -2797,12 +2847,12 @@ function openListingForm(existing) {
                 '<option value="buy"' + (isEdit && existing.side === "buy" ? " selected" : "") + '>comprar</option>' +
                 '<option value="donate"' + (isEdit && existing.side === "donate" ? " selected" : "") + '>doar</option>' +
               '</select></div>' +
-            '<div><label class="text-[11px] text-muted block mb-1">Char</label>' +
+            '<div data-char-field><label class="text-[11px] text-muted block mb-1">Char vinculado</label>' +
               '<select data-f="char_id" class="w-full h-10 bg-bg border border-border rounded-md px-2">' +
                 '<option value="">— sem char —</option>' + charOpts +
               '</select></div>' +
           '</div>' +
-          '<div><label class="text-[11px] text-muted block mb-1">Item</label>' +
+          '<div data-item-fields class="space-y-3"><div><label class="text-[11px] text-muted block mb-1" data-item-label>Item</label>' +
             '<div class="relative">' +
               '<div data-item-chip class="' + (isEdit && existing.item_image_url ? "" : "hidden ") + 'flex items-center gap-2 mb-2 px-2 py-1 rounded-md border border-goldsoft bg-gold/10">' +
                 (isEdit && existing.item_image_url ? '<img src="' + escapeHtml(existing.item_image_url) + '" class="w-8 h-8 object-contain" />' : '<img class="w-8 h-8 object-contain" />') +
@@ -2819,7 +2869,8 @@ function openListingForm(existing) {
             '<div><label class="text-[11px] text-muted block mb-1">Option (0..28)</label>' +
               '<input data-f="option" type="number" min="0" max="28" class="w-full h-10 bg-bg border border-border rounded-md px-2" value="' + (a.option ?? "") + '" /></div>' +
           '</div>' +
-          '<div class="flex gap-3 text-xs">' +
+          '<div class="flex flex-wrap gap-3 text-xs">' +
+            '<label class="inline-flex items-center gap-2"><input data-f="excellent" type="checkbox" class="accent-emerald-400"' + (a.excellent ? " checked" : "") + ' /> <span class="text-emerald-300 font-semibold drop-shadow">Excellent</span></label>' +
             '<label class="inline-flex items-center gap-2"><input data-f="luck" type="checkbox" class="accent-gold"' + (a.luck ? " checked" : "") + ' /> luck</label>' +
             '<label class="inline-flex items-center gap-2"><input data-f="skill" type="checkbox" class="accent-gold"' + (a.skill ? " checked" : "") + ' /> skill</label>' +
           '</div>' +
@@ -2827,6 +2878,10 @@ function openListingForm(existing) {
             '<input data-f="ancient" maxlength="40" placeholder="ex.: Gaion, Anonymous, Hyon..." class="w-full h-10 bg-bg border border-border rounded-md px-2" value="' + (a.ancient ? escapeHtml(a.ancient) : "") + '" /></div>' +
           '<div><label class="text-[11px] text-muted block mb-1">Bônus extras (texto livre)</label>' +
             '<input data-f="extras" maxlength="240" placeholder="ex.: dmg+15%, refl+5%, dr+5..." class="w-full h-10 bg-bg border border-border rounded-md px-2" value="' + (a.extras ? escapeHtml(a.extras) : "") + '" /></div>' +
+          '</div>' + // /data-item-fields
+          '<div data-char-fields class="hidden"><div><label class="text-[11px] text-muted block mb-1">Descrição do personagem</label>' +
+            '<textarea data-f="char_desc" rows="3" maxlength="80" placeholder="ex.: MG 244rr, set ancient Hyon, +15..." class="w-full bg-bg border border-border rounded-md px-2 py-1.5">' + (isCharListing ? escapeHtml(existing.item_name) : "") + '</textarea>' +
+            '<div class="text-[11px] text-muted mt-1">livre — qualquer detalhe que descreva o char (classe, level, equipamentos, conta original, etc.)</div></div></div>' +
           '<div data-pricing-block class="grid grid-cols-2 gap-2">' +
             '<div><label class="text-[11px] text-muted block mb-1">Moeda</label>' +
               '<select data-f="currency" class="w-full h-10 bg-bg border border-border rounded-md px-2">' +
@@ -2855,44 +2910,67 @@ function openListingForm(existing) {
     };
     sideSel.addEventListener("change", syncPricing);
     syncPricing();
+    // Item ↔ Personagem mode toggle. Char listings drop the catalog
+    // combobox and item-attribute fields; they're pure free-form.
+    const itemFields = overlay.querySelector('[data-item-fields]');
+    const charFields = overlay.querySelector('[data-char-fields]');
+    const syncKind = () => {
+      const kind = (overlay.querySelector('input[name="kind"]:checked') || {}).value || "item";
+      itemFields.classList.toggle("hidden", kind !== "item");
+      charFields.classList.toggle("hidden", kind !== "char");
+    };
+    overlay.querySelectorAll('input[name="kind"]').forEach((r) => r.addEventListener("change", syncKind));
+    syncKind();
     wireItemTypeahead(overlay);
     overlay.querySelector("[data-cancel]").onclick = () => overlay.remove();
-    overlay.querySelector("[data-save]").onclick = async () => {
+    overlay.querySelector("[data-save]").onclick = async (e) => {
+      const saveBtn = e.currentTarget;
       const get = (k) => overlay.querySelector('[data-f="' + k + '"]');
-      const item_name = get("item_name").value.trim();
-      if (!item_name) { toast("informe o item", "err"); return; }
+      const kindVal = (overlay.querySelector('input[name="kind"]:checked') || {}).value || "item";
+      const item_name = kindVal === "char"
+        ? get("char_desc").value.trim()
+        : get("item_name").value.trim();
+      if (!item_name) {
+        toast(kindVal === "char" ? "informe a descrição do personagem" : "informe o item", "err");
+        return;
+      }
       const attrs = {};
-      const refn = Number(get("refinement").value); if (Number.isInteger(refn) && refn >= 0) attrs.refinement = refn;
-      const opt = Number(get("option").value); if (Number.isInteger(opt) && opt >= 0) attrs.option = opt;
-      if (get("luck").checked) attrs.luck = true;
-      if (get("skill").checked) attrs.skill = true;
-      const anc = get("ancient").value.trim(); if (anc) attrs.ancient = anc;
-      const ext = get("extras").value.trim(); if (ext) attrs.extras = ext;
+      if (kindVal === "item") {
+        const refn = Number(get("refinement").value); if (Number.isInteger(refn) && refn >= 0) attrs.refinement = refn;
+        const opt = Number(get("option").value); if (Number.isInteger(opt) && opt >= 0) attrs.option = opt;
+        if (get("excellent").checked) attrs.excellent = true;
+        if (get("luck").checked) attrs.luck = true;
+        if (get("skill").checked) attrs.skill = true;
+        const anc = get("ancient").value.trim(); if (anc) attrs.ancient = anc;
+        const ext = get("extras").value.trim(); if (ext) attrs.extras = ext;
+      }
       const sideVal = get("side").value;
       const isDonate = sideVal === "donate";
       const currencyVal = isDonate ? "free" : get("currency").value;
       const priceVal = get("price").value === "" ? null : Number(get("price").value);
       const charIdVal = get("char_id").value === "" ? null : Number(get("char_id").value);
-      const slugVal = (get("item_slug").value || "").trim() || null;
+      const slugVal = kindVal === "char" ? null : ((get("item_slug").value || "").trim() || null);
       const payload = {
+        kind: kindVal,
         side: sideVal,
         char_id: charIdVal,
         item_name,
         item_slug: slugVal,
-        item_attrs: attrs,
+        item_attrs: kindVal === "item" ? attrs : null,
         currency: currencyVal || null,
         price: isDonate || currencyVal === "free" ? null : priceVal,
         notes: get("notes").value.trim() || null,
         allow_message: !!get("allow_message").checked,
       };
       try {
-        if (isEdit) {
-          await fetchJSON("/api/market/listings/" + existing.id, { method: "PATCH", body: JSON.stringify(payload) });
-          toast("atualizado", "ok");
-        } else {
-          await fetchJSON("/api/market/listings", { method: "POST", body: JSON.stringify(payload) });
-          toast("publicado", "ok");
-        }
+        await withSpinner(saveBtn, async () => {
+          if (isEdit) {
+            await fetchJSON("/api/market/listings/" + existing.id, { method: "PATCH", body: JSON.stringify(payload) });
+          } else {
+            await fetchJSON("/api/market/listings", { method: "POST", body: JSON.stringify(payload) });
+          }
+        });
+        toast(isEdit ? "anúncio atualizado!" : "anúncio publicado!", "ok");
         overlay.remove();
         loadMarket();
       } catch (err) { toast(err.message, "err"); }

@@ -1,10 +1,21 @@
 import type { Env } from "./types";
 import { now } from "./util";
 
-// Items that aren't (always) in shop-gold but matter for trading: jewels
-// drop in-game, event tickets are transitive, common pets/wings appear
-// in player-to-player trades. Image URLs left null — Mercado renders the
-// title without a thumbnail when image_url is missing.
+// Items that aren't (always) in the mupatos shops but matter for
+// trading: jewels drop in-game, event tickets are transitive, common
+// pets/wings appear in player-to-player trades. Plus mid-tier armor
+// sets (Storm Crow et al) that aren't sold in any shop. Image URLs
+// left null — Mercado renders the title without a thumbnail when
+// image_url is missing.
+function setPieces(setName: string, slugBase: string): Array<{ slug: string; name: string; category: string }> {
+  const pieces = ["Helm", "Armor", "Pants", "Gloves", "Boots"];
+  return pieces.map((p) => ({
+    slug: slugBase + "-" + p.toLowerCase(),
+    name: setName + " " + p,
+    category: "sets-extra",
+  }));
+}
+
 const STATIC_ITEMS: Array<{ slug: string; name: string; category: string }> = [
   { slug: "jewel-of-soul",     name: "Jewel of Soul",       category: "jewels" },
   { slug: "jewel-of-life",     name: "Jewel of Life",       category: "jewels" },
@@ -23,23 +34,53 @@ const STATIC_ITEMS: Array<{ slug: string; name: string; category: string }> = [
   { slug: "spirit-of-guardian",name: "Spirit of Guardian",  category: "pets" },
   { slug: "dinorant",          name: "Dinorant",            category: "pets" },
   { slug: "fenrir",            name: "Fenrir",              category: "pets" },
+  // Mid-tier armor sets that aren't in any shop (drop / craft only).
+  ...setPieces("Storm Crow",        "storm-crow"),         // MG
+  ...setPieces("Storm Roar",        "storm-roar"),         // BK 2nd
+  ...setPieces("Storm Reign",       "storm-reign"),        // BK 3rd
+  ...setPieces("Sunlight",          "sunlight"),
+  ...setPieces("Silk",              "silk"),               // Elf
+  ...setPieces("Wind",              "wind"),               // Elf
+  ...setPieces("Adventurer",        "adventurer"),         // Elf low
+  ...setPieces("Vine",              "vine"),               // Elf
+  ...setPieces("Mist",              "mist"),               // DW
+  ...setPieces("Pad of Greatness",  "pad-greatness"),      // DW low
+  ...setPieces("Sphinx",            "sphinx"),             // DW
+  ...setPieces("Robe of Wizardry",  "robe-wizardry"),      // DW
+  ...setPieces("Eclipse",           "eclipse"),            // DW high
+  ...setPieces("Iris",              "iris"),               // RF
+  ...setPieces("Valiant",           "valiant"),            // RF
+  ...setPieces("Glorious",          "glorious"),
+  ...setPieces("Brave",             "brave"),
+  ...setPieces("Hyon Dragon",       "hyon-dragon"),        // top BK
+  ...setPieces("Piercing Grove",    "piercing-grove"),     // top
+  ...setPieces("Phoenix Soul",      "phoenix-soul"),
+  ...setPieces("Ashcrow",           "ashcrow"),
+  ...setPieces("Bone",              "bone"),
+  ...setPieces("Pad",               "pad"),
+  ...setPieces("Leather",           "leather"),
+  ...setPieces("Bronze",            "bronze"),
+  ...setPieces("Brass",             "brass"),
+  ...setPieces("Plate",             "plate"),
+  ...setPieces("Tower",             "tower"),
+  ...setPieces("Light Plate",       "light-plate"),
 ];
 
-// Scrape mupatos.com.br/site/shop/shop-gold + each category page to seed
+// Scrape every mupatos shop (shop-gold, rarius, rings-pendants) to seed
 // the items table. The shop renders without login; the per-item options
 // page DOES need login, but we don't need it — the index pages have name
 // + image + category, which is plenty for the Mercado autocomplete.
 //
 // Page structure (observed):
-//   index: <a href="/site/shop/shop-gold/<category-slug>" ...>Category Name</a>
-//   per-category: <div class="card h-100">
-//                   <div class="card-header webshop-product-name">Item Name</div>
-//                   <img class="img-fluid" src="/site/resources/.../X.webp" />
-//                   <a href="/site/shop/shop-gold/<cat>/<item-slug>">+ detalhes</a>
-//                 </div>
+//   per-shop index: <a href="/site/shop/<shop>/<category-slug>" ...>Cat</a>
+//   per-category:   <div class="card h-100">
+//                     <div class="card-header webshop-product-name">Item Name</div>
+//                     <img class="img-fluid" src="/site/resources/.../X.webp" />
+//                     <a href="/site/shop/<shop>/<cat>/<item-slug>">+ detalhes</a>
+//                   </div>
 
 const SHOP_BASE = "https://mupatos.com.br";
-const INDEX_URL = SHOP_BASE + "/site/shop/shop-gold";
+const SHOPS = ["shop-gold", "rarius", "rings-pendants"];
 
 const BROWSER_HEADERS: Record<string, string> = {
   "user-agent":
@@ -76,9 +117,9 @@ interface ScrapedItem {
   image_url: string | null;
 }
 
-function parseCategorySlugs(html: string): string[] {
-  // Anchor matches: href="/site/shop/shop-gold/<slug>" with no extra '/' after.
-  const re = /href="\/site\/shop\/shop-gold\/([a-z0-9][a-z0-9\-]*)"/gi;
+function parseCategorySlugs(html: string, shop: string): string[] {
+  // Anchor matches: href="/site/shop/<shop>/<slug>" with no extra '/' after.
+  const re = new RegExp('href="\\/site\\/shop\\/' + shop + '\\/([a-z0-9][a-z0-9\\-]*)"', "gi");
   const slugs = new Set<string>();
   let m: RegExpExecArray | null;
   while ((m = re.exec(html)) !== null) {
@@ -87,7 +128,7 @@ function parseCategorySlugs(html: string): string[] {
   return [...slugs];
 }
 
-function parseItemsForCategory(html: string, category: string): ScrapedItem[] {
+function parseItemsForCategory(html: string, category: string, shop: string): ScrapedItem[] {
   // Cards look like:
   //   <div class="card h-100">
   //     <div class="card-header webshop-product-name"> NAME </div>
@@ -98,7 +139,7 @@ function parseItemsForCategory(html: string, category: string): ScrapedItem[] {
   const cardRe = /<div class="card h-100">[\s\S]*?<\/div>\s*<\/div>\s*<\/div>/g;
   const nameRe = /<div class="card-header webshop-product-name">\s*([\s\S]*?)\s*<\/div>/i;
   const imgRe  = /<img[^>]*class="img-fluid"[^>]*src="([^"]+)"/i;
-  const slugRe = new RegExp('href="/site/shop/shop-gold/' + category + '/([a-z0-9\\-]+)"', "i");
+  const slugRe = new RegExp('href="/site/shop/' + shop + '/' + category + '/([a-z0-9\\-]+)"', "i");
 
   let m: RegExpExecArray | null;
   while ((m = cardRe.exec(html)) !== null) {
@@ -121,19 +162,27 @@ function parseItemsForCategory(html: string, category: string): ScrapedItem[] {
   return items;
 }
 
-export async function refreshCatalog(env: Env): Promise<{ scraped: number; categories: number }> {
-  const indexHtml = await fetchHtml(INDEX_URL);
-  const slugs = parseCategorySlugs(indexHtml);
-
-  // All categories in parallel — keeps wallclock close to the slowest
-  // single page (~5s) instead of (chunks * slowest). CF paid plan handles
-  // a few dozen concurrent subrequests easily.
-  const results = await Promise.all(slugs.map(async (cat) => {
+export async function refreshCatalog(env: Env): Promise<{ scraped: number; categories: number; shops: number }> {
+  // Fetch each shop's index in parallel, collect (shop, category) pairs.
+  const shopIndices = await Promise.all(SHOPS.map(async (shop) => {
     try {
-      const html = await fetchHtml(SHOP_BASE + "/site/shop/shop-gold/" + cat);
-      return parseItemsForCategory(html, cat);
+      const html = await fetchHtml(SHOP_BASE + "/site/shop/" + shop);
+      return { shop, slugs: parseCategorySlugs(html, shop) };
     } catch (e) {
-      console.log("catalog scrape failed cat=" + cat + " err=" + (e as Error).message);
+      console.log("shop index scrape failed shop=" + shop + " err=" + (e as Error).message);
+      return { shop, slugs: [] };
+    }
+  }));
+  const pairs: Array<{ shop: string; cat: string }> = [];
+  for (const { shop, slugs } of shopIndices) for (const cat of slugs) pairs.push({ shop, cat });
+
+  // All categories across all shops in parallel — wallclock ≈ slowest page.
+  const results = await Promise.all(pairs.map(async ({ shop, cat }) => {
+    try {
+      const html = await fetchHtml(SHOP_BASE + "/site/shop/" + shop + "/" + cat);
+      return parseItemsForCategory(html, cat, shop);
+    } catch (e) {
+      console.log("catalog scrape failed shop=" + shop + " cat=" + cat + " err=" + (e as Error).message);
       return [];
     }
   }));
@@ -157,21 +206,28 @@ export async function refreshCatalog(env: Env): Promise<{ scraped: number; categ
   );
   await env.DB.batch(STATIC_ITEMS.map((it) => seedStmt.bind(it.slug, it.name, it.category, t)));
 
-  return { scraped: all.length + STATIC_ITEMS.length, categories: slugs.length };
+  return { scraped: all.length + STATIC_ITEMS.length, categories: pairs.length, shops: SHOPS.length };
 }
 
-// Lazy-seed the catalog if the items table is (mostly) empty. Idempotent —
-// repeat calls are cheap when the catalog is already populated. Used by
-// the Mercado UI when it loads, so the user never has to think about it.
+// Lazy-seed the catalog. Triggers refreshCatalog when:
+//   - the items table is (nearly) empty, OR
+//   - older shops aren't represented yet (first deploy after we widened
+//     the scrape from shop-gold to all three shops). The category prefix
+//     check is a cheap upgrade signal that avoids a forced version table.
+// Idempotent — repeat calls are no-ops once the catalog is healthy.
 export async function ensureCatalog(env: Env): Promise<{ count: number; seeded: boolean }> {
   const cnt = await env.DB
     .prepare("SELECT COUNT(*) AS n FROM items")
     .first<{ n: number }>();
   const n = cnt?.n ?? 0;
-  if (n >= 50) return { count: n, seeded: false };
+  const hasRarius = await env.DB
+    .prepare("SELECT 1 AS x FROM items WHERE category LIKE 'classic-%' LIMIT 1")
+    .first<{ x: number }>();
+  const hasRings = await env.DB
+    .prepare("SELECT 1 AS x FROM items WHERE category LIKE 'rings-pendants-%' LIMIT 1")
+    .first<{ x: number }>();
+  if (n >= 50 && hasRarius && hasRings) return { count: n, seeded: false };
 
-  // Race-prevention: a concurrent caller will see a partial table here,
-  // but refreshCatalog is upsert-based so duplicates resolve cleanly.
   await refreshCatalog(env);
   const after = await env.DB
     .prepare("SELECT COUNT(*) AS n FROM items")

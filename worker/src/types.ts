@@ -35,11 +35,13 @@ export interface UserRow {
 
 export type ListingSide = "buy" | "sell" | "donate";
 export type ListingStatus = "open" | "held" | "closed";
+export type ListingKind = "item" | "char";
 
 export interface ListingRow {
   id: number;
   user_id: number;
   char_id: number | null;
+  kind: ListingKind;
   side: ListingSide;
   item_name: string;
   item_slug: string | null;
