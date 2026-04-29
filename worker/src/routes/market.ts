@@ -1,6 +1,16 @@
 import type { Env, ListingRow, ListingSide, UserRow } from "../types";
 import { bad, json, now } from "../util";
 import { escHtml, sendTelegram } from "../telegram";
+import { ensureCatalog } from "../items-scrape";
+
+export async function warmupCatalog(env: Env): Promise<Response> {
+  try {
+    const r = await ensureCatalog(env);
+    return json(r);
+  } catch (e) {
+    return bad(500, "warmup falhou: " + (e as Error).message);
+  }
+}
 
 export async function listItems(env: Env, url: URL): Promise<Response> {
   const q = (url.searchParams.get("q") ?? "").trim();

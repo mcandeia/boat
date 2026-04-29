@@ -2450,9 +2450,16 @@ function refreshSideChips() {
   });
 }
 
+let marketWarmupFired = false;
 async function loadMarket() {
   const list = $("market-list");
   list.innerHTML = '<div class="text-xs text-muted">carregando...</div>';
+  // Fire-and-forget catalog warmup the first time the user opens Market.
+  // Idempotent server-side: re-runs only when the items table is sparse.
+  if (!marketWarmupFired) {
+    marketWarmupFired = true;
+    fetchJSON("/api/items/warmup", { method: "POST" }).catch(() => {});
+  }
   try {
     const params = new URLSearchParams();
     params.set("sort", marketState.sort);

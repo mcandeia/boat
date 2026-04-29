@@ -28,6 +28,7 @@ import {
   pingListing,
   reactListing,
   updateListing,
+  warmupCatalog,
 } from "./routes/market";
 import {
   adminCharHistory,
@@ -127,6 +128,7 @@ export default {
 
       // ---- Market ----
       if (pathname === "/api/items" && method === "GET") return await listItems(env, url);
+      if (pathname === "/api/items/warmup" && method === "POST") return await warmupCatalog(env);
       if (pathname === "/api/market/listings" && method === "GET") return await listListings(env, userId, url);
       if (pathname === "/api/market/listings" && method === "POST") return await createListing(env, userId, req);
       const listingMatch = pathname.match(/^\/api\/market\/listings\/(\d+)$/);
@@ -222,7 +224,7 @@ export default {
     }
   },
 
-  async scheduled(_event: ScheduledController, env: Env, ctx: ExecutionContext): Promise<void> {
+  async scheduled(event: ScheduledController, env: Env, ctx: ExecutionContext): Promise<void> {
     ctx.waitUntil(
       pollOnce(env)
         .then((r) => console.log(`poll: scraped=${r.scraped} fired=${r.fired}`))
@@ -232,6 +234,15 @@ export default {
       pollServerEvents(env)
         .then((r) => console.log(`server-events: refreshed=${r.refreshed} fired=${r.fired}`))
         .catch((e) => console.error("server-events poll failed", e)),
+    );
+    // Warm the items catalog if empty — runs lazily, only does work on
+    // first cron after a fresh DB. Once seeded, it's a single COUNT.
+    ctx.waitUntil(
+      (async () => {
+        const { ensureCatalog } = await import("./items-scrape");
+        try { const r = await ensureCatalog(env); if (r.seeded) console.log("catalog seeded: " + r.count + " items"); }
+        catch (e) { console.log("catalog seed failed: " + (e as Error).message); }
+      })(),
     );
   },
 };
