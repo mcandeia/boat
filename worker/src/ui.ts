@@ -538,11 +538,13 @@ function statRowIcon(icon, label, value) {
     '</div>';
 }
 function statCard(icon, label, value) {
+  // Label is allowed to wrap to a second line; the value still truncates so
+  // a long map/character name doesn't blow up the card.
   return (
     '<div class="rounded-lg border border-border bg-bg/40 px-3 py-2.5 min-w-0">' +
-      '<div class="flex items-center gap-2 text-[11px] text-muted uppercase tracking-wide">' +
-        '<span class="text-slate-300" aria-hidden="true">' + icon + '</span>' +
-        '<span class="truncate">' + escapeHtml(label) + '</span>' +
+      '<div class="flex items-start gap-1.5 text-[10px] text-muted uppercase tracking-wide leading-tight">' +
+        '<span class="text-slate-300 leading-none" aria-hidden="true">' + icon + '</span>' +
+        '<span>' + escapeHtml(label) + '</span>' +
       '</div>' +
       '<div class="mt-1 text-sm text-slate-100 font-semibold truncate">' + value + '</div>' +
     '</div>'
@@ -569,7 +571,7 @@ function renderCharLeft(container, c) {
   const cards = [];
   cards.push(statCard("🎭", "Classe", c.class ? (classBadgeHtml(c.class) + escapeHtml(c.class)) : dash));
   cards.push(statCard("♻️", "Resets", typeof c.resets === "number" ? '<span class="text-goldsoft">' + String(c.resets) + '</span>' : dash));
-  cards.push(statCard("⏱️", "Média/Reset", c.avg_reset_time ? formatDuration(c.avg_reset_time) : dash));
+  cards.push(statCard("⏱️", "Média/reset", c.avg_reset_time ? formatDuration(c.avg_reset_time) : dash));
   cards.push(statCard("📈", "Level", c.last_level != null ? '<span class="text-goldsoft">' + c.last_level + '</span>' : dash));
   cards.push(statCard("🗺️", "Mapa", c.last_map ? escapeHtml(c.last_map) : dash));
   cards.push(statCard("🟢", "Situação", statusBadge));
@@ -601,7 +603,7 @@ function renderCharLeft(container, c) {
       '<a href="' + profileUrl + '" target="_blank" rel="noopener" class="font-semibold text-goldsoft text-base hover:underline">' + escapeHtml(c.name) + '</a>' +
       gmTag +
     '</div>' +
-    '<div class="grid grid-cols-2 sm:grid-cols-3 gap-2.5">' + cards.join("") + '</div>' +
+    '<div class="grid grid-cols-[repeat(auto-fit,minmax(140px,1fr))] gap-2.5">' + cards.join("") + '</div>' +
     checkedLine;
 }
 
@@ -2324,6 +2326,59 @@ if ($("user-compare")) $("user-compare").onclick = async () => {
   await compareUserSelectedChars();
 };
 refresh();
+
+// ---- Auto-refresh ----
+//
+// Polls /api/me on a 30s cadence and patches the dashboard in place when
+// data has changed. Open history charts and inline expansions stay open
+// because we update the per-char content (renderCharLeft) instead of
+// blowing away the surrounding <li>. Subs list re-renders fully (no
+// expansion to preserve there). The admin section stays as-is (it has
+// its own expansions; reload manually).
+async function autoRefresh() {
+  if (document.hidden) return;     // skip when tab is in background
+  let data;
+  try { data = await fetchJSON("/api/me"); } catch { return; }
+  if (!data || !data.user) return;
+
+  const newCharIds = (data.characters || []).map((c) => c.id).sort().join(",");
+  const oldCharIds = (state.characters || []).map((c) => c.id).sort().join(",");
+  const newSubKey = (data.subscriptions || []).map((s) =>
+    s.id + ":" + (s.active ? "1" : "0") + ":" + (s.last_fired_at ?? "")
+  ).join(";");
+  const oldSubKey = (state.subscriptions || []).map((s) =>
+    s.id + ":" + (s.active ? "1" : "0") + ":" + (s.last_fired_at ?? "")
+  ).join(";");
+
+  state = data;
+
+  // Char structure changed (added/removed) — full re-render.
+  if (newCharIds !== oldCharIds) {
+    renderDash();
+    return;
+  }
+
+  // Otherwise patch each char card's contents in place. Preserves any
+  // open history-chart expansion.
+  for (const c of state.characters) {
+    const li = document.querySelector('li[data-char-id="' + c.id + '"]');
+    if (!li) continue;
+    const left = li.querySelector(":scope > div:first-child");
+    if (left) renderCharLeft(left, c);
+  }
+
+  // Re-render subs only when something subs-shaped changed.
+  if (newSubKey !== oldSubKey) {
+    renderDash();
+  }
+}
+setInterval(autoRefresh, 30_000);
+
+// Refresh on tab focus too — covers the case where the user returns to
+// the tab after a few minutes away.
+document.addEventListener("visibilitychange", () => {
+  if (!document.hidden) autoRefresh();
+});
 </script>
 </body>
 </html>`;
