@@ -312,7 +312,7 @@ export const INDEX_HTML = /* html */ `<!doctype html>
         <div class="bg-panel border border-border rounded-xl p-5">
           <div class="flex items-center justify-between gap-3 flex-wrap mb-3">
             <h2 class="text-xs uppercase tracking-widest text-muted">🛒 Mercado</h2>
-            <button id="market-new-btn" class="gold-btn block px-4 rounded-md bg-gold text-bg font-semibold text-center border border-transparent hover:brightness-110 transition">+ novo anúncio</button>
+            <button id="market-new-btn" class="gold-btn inline-flex items-center px-4 rounded-md bg-gold text-bg font-semibold border border-transparent hover:brightness-110 transition">+ novo anúncio</button>
           </div>
           <div class="flex flex-wrap items-center gap-2 text-xs mb-3">
             <span class="text-muted mr-1">ordenar:</span>
@@ -324,9 +324,9 @@ export const INDEX_HTML = /* html */ `<!doctype html>
             <button data-side="sell" class="market-side px-2 py-0.5 rounded border border-border text-muted hover:text-slate-300">vendendo</button>
             <button data-side="buy" class="market-side px-2 py-0.5 rounded border border-border text-muted hover:text-slate-300">comprando</button>
             <button data-side="donate" class="market-side px-2 py-0.5 rounded border border-border text-muted hover:text-slate-300">doação</button>
-            <input id="market-search" placeholder="buscar item ou nota..." class="ml-auto h-8 bg-bg border border-border rounded-md px-2 outline-none focus:border-gold/60 text-xs min-w-[160px]" />
           </div>
-          <div id="market-list" class="space-y-3"></div>
+          <input id="market-search" placeholder="buscar item ou nota..." class="h-9 w-full bg-bg border border-border rounded-md px-3 outline-none focus:border-gold/60 text-sm mb-3" />
+          <div id="market-list" class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3"></div>
         </div>
       </div>
 
@@ -511,7 +511,7 @@ async function refresh() {
 function showPublicMode() {
   $("login").classList.remove("hidden");
   $("dash").classList.remove("hidden");
-  setAppAdminLayout(false);
+  setAppWideLayout();
   // Hide everything except the Mercado card.
   const main = $("dash-main"); if (main) main.classList.add("hidden");
   const admin = $("admin-card"); if (admin) admin.classList.add("hidden");
@@ -519,6 +519,12 @@ function showPublicMode() {
   // Hide the side menu — there's nothing to switch between.
   const nav = document.querySelector("#dash nav");
   if (nav) nav.style.display = "none";
+  // Collapse the dash grid to a single column so the Mercado card stretches.
+  const dashGrid = document.querySelector("#dash > div");
+  if (dashGrid) {
+    dashGrid.classList.remove("lg:grid-cols-[220px_1fr]");
+    dashGrid.classList.add("grid-cols-1");
+  }
   loadMarket();
 }
 
@@ -527,6 +533,16 @@ function setAppAdminLayout(isAdmin) {
   if (!app) return;
   app.classList.remove("max-w-3xl", "max-w-6xl");
   app.classList.add(isAdmin ? "max-w-6xl" : "max-w-3xl");
+}
+
+// Wider container so the Mercado grid has room for 2–3 columns. Used by
+// the public Mercado view and could be reused if we ever land a logged-in
+// "Mercado-only" mode.
+function setAppWideLayout() {
+  const app = $("app");
+  if (!app) return;
+  app.classList.remove("max-w-3xl");
+  app.classList.add("max-w-6xl");
 }
 
 function relativeTime(unixSeconds) {
