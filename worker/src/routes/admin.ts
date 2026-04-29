@@ -319,12 +319,26 @@ export async function adminBackfillItemRulesFromSources(env: Env, req: Request):
   const limit = Math.min(Math.max(Number(body.limit ?? 50), 1), 200);
   const concurrency = Math.min(Math.max(Number(body.concurrency ?? 50), 1), 100);
   const cookie = (body.cookie ?? "").trim();
-  const { scrapeShopItemRule } = await import("../shop-scrape");
+  const { scrapeShopItemRule, getShopAuthCookie } = await import("../shop-scrape");
+
+  // Avoid "Too many subrequests" by logging in once and reusing the cookie across items.
+  let cookieToUse = cookie;
+  let cookieSource: "provided" | "authed" | "none" = cookieToUse ? "provided" : "none";
+  if (!cookieToUse) {
+    const auth = await getShopAuthCookie(env);
+    if (auth.ok) {
+      cookieToUse = auth.cookie;
+      cookieSource = "authed";
+    } else {
+      console.log("backfill auth cookie failed: " + auth.error);
+    }
+  }
 
   console.log(
     "adminBackfillItemRulesFromSources start limit=" + limit +
       " concurrency=" + concurrency +
-      " used_cookie=" + (!!cookie),
+      " used_cookie=" + (!!cookieToUse) +
+      " cookie_source=" + cookieSource,
   );
 
   // Pick items that have at least one source url but don't yet have excellent_values and/or ancient_values populated.
@@ -368,7 +382,7 @@ export async function adminBackfillItemRulesFromSources(env: Env, req: Request):
 
   const worker = async (row: { item_slug: string; detail_url: string; name: string }) => {
     console.log("backfill scrape item_slug=" + row.item_slug + " url=" + row.detail_url);
-    const r = await scrapeShopItemRule(env, { url: row.detail_url, name: row.name, cookie } as never);
+    const r = await scrapeShopItemRule(env, { url: row.detail_url, name: row.name, cookie: cookieToUse } as never);
     if ("error" in r) return { ok: false as const, err: row.name + ": " + r.error };
     const ancientVals = ((r.rule as unknown as { ancient_values?: unknown }).ancient_values);
     const excellentVals = (r.rule.excellent_values ?? null);
@@ -434,7 +448,8 @@ export async function adminBackfillItemRulesFromSources(env: Env, req: Request):
     with_ancient,
     with_excellent,
     concurrency,
-    used_cookie: !!cookie,
+    used_cookie: !!cookieToUse,
+    cookie_source: cookieSource,
     errors: errors.slice(0, 20),
   });
 }

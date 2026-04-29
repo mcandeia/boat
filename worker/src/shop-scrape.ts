@@ -274,7 +274,7 @@ const BROWSER_HEADERS: Record<string, string> = {
   "upgrade-insecure-requests": "1",
 };
 
-async function fetchShopItemHtmlAuthed(env: Env, itemUrl: string): Promise<{ ok: true; html: string } | { ok: false; error: string }> {
+async function loginShopAndGetCookie(env: Env): Promise<{ ok: true; cookie: string } | { ok: false; error: string }> {
   const user = env.SHOP_SCRAPER_USERNAME;
   const pass = env.SHOP_SCRAPER_PASSWORD;
   if (!user || !pass) {
@@ -287,9 +287,7 @@ async function fetchShopItemHtmlAuthed(env: Env, itemUrl: string): Promise<{ ok:
 
   try {
     // 1) GET login page → csrf token + initial cookies.
-    const loginRes = await fetch(loginUrl, {
-      headers: BROWSER_HEADERS,
-    });
+    const loginRes = await fetch(loginUrl, { headers: BROWSER_HEADERS });
     if (!loginRes.ok) return { ok: false, error: "login page HTTP " + loginRes.status };
     const loginHtml = await loginRes.text();
     const token =
@@ -336,25 +334,34 @@ async function fetchShopItemHtmlAuthed(env: Env, itemUrl: string): Promise<{ ok:
       if (more) cookie = mergeCookieHeaders(cookie, more);
     }
 
-    // 3) Fetch item page with cookie.
-    const res = await fetch(itemUrl, {
-      headers: {
-        ...BROWSER_HEADERS,
-        "cookie": cookie,
-        "referer": base + "/site/shops",
-      },
-    });
-    if (!res.ok) return { ok: false, error: "item page HTTP " + res.status };
-    const html = await res.text();
-    // If still a login page, surface more diagnostics.
-    const txt = stripTags(html);
-    if (isLoginPage(txt)) {
-      return { ok: false, error: "login não efetivou (cookies=" + cookieNames(cookie).join(",") + ")" };
-    }
-    return { ok: true, html };
+    return { ok: true, cookie };
   } catch (e) {
     return { ok: false, error: (e as Error).message };
   }
+}
+
+export async function getShopAuthCookie(env: Env): Promise<{ ok: true; cookie: string } | { ok: false; error: string }> {
+  return await loginShopAndGetCookie(env);
+}
+
+async function fetchShopItemHtmlAuthed(env: Env, itemUrl: string): Promise<{ ok: true; html: string } | { ok: false; error: string }> {
+  const base = "https://mupatos.com.br";
+  const logged = await loginShopAndGetCookie(env);
+  if (!logged.ok) return logged;
+  const res = await fetch(itemUrl, {
+    headers: {
+      ...BROWSER_HEADERS,
+      "cookie": logged.cookie,
+      "referer": base + "/site/shops",
+    },
+  });
+  if (!res.ok) return { ok: false, error: "item page HTTP " + res.status };
+  const html = await res.text();
+  const txt = stripTags(html);
+  if (isLoginPage(txt)) {
+    return { ok: false, error: "login não efetivou (cookies=" + cookieNames(logged.cookie).join(",") + ")" };
+  }
+  return { ok: true, html };
 }
 
 async function fetchShopItemHtmlWithCookie(url: string, cookie: string): Promise<{ ok: true; html: string } | { ok: false; error: string }> {
