@@ -1,5 +1,5 @@
 import type { CharacterRow, Env, ProfileSnapshot, SubscriptionRow } from "./types";
-import { parseMap, scrapeMany } from "./scraper";
+import { parseMap, scrapeOne } from "./scraper";
 import { now } from "./util";
 import { sendTelegram } from "./telegram";
 import { formatAlert, formatServerEventAlert } from "./messages";
@@ -12,46 +12,26 @@ import {
   shouldRefreshServerEvents,
 } from "./server-events";
 
-// One pass (10-minute cron):
-//   1. Pick every distinct character name that has at least one active sub.
-//   2. Scrape them all in one Browser Rendering session.
-//   3. For each character row, evaluate every active subscription against the
-//      previous snapshot vs the new one, fire Telegram alerts, set cooldowns.
-//   4. Persist the new snapshot.
-//
-// Flat 10-minute cadence regardless of online/offline. Simpler than the old
-// adaptive logic and predictable for users ("every char checked every 10 min").
-export async function pollOnce(env: Env): Promise<{ scraped: number; fired: number }> {
-  const distinctNames = await env.DB
-    .prepare(
-      `SELECT DISTINCT c.name
-         FROM characters c
-         JOIN subscriptions s
-           ON s.character_id = c.id AND s.active = 1
-        WHERE c.blocked = 0`,
-    )
-    .all<{ name: string }>();
+// Per-character poll. The CharWatcher Durable Object calls this from its
+// alarm handler — one call per character per minute, spread across
+// independent DO instances so a slow scrape on one char doesn't drop
+// the rest.
+export async function pollSingleChar(
+  env: Env,
+  charId: number,
+): Promise<{ scraped: boolean; fired: number }> {
+  const char = await env.DB
+    .prepare("SELECT * FROM characters WHERE id = ?")
+    .bind(charId)
+    .first<CharacterRow>();
+  if (!char || char.blocked) return { scraped: false, fired: 0 };
 
-  const names = (distinctNames.results ?? []).map((r) => r.name);
-  if (names.length === 0) return { scraped: 0, fired: 0 };
+  // Skip if there are no active subs for this char AND nothing is watching it.
+  // Still useful to keep snapshots for the dashboard, so we don't actually
+  // skip — only abort early on truly dead chars (none registered, fully blocked).
 
-  // Fetch character snapshots and rankings in parallel — they're
-  // independent HTTP calls. Rankings get reused across all chars.
-  const [snapshots, rankings] = await Promise.all([
-    scrapeMany(env, names),
-    fetchRankings(),
-  ]);
-
-  // Pull all character rows for those names, plus their owners' Telegram chat_id.
-  const placeholders = names.map(() => "?").join(",");
-  const charsRes = await env.DB
-    .prepare(
-      `SELECT c.*
-         FROM characters c
-        WHERE c.name IN (${placeholders})`,
-    )
-    .bind(...names)
-    .all<CharacterRow>();
+  const snap = await scrapeOne(env, char.name, { totalTimeoutMs: 25_000 });
+  if (!snap.exists) return { scraped: snap.scraped, fired: 0 };
 
   type SubRow = SubscriptionRow & { owner_chat_id: number; is_gm: number };
   const subsRes = await env.DB
@@ -64,131 +44,156 @@ export async function pollOnce(env: Env): Promise<{ scraped: number; fired: numb
        JOIN users u ON u.id = s.user_id
        LEFT JOIN user_characters uc
          ON uc.user_id = s.user_id AND uc.character_id = s.character_id
-      WHERE s.active = 1
-        AND s.character_id IN (SELECT id FROM characters WHERE name IN (${placeholders}))`,
+      WHERE s.active = 1 AND s.character_id = ?`,
     )
-    .bind(...names)
+    .bind(charId)
     .all<SubRow>();
-
-  const charsById = new Map<number, CharacterRow>();
-  for (const c of charsRes.results ?? []) charsById.set(c.id, c);
-
-  const subsByChar = new Map<number, SubRow[]>();
-  for (const s of subsRes.results ?? []) {
-    if (s.character_id == null) continue;
-    const arr = subsByChar.get(s.character_id) ?? [];
-    arr.push(s);
-    subsByChar.set(s.character_id, arr);
-  }
+  const subs = subsRes.results ?? [];
 
   const t = now();
   const cooldown = Number(env.COOLDOWN_SECONDS || "3600");
   let fired = 0;
 
-  for (const char of charsById.values()) {
-    const snap = snapshots.get(char.name);
-    if (!snap || !snap.exists) continue;
+  const prevMap = parseMap(char.last_map);
+  const prev: ProfileSnapshot = {
+    name: char.name,
+    class: char.class,
+    resets: char.resets,
+    level: char.last_level,
+    map: char.last_map,
+    mapName: prevMap.name,
+    mapX: prevMap.x,
+    mapY: prevMap.y,
+    status: char.last_status as "Online" | "Offline" | null,
+    exists: true,
+    scraped: true,
+  };
 
-    const prevMap = parseMap(char.last_map);
-    const prev: ProfileSnapshot = {
-      name: char.name,
-      class: char.class,
-      resets: char.resets,
-      level: char.last_level,
-      map: char.last_map,
-      mapName: prevMap.name,
-      mapX: prevMap.x,
-      mapY: prevMap.y,
-      status: char.last_status as "Online" | "Offline" | null,
-      exists: true,
-      scraped: true,
-    };
+  for (const sub of subs) {
+    if (sub.cooldown_until > t) continue;
+    const trigger = evaluate(sub, prev, snap, !!sub.is_gm, {
+      last_level_change_at: char.last_level_change_at,
+      now: t,
+    });
+    if (!trigger) continue;
 
-    for (const sub of subsByChar.get(char.id) ?? []) {
-      if (sub.cooldown_until > t) continue;
-      const trigger = evaluate(sub, prev, snap, !!sub.is_gm, {
-        last_level_change_at: char.last_level_change_at,
-        now: t,
-      });
-      if (!trigger) continue;
-
-      const msg = formatAlert(char.name, sub, snap);
-      console.log(`fire sub=${sub.id} type=${sub.event_type} char=${char.name} chat=${sub.owner_chat_id} prevLevel=${prev.level} nextLevel=${snap.level} prevStatus=${prev.status} nextStatus=${snap.status}`);
-      const sendRes = await sendTelegram(env, sub.owner_chat_id, msg);
-      if (!sendRes.ok) {
-        console.log(`telegram send FAILED sub=${sub.id} status=${sendRes.status} body=${sendRes.body}`);
-        continue;
-      }
-      console.log(`telegram send OK sub=${sub.id}`);
-      await env.DB
-        .prepare(
-          "UPDATE subscriptions SET cooldown_until = ?, last_fired_at = ? WHERE id = ?",
-        )
-        .bind(t + cooldown, t, sub.id)
-        .run();
-      fired++;
+    const msg = formatAlert(char.name, sub, snap);
+    console.log(`fire sub=${sub.id} type=${sub.event_type} char=${char.name} chat=${sub.owner_chat_id} prevLevel=${prev.level} nextLevel=${snap.level} prevStatus=${prev.status} nextStatus=${snap.status}`);
+    const sendRes = await sendTelegram(env, sub.owner_chat_id, msg);
+    if (!sendRes.ok) {
+      console.log(`telegram send FAILED sub=${sub.id} status=${sendRes.status} body=${sendRes.body}`);
+      continue;
     }
-
-    const ranks = enrichRanks(snap, rankings);
-    // Track when level last changed so the level_stale alert can fire after
-    // N minutes of no progress. Only bump it if the level actually moved.
-    const levelChangedAt = snap.level !== prev.level && snap.level != null ? t : null;
     await env.DB
-      .prepare(
-        `UPDATE characters
-            SET class = COALESCE(?, class),
-                resets = COALESCE(?, resets),
-                last_level = COALESCE(?, last_level),
-                last_map = COALESCE(?, last_map),
-                last_status = COALESCE(?, last_status),
-                last_checked_at = ?,
-                last_level_change_at = COALESCE(?, last_level_change_at),
-                class_code = ?,
-                rank_overall = ?,
-                rank_class = ?,
-                next_target_name = ?,
-                next_target_resets = ?
-          WHERE name = ?`,
-      )
-      .bind(
-        snap.class, snap.resets, snap.level, snap.map, snap.status, t,
-        levelChangedAt,
-        ranks.classCode, ranks.rankOverall, ranks.rankClass,
-        ranks.nextTargetName, ranks.nextTargetResets,
-        char.name,
-      )
+      .prepare("UPDATE subscriptions SET cooldown_until = ?, last_fired_at = ? WHERE id = ?")
+      .bind(t + cooldown, t, sub.id)
       .run();
+    fired++;
+  }
 
-    // History: insert a snapshot when anything visible changed, OR every
-    // ~5 min as a heartbeat so the chart has data even for chars whose
-    // level/map happens to be stable (or whose scraped level appears stuck
-    // because of upstream caching).
-    const changed =
-      snap.level !== prev.level ||
-      snap.resets !== prev.resets ||
-      snap.map !== prev.map ||
-      snap.status !== prev.status;
-    let needHeartbeat = false;
-    if (!changed) {
-      const lastSnap = await env.DB
-        .prepare("SELECT MAX(ts) AS last_ts FROM char_snapshots WHERE char_id = ?")
-        .bind(char.id)
-        .first<{ last_ts: number | null }>();
-      const lastTs = lastSnap?.last_ts ?? 0;
-      needHeartbeat = (t - lastTs) >= 300;
-    }
-    if (changed || needHeartbeat) {
-      await env.DB
-        .prepare(
-          `INSERT INTO char_snapshots (char_id, ts, level, resets, map, status)
-           VALUES (?, ?, ?, ?, ?, ?)`,
-        )
-        .bind(char.id, t, snap.level, snap.resets, snap.map, snap.status)
-        .run();
+  // Fetch rankings only when this char's level/resets actually changed —
+  // ranks are reset+name based, so unchanged scrapes don't need a refetch.
+  let ranks = {
+    classCode: char.class_code,
+    rankOverall: char.rank_overall,
+    rankClass: char.rank_class,
+    nextTargetName: char.next_target_name,
+    nextTargetResets: char.next_target_resets,
+  };
+  if (snap.level !== prev.level || snap.resets !== prev.resets || snap.class !== prev.class) {
+    try {
+      const rankings = await fetchRankings();
+      ranks = enrichRanks(snap, rankings);
+    } catch (e) {
+      // Rankings page is best-effort — keep prior values on failure.
+      console.log(`rankings fetch failed for ${char.name}: ${(e as Error).message}`);
     }
   }
 
-  return { scraped: snapshots.size, fired };
+  const levelChangedAt = snap.level !== prev.level && snap.level != null ? t : null;
+  await env.DB
+    .prepare(
+      `UPDATE characters
+          SET class = COALESCE(?, class),
+              resets = COALESCE(?, resets),
+              last_level = COALESCE(?, last_level),
+              last_map = COALESCE(?, last_map),
+              last_status = COALESCE(?, last_status),
+              last_checked_at = ?,
+              last_level_change_at = COALESCE(?, last_level_change_at),
+              class_code = ?,
+              rank_overall = ?,
+              rank_class = ?,
+              next_target_name = ?,
+              next_target_resets = ?
+        WHERE id = ?`,
+    )
+    .bind(
+      snap.class, snap.resets, snap.level, snap.map, snap.status, t,
+      levelChangedAt,
+      ranks.classCode, ranks.rankOverall, ranks.rankClass,
+      ranks.nextTargetName, ranks.nextTargetResets,
+      charId,
+    )
+    .run();
+
+  // Snapshot row when something visible changed, OR every ~5 min as a
+  // heartbeat so the chart isn't empty for stable chars.
+  const changed =
+    snap.level !== prev.level ||
+    snap.resets !== prev.resets ||
+    snap.map !== prev.map ||
+    snap.status !== prev.status;
+  let needHeartbeat = false;
+  if (!changed) {
+    const lastSnap = await env.DB
+      .prepare("SELECT MAX(ts) AS last_ts FROM char_snapshots WHERE char_id = ?")
+      .bind(charId)
+      .first<{ last_ts: number | null }>();
+    needHeartbeat = (t - (lastSnap?.last_ts ?? 0)) >= 300;
+  }
+  if (changed || needHeartbeat) {
+    await env.DB
+      .prepare(
+        `INSERT INTO char_snapshots (char_id, ts, level, resets, map, status)
+         VALUES (?, ?, ?, ?, ?, ?)`,
+      )
+      .bind(charId, t, snap.level, snap.resets, snap.map, snap.status)
+      .run();
+  }
+
+  return { scraped: true, fired };
+}
+
+// Loop over every active char and run pollSingleChar. Used by the admin
+// "Rodar cron agora" button as a backstop / debug tool. The production
+// path is per-char DOs with alarms, not this loop.
+export async function pollOnce(env: Env): Promise<{ scraped: number; fired: number }> {
+  const rs = await env.DB
+    .prepare(
+      `SELECT DISTINCT c.id
+         FROM characters c
+         JOIN subscriptions s ON s.character_id = c.id AND s.active = 1
+        WHERE c.blocked = 0`,
+    )
+    .all<{ id: number }>();
+  const ids = (rs.results ?? []).map((r) => r.id);
+  if (ids.length === 0) return { scraped: 0, fired: 0 };
+
+  let scraped = 0;
+  let fired = 0;
+  // Modest concurrency — this is admin-triggered and CPU is per-tick now,
+  // not per-char, so keep it tame to stay under the budget.
+  const CONC = 5;
+  for (let i = 0; i < ids.length; i += CONC) {
+    const batch = ids.slice(i, i + CONC);
+    const out = await Promise.all(batch.map((id) => pollSingleChar(env, id).catch(() => ({ scraped: false, fired: 0 }))));
+    for (const r of out) {
+      if (r.scraped) scraped++;
+      fired += r.fired;
+    }
+  }
+  return { scraped, fired };
 }
 
 // Server-event scheduling pass. Two responsibilities:
@@ -218,8 +223,6 @@ export async function pollServerEvents(env: Env): Promise<{ refreshed: boolean; 
   if (subs.length === 0) return { refreshed, fired: 0 };
 
   // Precompute user's max char level to tailor entry requirements in messages.
-  // Post-migration to global characters: user_id no longer lives on `characters`,
-  // so we go through user_characters → characters.
   const maxLevelRes = await env.DB
     .prepare(
       `SELECT uc.user_id AS user_id, MAX(c.last_level) AS max_level
@@ -287,8 +290,6 @@ export function parseServerEventThreshold(threshold: string | null):
 }
 
 // True iff the subscription should fire given old vs new snapshot.
-// All checks are "edge-triggered" — we only alert on the transition into the
-// matching state, not while it remains in that state, so cooldown is a backup.
 function evaluate(
   sub: SubscriptionRow,
   prev: ProfileSnapshot,
@@ -326,14 +327,8 @@ function evaluate(
       return next.status === "Online" && prev.status !== "Online";
     }
     case "server_event":
-      // Not yet wired to a data source. Skipped silently for now.
       return false;
     case "level_stale": {
-      // Fire when the char has been idle for the configured number of
-      // minutes. Edge-trigger: don't re-fire if last_level_change_at
-      // hasn't advanced past the previous fire — i.e., we already
-      // alerted for THIS idle run; only the next idle run (after a
-      // level-up) should trigger again.
       const minutes = Number(sub.threshold);
       if (!Number.isFinite(minutes) || minutes < 1) return false;
       if (ctx.last_level_change_at == null) return false;
@@ -344,7 +339,6 @@ function evaluate(
   }
 }
 
-// "Stadium:60-90:80-100" -> {map, x1, x2, y1, y2}
 export function parseCoordsBox(
   threshold: string | null,
 ): { map: string; x1: number; x2: number; y1: number; y2: number } | null {
@@ -368,9 +362,6 @@ function inBox(
   return snap.mapX >= box.x1 && snap.mapX <= box.x2 && snap.mapY >= box.y1 && snap.mapY <= box.y2;
 }
 
-// Resolve a char's overall + class ranking (and the char one slot above
-// in the class list — i.e. the immediate "next target" to surpass) using
-// the freshly-fetched rankings map.
 function enrichRanks(snap: ProfileSnapshot, rankings: RankingMap): {
   classCode: string | null;
   rankOverall: number | null;

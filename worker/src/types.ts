@@ -1,5 +1,6 @@
 export interface Env {
   DB: D1Database;
+  CHAR_WATCHERS: DurableObjectNamespace;  // one DO per character (timer + per-char tick)
 
   PROFILE_BASE_URL: string;
   LOGIN_TOKEN_TTL_SECONDS: string;  // pending_logins TTL (deep-link auth)
@@ -7,6 +8,7 @@ export interface Env {
   COOLDOWN_SECONDS: string;
   COOKIE_NAME: string;
   TELEGRAM_BOT_USERNAME: string;    // e.g. "mu_patos_bot" — public, no @
+  DO_ALARM_INTERVAL_SECS?: string;  // optional override for the DO alarm cadence (default 60)
 
   // Set with `wrangler secret put`
   SESSION_SECRET?: string;          // HMAC key for the session cookie

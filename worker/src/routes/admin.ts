@@ -4,6 +4,7 @@ import { scrapeOne } from "../scraper";
 import { pollOnce } from "../poll";
 import { buildHistoryResponse } from "./characters";
 import { refreshCatalog } from "../items-scrape";
+import { pokeWatcher, spawnWatcher } from "../char-watcher";
 
 // Every admin route assumes the gate in index.ts already verified the
 // caller has users.admin = 1.
@@ -204,6 +205,41 @@ export async function adminRefreshItems(env: Env): Promise<Response> {
     return json({ ok: true, ...r });
   } catch (e) {
     return bad(500, "scrape falhou: " + (e as Error).message);
+  }
+}
+
+// One-shot bulk spawn — initialises a CharWatcher DO for every existing
+// character. Safe to re-run: /init resets the alarm, no duplicates.
+// Use this once after deploying the DO migration so legacy chars start
+// ticking under the new architecture.
+export async function adminSpawnAllWatchers(env: Env): Promise<Response> {
+  const rs = await env.DB
+    .prepare("SELECT id FROM characters WHERE blocked = 0 ORDER BY id")
+    .all<{ id: number }>();
+  const ids = (rs.results ?? []).map((r) => r.id);
+
+  let spawned = 0;
+  let failed = 0;
+  // Modest concurrency — each spawn is one DO RPC call.
+  const CONC = 10;
+  for (let i = 0; i < ids.length; i += CONC) {
+    const batch = ids.slice(i, i + CONC);
+    const out = await Promise.all(
+      batch.map((id) => spawnWatcher(env, id).then(() => true).catch(() => false)),
+    );
+    for (const ok of out) (ok ? spawned++ : failed++);
+  }
+  return json({ ok: true, total: ids.length, spawned, failed });
+}
+
+// Trigger one immediate alarm run on a specific char's DO — handy for
+// debugging without waiting for the next 60s tick.
+export async function adminPokeWatcher(env: Env, charId: number): Promise<Response> {
+  try {
+    await pokeWatcher(env, charId);
+    return json({ ok: true });
+  } catch (e) {
+    return bad(500, "poke falhou: " + (e as Error).message);
   }
 }
 

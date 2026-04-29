@@ -337,6 +337,7 @@ export const INDEX_HTML = /* html */ `<!doctype html>
             <div class="flex gap-2">
               <button id="admin-compare" class="px-3 py-1.5 rounded-md border border-gold/40 text-goldsoft hover:bg-gold/10 transition text-xs">📈 Comparar</button>
               <button id="admin-scrape-items" class="px-3 py-1.5 rounded-md border border-gold/40 text-goldsoft hover:bg-gold/10 transition text-xs">🛍️ Scrapear catálogo</button>
+              <button id="admin-spawn-watchers" class="px-3 py-1.5 rounded-md border border-gold/40 text-goldsoft hover:bg-gold/10 transition text-xs">🤖 Spawn watchers</button>
               <button id="admin-poll" class="gold-btn block px-3 rounded-md bg-gold text-bg font-semibold text-center border border-transparent hover:brightness-110 transition text-xs">Rodar cron agora</button>
             </div>
           </div>
@@ -2451,6 +2452,13 @@ if ($("admin-scrape-items")) $("admin-scrape-items").onclick = async (e) => {
   try {
     const r = await withSpinner(btn, () => fetchJSON("/api/admin/items/refresh", { method: "POST" }));
     toast("catálogo: " + r.scraped + " itens em " + r.categories + " categorias", "ok");
+  } catch (err) { toast(err.message, "err"); }
+};
+if ($("admin-spawn-watchers")) $("admin-spawn-watchers").onclick = async (e) => {
+  const btn = e.currentTarget;
+  try {
+    const r = await withSpinner(btn, () => fetchJSON("/api/admin/watchers/spawn-all", { method: "POST" }));
+    toast("watchers: " + r.spawned + " ok / " + r.failed + " falhas (" + r.total + " chars)", "ok");
   } catch (err) { toast(err.message, "err"); }
 };
 if ($("admin-health-refresh")) $("admin-health-refresh").onclick = () => loadAdminHealth();
