@@ -16,7 +16,18 @@ import {
   listSubscriptions,
   toggleSubscription,
 } from "./routes/subscriptions";
-import { me } from "./routes/me";
+import { me, setNickname } from "./routes/me";
+import {
+  commentListing,
+  createListing,
+  deleteComment,
+  deleteListing,
+  getListing,
+  listListings,
+  pingListing,
+  reactListing,
+  updateListing,
+} from "./routes/market";
 import {
   adminCharHistory,
   adminClearCharSnapshots,
@@ -110,6 +121,28 @@ export default {
       const userId = sess.userId;
 
       if (pathname === "/api/me" && method === "GET") return await me(env, userId);
+      if (pathname === "/api/me/nickname" && method === "POST") return await setNickname(env, userId, req);
+
+      // ---- Market ----
+      if (pathname === "/api/market/listings" && method === "GET") return await listListings(env, userId, url);
+      if (pathname === "/api/market/listings" && method === "POST") return await createListing(env, userId, req);
+      const listingMatch = pathname.match(/^\/api\/market\/listings\/(\d+)$/);
+      if (listingMatch && method === "GET") return await getListing(env, userId, Number(listingMatch[1]));
+      if (listingMatch && method === "PATCH") return await updateListing(env, userId, Number(listingMatch[1]), req);
+      if (listingMatch && method === "DELETE") return await deleteListing(env, userId, Number(listingMatch[1]));
+      const reactMatch = pathname.match(/^\/api\/market\/listings\/(\d+)\/react$/);
+      if (reactMatch && method === "POST") return await reactListing(env, userId, Number(reactMatch[1]), req);
+      const commentMatch = pathname.match(/^\/api\/market\/listings\/(\d+)\/comment$/);
+      if (commentMatch && method === "POST") return await commentListing(env, userId, Number(commentMatch[1]), req);
+      const commentDelMatch = pathname.match(/^\/api\/market\/comments\/(\d+)$/);
+      if (commentDelMatch && method === "DELETE") return await deleteComment(env, userId, Number(commentDelMatch[1]));
+      const pingMatch = pathname.match(/^\/api\/market\/listings\/(\d+)\/ping$/);
+      if (pingMatch && method === "POST") {
+        return await pingListing(env, userId, Number(pingMatch[1]), req, {
+          origin: url.origin,
+          buildAppUrl: (origin, id) => origin + "/?market=" + id,
+        });
+      }
 
       if (pathname === "/api/characters" && method === "GET") return await listCharacters(env, userId);
       if (pathname === "/api/characters" && method === "POST") return await createCharacter(env, userId, req);

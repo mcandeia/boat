@@ -174,10 +174,11 @@ export const INDEX_HTML = /* html */ `<!doctype html>
         <div class="text-[11px] uppercase tracking-widest text-muted px-2 pt-1 pb-2">Menu</div>
         <div class="flex lg:flex-col gap-2">
           <button id="nav-dashboard" class="flex-1 lg:flex-none px-3 py-2 rounded-md border border-border text-sm hover:bg-bg transition text-left">Dashboard</button>
+          <button id="nav-market" class="flex-1 lg:flex-none px-3 py-2 rounded-md border border-border text-sm hover:bg-bg transition text-left">🛒 Mercado</button>
           <button id="nav-admin" class="hidden flex-1 lg:flex-none px-3 py-2 rounded-md border border-gold/40 text-goldsoft hover:bg-gold/10 transition text-left">Admin</button>
         </div>
         <div id="nav-hint" class="hidden mt-3 text-[11px] text-muted px-2 leading-relaxed">
-          Dica: use o menu para alternar entre o painel normal e o admin.
+          Dica: use o menu para alternar entre Dashboard, Mercado e Admin.
         </div>
       </nav>
 
@@ -303,6 +304,29 @@ export const INDEX_HTML = /* html */ `<!doctype html>
               </div>
             </details>
           </div>
+        </div>
+      </div>
+
+      <!-- Market panel -->
+      <div id="market-card" class="hidden space-y-4">
+        <div class="bg-panel border border-border rounded-xl p-5">
+          <div class="flex items-center justify-between gap-3 flex-wrap mb-3">
+            <h2 class="text-xs uppercase tracking-widest text-muted">🛒 Mercado</h2>
+            <button id="market-new-btn" class="gold-btn block px-4 rounded-md bg-gold text-bg font-semibold text-center border border-transparent hover:brightness-110 transition">+ novo anúncio</button>
+          </div>
+          <div class="flex flex-wrap items-center gap-2 text-xs mb-3">
+            <span class="text-muted mr-1">ordenar:</span>
+            <button data-sort="hot" class="market-sort px-2 py-0.5 rounded border border-goldsoft text-goldsoft">🔥 em alta</button>
+            <button data-sort="new" class="market-sort px-2 py-0.5 rounded border border-border text-muted hover:text-slate-300">🆕 novos</button>
+            <span class="text-muted mx-1">·</span>
+            <span class="text-muted">tipo:</span>
+            <button data-side="" class="market-side px-2 py-0.5 rounded border border-goldsoft text-goldsoft">todos</button>
+            <button data-side="sell" class="market-side px-2 py-0.5 rounded border border-border text-muted hover:text-slate-300">vendendo</button>
+            <button data-side="buy" class="market-side px-2 py-0.5 rounded border border-border text-muted hover:text-slate-300">comprando</button>
+            <button data-side="donate" class="market-side px-2 py-0.5 rounded border border-border text-muted hover:text-slate-300">doação</button>
+            <input id="market-search" placeholder="buscar item ou nota..." class="ml-auto h-8 bg-bg border border-border rounded-md px-2 outline-none focus:border-gold/60 text-xs min-w-[160px]" />
+          </div>
+          <div id="market-list" class="space-y-3"></div>
         </div>
       </div>
 
@@ -850,8 +874,10 @@ function setDashView(view) {
   const isAdmin = !!state.user?.is_admin;
   const dashBtn = $("nav-dashboard");
   const adminBtn = $("nav-admin");
+  const marketBtn = $("nav-market");
   const main = $("dash-main");
   const admin = $("admin-card");
+  const market = $("market-card");
 
   const activeCls = "bg-bg border-gold/40 text-goldsoft";
   const idleCls = "border-border text-slate-200 hover:bg-bg";
@@ -869,17 +895,16 @@ function setDashView(view) {
       (active ? activeCls : idleCls);
   };
 
-  if (view === "admin" && isAdmin) {
-    main.classList.add("hidden");
-    admin.classList.remove("hidden");
-    setBtn(dashBtn, false);
-    setBtn(adminBtn, true);
-  } else {
-    main.classList.remove("hidden");
-    admin.classList.add("hidden");
-    setBtn(dashBtn, true);
-    setBtn(adminBtn, false);
-  }
+  const isAdminView = view === "admin" && isAdmin;
+  const isMarketView = view === "market";
+  main.classList.toggle("hidden", isAdminView || isMarketView);
+  admin.classList.toggle("hidden", !isAdminView);
+  market.classList.toggle("hidden", !isMarketView);
+  setBtn(dashBtn, !isAdminView && !isMarketView);
+  setBtn(adminBtn, isAdminView);
+  setBtn(marketBtn, isMarketView);
+
+  if (isMarketView) loadMarket();
 }
 
 // ---- Auth handlers ----
@@ -2378,11 +2403,455 @@ function wireAdminEventRow(ev) {
   };
 }
 
+// ---- Market ----
+const marketState = { sort: "hot", side: "", q: "", listings: [] };
+let marketSearchTimer = null;
+
+function wireMarket() {
+  if (!$("market-card")) return;
+  document.querySelectorAll(".market-sort").forEach((b) => {
+    b.onclick = () => { marketState.sort = b.getAttribute("data-sort"); refreshSortChips(); loadMarket(); };
+  });
+  document.querySelectorAll(".market-side").forEach((b) => {
+    b.onclick = () => { marketState.side = b.getAttribute("data-side") || ""; refreshSideChips(); loadMarket(); };
+  });
+  $("market-search").addEventListener("input", () => {
+    if (marketSearchTimer) clearTimeout(marketSearchTimer);
+    marketSearchTimer = setTimeout(() => {
+      marketState.q = $("market-search").value.trim();
+      loadMarket();
+    }, 250);
+  });
+  $("market-new-btn").onclick = openListingForm;
+}
+
+function refreshSortChips() {
+  document.querySelectorAll(".market-sort").forEach((b) => {
+    const active = b.getAttribute("data-sort") === marketState.sort;
+    b.className = "market-sort px-2 py-0.5 rounded border " + (active ? "border-goldsoft text-goldsoft" : "border-border text-muted hover:text-slate-300");
+  });
+}
+function refreshSideChips() {
+  document.querySelectorAll(".market-side").forEach((b) => {
+    const active = (b.getAttribute("data-side") || "") === marketState.side;
+    b.className = "market-side px-2 py-0.5 rounded border " + (active ? "border-goldsoft text-goldsoft" : "border-border text-muted hover:text-slate-300");
+  });
+}
+
+async function loadMarket() {
+  const list = $("market-list");
+  list.innerHTML = '<div class="text-xs text-muted">carregando...</div>';
+  try {
+    const params = new URLSearchParams();
+    params.set("sort", marketState.sort);
+    if (marketState.side) params.set("side", marketState.side);
+    if (marketState.q) params.set("q", marketState.q);
+    const data = await fetchJSON("/api/market/listings?" + params.toString());
+    marketState.listings = data.listings || [];
+    renderMarket();
+  } catch (e) {
+    list.innerHTML = '<div class="text-xs text-danger">erro: ' + escapeHtml(e.message) + '</div>';
+  }
+}
+
+function fmtPriceCurrency(listing) {
+  if (!listing.currency) return "";
+  if (listing.currency === "free") return "🎁 grátis";
+  const price = listing.price != null ? Number(listing.price).toLocaleString("pt-BR") : "?";
+  const ico = listing.currency === "zeny" ? "🟡" : listing.currency === "gold" ? "💠" : listing.currency === "cash" ? "💵" : "💰";
+  return ico + " " + price + " " + listing.currency;
+}
+
+function fmtAttrs(attrsJson) {
+  if (!attrsJson) return null;
+  try {
+    const a = JSON.parse(attrsJson);
+    const parts = [];
+    if (a.refinement != null) parts.push("+" + a.refinement);
+    if (a.option != null) parts.push("opt+" + a.option);
+    if (a.luck) parts.push("luck");
+    if (a.skill) parts.push("skill");
+    if (a.ancient) parts.push("ancient: " + a.ancient);
+    if (a.extras) parts.push(a.extras);
+    return parts.join(" · ");
+  } catch { return null; }
+}
+
+function renderMarket() {
+  refreshSortChips();
+  refreshSideChips();
+  const list = $("market-list");
+  list.innerHTML = "";
+  if (marketState.listings.length === 0) {
+    list.innerHTML = '<div class="text-xs text-muted py-4">nenhum anúncio. seja o primeiro!</div>';
+    return;
+  }
+  for (const l of marketState.listings) list.appendChild(renderListingCard(l));
+  // Auto-open if URL has ?market=ID
+  const urlId = new URLSearchParams(location.search).get("market");
+  if (urlId) {
+    const card = list.querySelector('[data-listing-id="' + urlId + '"]');
+    if (card) {
+      card.scrollIntoView({ behavior: "smooth", block: "center" });
+      const detailBtn = card.querySelector('[data-action="toggle-detail"]');
+      if (detailBtn) detailBtn.click();
+    }
+  }
+}
+
+function renderListingCard(l) {
+  const card = document.createElement("div");
+  card.className = "border border-border rounded-md bg-bg/60 p-3";
+  card.dataset.listingId = String(l.id);
+  const sideBadge = l.side === "buy"
+    ? '<span class="px-1.5 py-0.5 rounded bg-blue-500/15 text-blue-300 border border-blue-500/30 text-[10px] uppercase">comprar</span>'
+    : l.side === "donate"
+    ? '<span class="px-1.5 py-0.5 rounded bg-emerald-500/15 text-emerald-300 border border-emerald-500/30 text-[10px] uppercase">doação</span>'
+    : '<span class="px-1.5 py-0.5 rounded bg-gold/15 text-goldsoft border border-gold/40 text-[10px] uppercase">vender</span>';
+  const statusBadge = l.status === "open"
+    ? ""
+    : l.status === "held"
+    ? '<span class="px-1.5 py-0.5 rounded bg-yellow-500/15 text-yellow-300 border border-yellow-500/30 text-[10px] uppercase">reservado</span>'
+    : '<span class="px-1.5 py-0.5 rounded bg-zinc-500/15 text-zinc-300 border border-zinc-500/30 text-[10px] uppercase">fechado</span>';
+  const attrs = fmtAttrs(l.item_attrs);
+  const price = fmtPriceCurrency(l);
+  const charLine = l.char_name ? "🎮 " + escapeHtml(l.char_name) + (l.char_level != null ? " (" + l.char_level + "/" + (l.char_resets ?? "?") + "rr)" : "") : "";
+  const isMine = state.user && l.user_id === state.user.id;
+  const date = new Date(l.created_at * 1000);
+  const ago = fmtAgo(state.now ? state.now - l.created_at : Math.floor(Date.now() / 1000) - l.created_at);
+
+  const reactionsRow = l.reactions.map((r) =>
+    '<button data-action="react" data-kind="' + escapeHtml(r.kind) + '" class="text-xs px-2 py-0.5 rounded border ' +
+    (r.mine ? "border-goldsoft bg-gold/10 text-goldsoft" : "border-border text-muted hover:text-slate-200") +
+    '">' + r.kind + (r.count ? ' <span class="tabular-nums">' + r.count + '</span>' : "") + '</button>'
+  ).join("");
+
+  card.innerHTML =
+    '<div class="flex flex-wrap items-center gap-2 text-xs mb-1.5">' +
+      sideBadge + statusBadge +
+      '<span class="text-muted">por <b class="text-goldsoft">' + escapeHtml(l.nickname ?? "?") + '</b></span>' +
+      (charLine ? '<span class="text-muted">· ' + charLine + '</span>' : "") +
+      '<span class="text-muted ml-auto" title="' + escapeHtml(date.toLocaleString("pt-BR")) + '">' + escapeHtml(ago) + '</span>' +
+    '</div>' +
+    '<div class="font-semibold text-slate-100">' + escapeHtml(l.item_name) + '</div>' +
+    (attrs ? '<div class="text-xs text-muted mt-0.5">' + escapeHtml(attrs) + '</div>' : "") +
+    (price ? '<div class="text-sm text-goldsoft mt-1 tabular-nums">' + escapeHtml(price) + '</div>' : "") +
+    (l.notes ? '<div class="text-sm text-slate-300 mt-2 whitespace-pre-wrap">' + escapeHtml(l.notes) + '</div>' : "") +
+    '<div class="flex flex-wrap items-center gap-1.5 mt-3">' +
+      reactionsRow +
+      (isMine
+        ? '<button data-action="edit" class="text-xs px-2 py-0.5 rounded border border-border text-muted hover:text-slate-200 ml-auto">editar</button>' +
+          '<button data-action="delete" class="text-xs px-2 py-0.5 rounded border border-border text-danger hover:bg-danger/10">remover</button>'
+        : '<button data-action="ping" class="text-xs px-2 py-0.5 rounded bg-gold text-bg font-semibold ml-auto hover:brightness-110">📣 tenho interesse</button>') +
+      '<button data-action="toggle-detail" class="text-xs px-2 py-0.5 rounded border border-border text-muted hover:text-slate-200">💬 <span data-comment-count>' + (l.comment_count || 0) + '</span></button>' +
+    '</div>' +
+    '<div data-detail class="hidden mt-3 pt-3 border-t border-border/60"></div>';
+
+  card.querySelectorAll("[data-action]").forEach((btn) => {
+    const action = btn.getAttribute("data-action");
+    btn.onclick = (e) => handleListingAction(action, l, card, e);
+  });
+  return card;
+}
+
+function fmtAgo(secs) {
+  if (secs < 60) return "agora";
+  const m = Math.floor(secs / 60);
+  if (m < 60) return m + "min";
+  const h = Math.floor(m / 60);
+  if (h < 48) return h + "h";
+  const d = Math.floor(h / 24);
+  return d + "d";
+}
+
+async function handleListingAction(action, l, card, e) {
+  if (action === "react") {
+    if (!await ensureNickname()) return;
+    const kind = e.currentTarget.getAttribute("data-kind");
+    try {
+      await fetchJSON("/api/market/listings/" + l.id + "/react", {
+        method: "POST",
+        body: JSON.stringify({ kind }),
+      });
+      await loadMarket();
+    } catch (err) { toast(err.message, "err"); }
+    return;
+  }
+  if (action === "delete") {
+    if (!confirm("Remover este anúncio?")) return;
+    try {
+      await fetchJSON("/api/market/listings/" + l.id, { method: "DELETE" });
+      toast("removido", "ok");
+      await loadMarket();
+    } catch (err) { toast(err.message, "err"); }
+    return;
+  }
+  if (action === "edit") { openListingForm(l); return; }
+  if (action === "ping") {
+    if (!await ensureNickname()) return;
+    openPingModal(l);
+    return;
+  }
+  if (action === "toggle-detail") { toggleListingDetail(l, card); return; }
+}
+
+async function toggleListingDetail(l, card) {
+  const det = card.querySelector("[data-detail]");
+  if (!det) return;
+  if (!det.classList.contains("hidden")) {
+    det.classList.add("hidden");
+    return;
+  }
+  det.classList.remove("hidden");
+  det.innerHTML = '<div class="text-xs text-muted">carregando comentários...</div>';
+  try {
+    const data = await fetchJSON("/api/market/listings/" + l.id);
+    const comments = data.comments || [];
+    const list = comments.map((c) => {
+      const mine = state.user && c.user_id === state.user.id;
+      const ownerOfListing = state.user && l.user_id === state.user.id;
+      const removable = mine || ownerOfListing;
+      return '<div class="text-sm py-1 border-b border-border/40 last:border-0">' +
+        '<div class="flex items-center gap-2 text-[11px] text-muted">' +
+          '<b class="text-goldsoft">' + escapeHtml(c.nickname ?? "?") + '</b>' +
+          '<span>' + escapeHtml(fmtAgo(Math.floor(Date.now() / 1000) - c.created_at)) + '</span>' +
+          (removable ? '<button data-comment-del="' + c.id + '" class="ml-auto text-danger hover:underline">apagar</button>' : "") +
+        '</div>' +
+        '<div class="whitespace-pre-wrap">' + escapeHtml(c.body) + '</div>' +
+      '</div>';
+    }).join("");
+    det.innerHTML =
+      '<div class="space-y-1 mb-3">' + (list || '<div class="text-xs text-muted">sem comentários ainda</div>') + '</div>' +
+      '<div class="flex gap-2">' +
+        '<input data-comment-input type="text" maxlength="500" placeholder="comentário..." class="flex-1 h-9 bg-bg border border-border rounded-md px-2 outline-none focus:border-gold/60 text-sm" />' +
+        '<button data-comment-send class="px-3 py-1.5 rounded-md border border-border text-sm hover:bg-bg transition">enviar</button>' +
+      '</div>';
+    det.querySelectorAll("[data-comment-del]").forEach((b) => {
+      b.onclick = async () => {
+        if (!confirm("apagar comentário?")) return;
+        try {
+          await fetchJSON("/api/market/comments/" + b.getAttribute("data-comment-del"), { method: "DELETE" });
+          toggleListingDetail(l, card); toggleListingDetail(l, card);
+        } catch (err) { toast(err.message, "err"); }
+      };
+    });
+    const input = det.querySelector("[data-comment-input]");
+    const send = det.querySelector("[data-comment-send]");
+    const submit = async () => {
+      const txt = input.value.trim();
+      if (!txt) return;
+      if (!await ensureNickname()) return;
+      try {
+        await fetchJSON("/api/market/listings/" + l.id + "/comment", {
+          method: "POST",
+          body: JSON.stringify({ body: txt }),
+        });
+        input.value = "";
+        // Reload listings (count) + this detail.
+        const cc = card.querySelector("[data-comment-count]");
+        if (cc) cc.textContent = String((Number(cc.textContent) || 0) + 1);
+        await toggleListingDetail(l, card);  // close
+        await toggleListingDetail(l, card);  // reopen with new comment
+      } catch (err) { toast(err.message, "err"); }
+    };
+    send.onclick = submit;
+    input.addEventListener("keydown", (e) => { if (e.key === "Enter") submit(); });
+  } catch (err) {
+    det.innerHTML = '<div class="text-xs text-danger">erro: ' + escapeHtml(err.message) + '</div>';
+  }
+}
+
+// ---- Listing form modal ----
+function openListingForm(existing) {
+  ensureNickname().then((ok) => {
+    if (!ok) return;
+    const isEdit = existing && typeof existing === "object" && existing.id;
+    const overlay = document.createElement("div");
+    overlay.className = "fixed inset-0 bg-black/70 flex items-start sm:items-center justify-center z-50 p-3 overflow-y-auto";
+    const charOpts = (state.characters || []).map((c) =>
+      '<option value="' + c.id + '"' + (isEdit && existing.char_id === c.id ? " selected" : "") + '>' + escapeHtml(c.name) + '</option>'
+    ).join("");
+    const a = isEdit && existing.item_attrs ? (() => { try { return JSON.parse(existing.item_attrs); } catch { return {}; } })() : {};
+    overlay.innerHTML =
+      '<div class="bg-panel border border-border rounded-xl p-5 w-full max-w-lg my-4">' +
+        '<h3 class="text-sm uppercase tracking-widest text-muted mb-3">' + (isEdit ? "Editar anúncio" : "Novo anúncio") + '</h3>' +
+        '<div class="space-y-3 text-sm">' +
+          '<div class="grid grid-cols-2 gap-2">' +
+            '<div><label class="text-[11px] text-muted block mb-1">Tipo</label>' +
+              '<select data-f="side" class="w-full h-10 bg-bg border border-border rounded-md px-2">' +
+                '<option value="sell"' + (isEdit && existing.side === "sell" ? " selected" : "") + '>vender</option>' +
+                '<option value="buy"' + (isEdit && existing.side === "buy" ? " selected" : "") + '>comprar</option>' +
+                '<option value="donate"' + (isEdit && existing.side === "donate" ? " selected" : "") + '>doar</option>' +
+              '</select></div>' +
+            '<div><label class="text-[11px] text-muted block mb-1">Char</label>' +
+              '<select data-f="char_id" class="w-full h-10 bg-bg border border-border rounded-md px-2">' +
+                '<option value="">— sem char —</option>' + charOpts +
+              '</select></div>' +
+          '</div>' +
+          '<div><label class="text-[11px] text-muted block mb-1">Item</label>' +
+            '<input data-f="item_name" maxlength="80" placeholder="ex.: Excellent Bone Blade" class="w-full h-10 bg-bg border border-border rounded-md px-2" value="' + (isEdit ? escapeHtml(existing.item_name) : "") + '" /></div>' +
+          '<div class="grid grid-cols-2 gap-2">' +
+            '<div><label class="text-[11px] text-muted block mb-1">Refinamento (+0..+13)</label>' +
+              '<input data-f="refinement" type="number" min="0" max="13" class="w-full h-10 bg-bg border border-border rounded-md px-2" value="' + (a.refinement ?? "") + '" /></div>' +
+            '<div><label class="text-[11px] text-muted block mb-1">Option (0..28)</label>' +
+              '<input data-f="option" type="number" min="0" max="28" class="w-full h-10 bg-bg border border-border rounded-md px-2" value="' + (a.option ?? "") + '" /></div>' +
+          '</div>' +
+          '<div class="flex gap-3 text-xs">' +
+            '<label class="inline-flex items-center gap-2"><input data-f="luck" type="checkbox" class="accent-gold"' + (a.luck ? " checked" : "") + ' /> luck</label>' +
+            '<label class="inline-flex items-center gap-2"><input data-f="skill" type="checkbox" class="accent-gold"' + (a.skill ? " checked" : "") + ' /> skill</label>' +
+          '</div>' +
+          '<div><label class="text-[11px] text-muted block mb-1">Conjunto ancient</label>' +
+            '<input data-f="ancient" maxlength="40" placeholder="ex.: Gaion, Anonymous, Hyon..." class="w-full h-10 bg-bg border border-border rounded-md px-2" value="' + (a.ancient ? escapeHtml(a.ancient) : "") + '" /></div>' +
+          '<div><label class="text-[11px] text-muted block mb-1">Bônus extras (texto livre)</label>' +
+            '<input data-f="extras" maxlength="240" placeholder="ex.: dmg+15%, refl+5%, dr+5..." class="w-full h-10 bg-bg border border-border rounded-md px-2" value="' + (a.extras ? escapeHtml(a.extras) : "") + '" /></div>' +
+          '<div class="grid grid-cols-2 gap-2">' +
+            '<div><label class="text-[11px] text-muted block mb-1">Moeda</label>' +
+              '<select data-f="currency" class="w-full h-10 bg-bg border border-border rounded-md px-2">' +
+                '<option value="">—</option>' +
+                ['zeny','gold','cash','free'].map((v) => '<option value="' + v + '"' + (isEdit && existing.currency === v ? " selected" : "") + '>' + v + '</option>').join("") +
+              '</select></div>' +
+            '<div><label class="text-[11px] text-muted block mb-1">Preço</label>' +
+              '<input data-f="price" type="number" min="0" placeholder="0" class="w-full h-10 bg-bg border border-border rounded-md px-2" value="' + (isEdit && existing.price != null ? existing.price : "") + '" /></div>' +
+          '</div>' +
+          '<div><label class="text-[11px] text-muted block mb-1">Notas (opcional)</label>' +
+            '<textarea data-f="notes" maxlength="1000" rows="2" placeholder="qualquer detalhe..." class="w-full bg-bg border border-border rounded-md px-2 py-1.5">' + (isEdit && existing.notes ? escapeHtml(existing.notes) : "") + '</textarea></div>' +
+          '<label class="inline-flex items-center gap-2 text-xs"><input data-f="allow_message" type="checkbox" class="accent-gold"' + (!isEdit || existing.allow_message ? " checked" : "") + ' /> permitir mensagem ao pingar</label>' +
+        '</div>' +
+        '<div class="flex justify-end gap-2 mt-4">' +
+          '<button data-cancel class="px-3 py-1.5 rounded-md border border-border text-sm hover:bg-bg">cancelar</button>' +
+          '<button data-save class="gold-btn block px-4 rounded-md bg-gold text-bg font-semibold text-center border border-transparent hover:brightness-110">' + (isEdit ? "salvar" : "publicar") + '</button>' +
+        '</div>' +
+      '</div>';
+    document.body.appendChild(overlay);
+    overlay.querySelector("[data-cancel]").onclick = () => overlay.remove();
+    overlay.querySelector("[data-save]").onclick = async () => {
+      const get = (k) => overlay.querySelector('[data-f="' + k + '"]');
+      const item_name = get("item_name").value.trim();
+      if (!item_name) { toast("informe o item", "err"); return; }
+      const attrs = {};
+      const refn = Number(get("refinement").value); if (Number.isInteger(refn) && refn >= 0) attrs.refinement = refn;
+      const opt = Number(get("option").value); if (Number.isInteger(opt) && opt >= 0) attrs.option = opt;
+      if (get("luck").checked) attrs.luck = true;
+      if (get("skill").checked) attrs.skill = true;
+      const anc = get("ancient").value.trim(); if (anc) attrs.ancient = anc;
+      const ext = get("extras").value.trim(); if (ext) attrs.extras = ext;
+      const currencyVal = get("currency").value;
+      const priceVal = get("price").value === "" ? null : Number(get("price").value);
+      const charIdVal = get("char_id").value === "" ? null : Number(get("char_id").value);
+      const payload = {
+        side: get("side").value,
+        char_id: charIdVal,
+        item_name,
+        item_attrs: attrs,
+        currency: currencyVal || null,
+        price: currencyVal === "free" ? null : priceVal,
+        notes: get("notes").value.trim() || null,
+        allow_message: !!get("allow_message").checked,
+      };
+      try {
+        if (isEdit) {
+          await fetchJSON("/api/market/listings/" + existing.id, { method: "PATCH", body: JSON.stringify(payload) });
+          toast("atualizado", "ok");
+        } else {
+          await fetchJSON("/api/market/listings", { method: "POST", body: JSON.stringify(payload) });
+          toast("publicado", "ok");
+        }
+        overlay.remove();
+        loadMarket();
+      } catch (err) { toast(err.message, "err"); }
+    };
+  });
+}
+
+function openPingModal(l) {
+  const overlay = document.createElement("div");
+  overlay.className = "fixed inset-0 bg-black/70 flex items-center justify-center z-50 p-3";
+  const charOpts = (state.characters || []).map((c) =>
+    '<option value="' + c.id + '">' + escapeHtml(c.name) + (c.last_level != null ? " (lvl " + c.last_level + ")" : "") + '</option>'
+  ).join("");
+  overlay.innerHTML =
+    '<div class="bg-panel border border-border rounded-xl p-5 w-full max-w-md">' +
+      '<h3 class="text-sm uppercase tracking-widest text-muted mb-3">📣 Tenho interesse</h3>' +
+      '<p class="text-xs text-muted mb-3">Vamos enviar um ping no Telegram do anunciante. Limite: 1 por hora.</p>' +
+      '<div class="space-y-3 text-sm">' +
+        '<div><label class="text-[11px] text-muted block mb-1">Seu personagem (opcional)</label>' +
+          '<select data-f="char_id" class="w-full h-10 bg-bg border border-border rounded-md px-2">' +
+            '<option value="">— não informar —</option>' + charOpts +
+          '</select></div>' +
+        (l.allow_message
+          ? '<div><label class="text-[11px] text-muted block mb-1">Mensagem (opcional, máx 280 chars)</label>' +
+            '<textarea data-f="message" rows="3" maxlength="280" placeholder="quanto você aceita por isso?" class="w-full bg-bg border border-border rounded-md px-2 py-1.5"></textarea></div>'
+          : '<div class="text-[11px] text-muted">o anunciante não habilitou mensagens — ping será enviado sem texto</div>') +
+      '</div>' +
+      '<div class="flex justify-end gap-2 mt-4">' +
+        '<button data-cancel class="px-3 py-1.5 rounded-md border border-border text-sm hover:bg-bg">cancelar</button>' +
+        '<button data-send class="gold-btn block px-4 rounded-md bg-gold text-bg font-semibold text-center border border-transparent hover:brightness-110">enviar ping</button>' +
+      '</div>' +
+    '</div>';
+  document.body.appendChild(overlay);
+  overlay.querySelector("[data-cancel]").onclick = () => overlay.remove();
+  overlay.querySelector("[data-send]").onclick = async () => {
+    const charSel = overlay.querySelector('[data-f="char_id"]');
+    const msgEl = overlay.querySelector('[data-f="message"]');
+    const charIdVal = charSel.value === "" ? null : Number(charSel.value);
+    const message = msgEl ? msgEl.value.trim() : "";
+    try {
+      await fetchJSON("/api/market/listings/" + l.id + "/ping", {
+        method: "POST",
+        body: JSON.stringify({ char_id: charIdVal, message }),
+      });
+      toast("ping enviado!", "ok");
+      overlay.remove();
+      loadMarket();
+    } catch (err) { toast(err.message, "err"); }
+  };
+}
+
+// Returns true if user already has nickname OR set one successfully.
+async function ensureNickname() {
+  if (state.user?.nickname) return true;
+  return await new Promise((resolve) => {
+    const overlay = document.createElement("div");
+    overlay.className = "fixed inset-0 bg-black/70 flex items-center justify-center z-50 p-3";
+    overlay.innerHTML =
+      '<div class="bg-panel border border-border rounded-xl p-5 w-full max-w-sm">' +
+        '<h3 class="text-sm uppercase tracking-widest text-muted mb-3">Escolha um apelido</h3>' +
+        '<p class="text-xs text-muted mb-3">No Mercado, outros usuários só veem seu apelido (não seu nome real). 2–20 caracteres, letras/números/_-.</p>' +
+        '<input data-nick type="text" maxlength="20" placeholder="ex.: daddyMU" class="w-full h-10 bg-bg border border-border rounded-md px-2 outline-none focus:border-gold/60" />' +
+        '<div data-err class="text-xs text-danger mt-1"></div>' +
+        '<div class="flex justify-end gap-2 mt-4">' +
+          '<button data-cancel class="px-3 py-1.5 rounded-md border border-border text-sm hover:bg-bg">cancelar</button>' +
+          '<button data-save class="gold-btn block px-4 rounded-md bg-gold text-bg font-semibold text-center border border-transparent hover:brightness-110">salvar</button>' +
+        '</div>' +
+      '</div>';
+    document.body.appendChild(overlay);
+    const input = overlay.querySelector("[data-nick]");
+    const errEl = overlay.querySelector("[data-err]");
+    input.focus();
+    overlay.querySelector("[data-cancel]").onclick = () => { overlay.remove(); resolve(false); };
+    const submit = async () => {
+      const v = input.value.trim();
+      if (!v) { errEl.textContent = "informe um apelido"; return; }
+      try {
+        const r = await fetchJSON("/api/me/nickname", { method: "POST", body: JSON.stringify({ nickname: v }) });
+        state.user.nickname = r.nickname;
+        toast("apelido definido!", "ok");
+        overlay.remove();
+        resolve(true);
+      } catch (err) { errEl.textContent = err.message; }
+    };
+    overlay.querySelector("[data-save]").onclick = submit;
+    input.addEventListener("keydown", (e) => { if (e.key === "Enter") submit(); });
+  });
+}
+
 // ---- Boot ----
 if (!localStorage.getItem(CONSENT_KEY)) showConsent();
 // Side-menu wiring (admin tab only shows for admins).
 $("nav-dashboard").onclick = () => setDashView("dashboard");
+if ($("nav-market")) $("nav-market").onclick = () => setDashView("market");
 if ($("nav-admin")) $("nav-admin").onclick = () => setDashView("admin");
+wireMarket();
 // User comparison (own characters)
 if ($("user-compare")) $("user-compare").onclick = async () => {
   const btn = $("user-compare");

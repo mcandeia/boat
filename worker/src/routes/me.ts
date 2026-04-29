@@ -39,8 +39,36 @@ export async function me(env: Env, userId: number): Promise<Response> {
       first_name: user.first_name,
       username: user.telegram_username,
       is_admin: !!user.admin,
+      nickname: user.nickname ?? null,
     },
     characters,
     subscriptions,
   });
+}
+
+const NICKNAME_RE = /^[A-Za-z0-9_\-\.]{2,20}$/;
+
+export async function setNickname(env: Env, userId: number, req: Request): Promise<Response> {
+  const body = (await req.json().catch(() => ({}))) as { nickname?: string };
+  const raw = (body.nickname ?? "").trim();
+  if (!NICKNAME_RE.test(raw)) {
+    return bad(400, "apelido deve ter 2–20 caracteres (letras, números, _ - .)");
+  }
+  // Case-insensitive uniqueness — let the unique index enforce it but
+  // give a friendly message when it collides.
+  const collision = await env.DB
+    .prepare("SELECT id FROM users WHERE nickname = ? COLLATE NOCASE AND id <> ?")
+    .bind(raw, userId)
+    .first<{ id: number }>();
+  if (collision) return bad(409, "apelido já está em uso");
+
+  try {
+    await env.DB
+      .prepare("UPDATE users SET nickname = ? WHERE id = ?")
+      .bind(raw, userId)
+      .run();
+  } catch (e) {
+    return bad(409, "apelido já está em uso");
+  }
+  return json({ ok: true, nickname: raw });
 }

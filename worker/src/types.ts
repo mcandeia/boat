@@ -30,6 +30,33 @@ export interface UserRow {
   first_name: string | null;
   created_at: number;
   admin: number;
+  nickname: string | null;
+}
+
+export type ListingSide = "buy" | "sell" | "donate";
+export type ListingStatus = "open" | "held" | "closed";
+
+export interface ListingRow {
+  id: number;
+  user_id: number;
+  char_id: number | null;
+  side: ListingSide;
+  item_name: string;
+  item_attrs: string | null;
+  currency: string | null;
+  price: number | null;
+  notes: string | null;
+  allow_message: number;
+  status: ListingStatus;
+  created_at: number;
+}
+
+export interface ListingCommentRow {
+  id: number;
+  listing_id: number;
+  user_id: number;
+  body: string;
+  created_at: number;
 }
 
 export interface PendingLoginRow {
