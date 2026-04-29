@@ -1,6 +1,15 @@
 import type { Env } from "./types";
 import { now } from "./util";
 
+// Mupatos origin. Defined at the very top of the module because
+// STATIC_ITEMS / setPieces / spriteUrl below all reference it during
+// the module's top-level initialization — a previous reorder put the
+// declaration further down and SHOP_BASE was in the TDZ when those
+// initializers ran, which silently produced "undefined/site/..." URLs
+// in the database.
+const SHOP_BASE = "https://mupatos.com.br";
+const SHOPS = ["shop-gold", "rarius", "rings-pendants"];
+
 // Items that aren't (always) in the mupatos shops but matter for
 // trading: jewels drop in-game, event tickets are transitive, common
 // pets/wings appear in player-to-player trades. Plus mid-tier armor
@@ -111,9 +120,6 @@ const STATIC_ITEMS: Array<{ slug: string; name: string; category: string; image_
 //                     <img class="img-fluid" src="/site/resources/.../X.webp" />
 //                     <a href="/site/shop/<shop>/<cat>/<item-slug>">+ detalhes</a>
 //                   </div>
-
-const SHOP_BASE = "https://mupatos.com.br";
-const SHOPS = ["shop-gold", "rarius", "rings-pendants"];
 
 const BROWSER_HEADERS: Record<string, string> = {
   "user-agent":
@@ -231,15 +237,16 @@ export async function refreshCatalog(env: Env): Promise<{ scraped: number; categ
   const scrapedBatch = all.map((it) => stmt.bind(it.slug, it.name, it.category, it.image_url, t));
   if (scrapedBatch.length > 0) await env.DB.batch(scrapedBatch);
 
-  // Seed the static fallback. Existing rows with NULL image_url get
-  // upgraded to the canonical sprite URL when we have one; rows that
-  // already have an image (real shop scrape, or a previously seeded
-  // sprite) are kept untouched via COALESCE.
+  // Seed the static fallback. Always overwrite image_url with whatever
+  // the array currently says — no COALESCE — because we've shipped at
+  // least one bad version of this seed (SHOP_BASE was in the TDZ at
+  // module init, persisting "undefined/..." URLs). Static slugs don't
+  // collide with shop-scraped slugs, so unconditional overwrite is safe.
   const seedStmt = env.DB.prepare(
     "INSERT INTO items (slug, name, category, image_url, updated_at) VALUES (?, ?, ?, ?, ?) " +
     "ON CONFLICT(slug) DO UPDATE SET " +
     "  name = excluded.name, category = excluded.category, " +
-    "  image_url = COALESCE(items.image_url, excluded.image_url), " +
+    "  image_url = excluded.image_url, " +
     "  updated_at = excluded.updated_at",
   );
   await env.DB.batch(STATIC_ITEMS.map((it) => seedStmt.bind(it.slug, it.name, it.category, it.image_url, t)));
@@ -265,12 +272,14 @@ export async function ensureCatalog(env: Env): Promise<{ count: number; seeded: 
     .prepare("SELECT 1 AS x FROM items WHERE category LIKE 'rings-pendants-%' LIMIT 1")
     .first<{ x: number }>();
   // After a deploy that adds sprite URLs to the static seed, existing
-  // rows still hold image_url=NULL. Use storm-crow-helm as a canary —
-  // if it's missing an image, we owe a re-seed.
+  // rows still hold image_url=NULL (or worse — "undefined/..." from a
+  // bad previous deploy). Use storm-crow-helm as a canary: refresh
+  // whenever its URL is missing or doesn't look like a real https URL.
   const canary = await env.DB
     .prepare("SELECT image_url FROM items WHERE slug = 'storm-crow-helm'")
     .first<{ image_url: string | null }>();
-  const needsSpriteRefresh = !canary || canary.image_url == null;
+  const canaryUrl = canary?.image_url ?? "";
+  const needsSpriteRefresh = !canaryUrl || !canaryUrl.startsWith("https://");
   if (n >= 50 && hasRarius && hasRings && !needsSpriteRefresh) return { count: n, seeded: false };
 
   await refreshCatalog(env);
