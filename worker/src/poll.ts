@@ -222,17 +222,23 @@ export async function pollServerEvents(env: Env): Promise<{ refreshed: boolean; 
   const subs = subsRes.results ?? [];
   if (subs.length === 0) return { refreshed, fired: 0 };
 
-  // Precompute user's max char level to tailor entry requirements in messages.
-  const maxLevelRes = await env.DB
+  // Per-user char list (name + level) so formatServerEventAlert can
+  // pick the BEST char for each event's tier instead of just suggesting
+  // a generic ticket bracket from the user's max-level char.
+  const charsRes = await env.DB
     .prepare(
-      `SELECT uc.user_id AS user_id, MAX(c.last_level) AS max_level
+      `SELECT uc.user_id AS user_id, c.name AS name, c.last_level AS level
          FROM user_characters uc
          JOIN characters c ON c.id = uc.character_id
-        GROUP BY uc.user_id`,
+        WHERE c.blocked = 0`,
     )
-    .all<{ user_id: number; max_level: number | null }>();
-  const maxLevelByUser = new Map<number, number | null>();
-  for (const r of maxLevelRes.results ?? []) maxLevelByUser.set(r.user_id, r.max_level);
+    .all<{ user_id: number; name: string; level: number | null }>();
+  const charsByUser = new Map<number, Array<{ name: string; level: number | null }>>();
+  for (const r of charsRes.results ?? []) {
+    const list = charsByUser.get(r.user_id) ?? [];
+    list.push({ name: r.name, level: r.level });
+    charsByUser.set(r.user_id, list);
+  }
 
   const cooldown = Number(env.COOLDOWN_SECONDS || "3600");
   const br = brNowParts(t);
@@ -256,7 +262,7 @@ export async function pollServerEvents(env: Env): Promise<{ refreshed: boolean; 
       name: parsed.name,
       room: parsed.room,
       leadMinutes: parsed.lead,
-      userMaxLevel: maxLevelByUser.get(sub.user_id) ?? null,
+      userChars: charsByUser.get(sub.user_id) ?? [],
       customMessage: sub.custom_message ?? null,
     });
     const send = await sendTelegram(env, sub.owner_chat_id, msg);
