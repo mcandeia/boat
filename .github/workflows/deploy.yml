@@ -61,10 +61,14 @@ jobs:
             SESSION_SECRET
             TELEGRAM_BOT_TOKEN
             TELEGRAM_WEBHOOK_SECRET
+            SHOP_SCRAPER_USERNAME
+            SHOP_SCRAPER_PASSWORD
         env:
           SESSION_SECRET: ${{ secrets.SESSION_SECRET }}
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_WEBHOOK_SECRET: ${{ secrets.TELEGRAM_WEBHOOK_SECRET }}
+          SHOP_SCRAPER_USERNAME: ${{ secrets.SHOP_SCRAPER_USERNAME }}
+          SHOP_SCRAPER_PASSWORD: ${{ secrets.SHOP_SCRAPER_PASSWORD }}
 
       # Idempotent: tells Telegram to deliver bot updates to our worker URL.
       # secret_token gets included in X-Telegram-Bot-Api-Secret-Token on every
