@@ -416,9 +416,12 @@ export const INDEX_HTML = /* html */ `<!doctype html>
           <div id="admin-msg" class="text-[11px] text-muted mt-2"></div>
 
           <div class="mt-5 pt-4 border-t border-border">
-            <div class="flex items-center justify-between gap-3 mb-2">
+            <div class="flex items-center justify-between gap-3 mb-2 flex-wrap">
               <h3 class="text-xs uppercase tracking-widest text-gold">Eventos do servidor</h3>
-              <span class="text-[11px] text-muted">scraped de mupatos.net (1×/h). Marca <b>Manual</b> pra travar o horário.</span>
+              <div class="flex items-center gap-2 flex-wrap">
+                <span class="text-[11px] text-muted">scraped de mupatos.net (1×/h). Marca <b>Manual</b> pra travar.</span>
+                <button id="admin-refresh-events" class="px-2 py-1 rounded-md border border-gold/40 text-goldsoft hover:bg-gold/10 transition text-xs">↻ atualizar agora</button>
+              </div>
             </div>
             <div class="overflow-x-auto">
               <table class="w-full text-xs">
@@ -2770,6 +2773,15 @@ if ($("admin-spawn-watchers")) $("admin-spawn-watchers").onclick = async (e) => 
   } catch (err) { toast(err.message, "err"); }
 };
 if ($("admin-health-refresh")) $("admin-health-refresh").onclick = () => loadAdminHealth();
+if ($("admin-new-custom-event")) $("admin-new-custom-event").onclick = () => openCustomEventForm(null);
+if ($("admin-refresh-events")) $("admin-refresh-events").onclick = async (e) => {
+  const btn = e.currentTarget;
+  try {
+    const r = await withSpinner(btn, () => fetchJSON("/api/admin/events/refresh", { method: "POST" }));
+    toast("eventos atualizados (" + r.entries + " entradas)", "ok");
+    loadAdminEvents();
+  } catch (err) { toast(err.message, "err"); }
+};
 
 // Admin actions dropdown (single entry point for admin operations).
 if ($("admin-actions-btn")) {

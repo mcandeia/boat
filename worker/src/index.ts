@@ -44,6 +44,7 @@ import {
   adminListCharSubs,
   adminListChars,
   adminListEvents,
+  adminRefreshEvents,
   adminPokeWatcher,
   adminRefreshChar,
   adminRefreshItems,
@@ -330,6 +331,7 @@ export default {
         const charPoke = pathname.match(/^\/api\/admin\/chars\/(\d+)\/poke$/);
         if (charPoke && method === "POST") return await adminPokeWatcher(env, Number(charPoke[1]));
         if (pathname === "/api/admin/events" && method === "GET") return await adminListEvents(env);
+        if (pathname === "/api/admin/events/refresh" && method === "POST") return await adminRefreshEvents(env);
         const evPatch = pathname.match(/^\/api\/admin\/events\/(\d+)$/);
         if (evPatch && method === "PATCH") return await adminUpdateEvent(env, Number(evPatch[1]), req);
       }

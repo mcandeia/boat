@@ -5,6 +5,7 @@ import { pollOnce } from "../poll";
 import { buildHistoryResponse } from "./characters";
 import { refreshCatalog } from "../items-scrape";
 import { pokeWatcher, spawnWatcher } from "../char-watcher";
+import { refreshServerEvents } from "../server-events";
 
 function normalizeItemSlug(name: string): string {
   // Keep this compatible with item `slug` style used across the app (kebab-case).
@@ -863,6 +864,19 @@ export async function adminListEvents(env: Env): Promise<Response> {
     )
     .all<AdminEventRow>();
   return json({ events: rs.results ?? [] });
+}
+
+// Force-refresh the scraped server events table — bypasses the 1h gate
+// in shouldRefreshServerEvents so admins can verify a parser fix
+// immediately. Manual-flagged rows keep their hand-edited schedule
+// (refreshServerEvents already ON CONFLICT-skips those).
+export async function adminRefreshEvents(env: Env): Promise<Response> {
+  try {
+    const r = await refreshServerEvents(env);
+    return json({ ok: true, ...r });
+  } catch (e) {
+    return bad(500, "refresh falhou: " + (e as Error).message);
+  }
 }
 
 // PATCH body: { schedule: "13:30,19:30,21:30", manual: true } — schedule
