@@ -349,14 +349,39 @@ export const INDEX_HTML = /* html */ `<!doctype html>
       <div id="admin-card" class="hidden bg-panel border border-gold/30 rounded-xl p-5">
           <div class="flex items-center justify-between gap-3 mb-3">
             <h2 class="text-xs uppercase tracking-widest text-gold">Admin</h2>
-            <div class="flex gap-2">
-              <button id="admin-compare" class="px-3 py-1.5 rounded-md border border-gold/40 text-goldsoft hover:bg-gold/10 transition text-xs">📈 Comparar</button>
-              <button id="admin-scrape-items" class="px-3 py-1.5 rounded-md border border-gold/40 text-goldsoft hover:bg-gold/10 transition text-xs">🛍️ Scrapear catálogo</button>
-              <button id="admin-wipe-items" class="px-3 py-1.5 rounded-md border border-danger/40 text-danger hover:bg-danger/10 transition text-xs">🧹 Wipe catálogo</button>
-              <button id="admin-import-item-rules" class="px-3 py-1.5 rounded-md border border-gold/40 text-goldsoft hover:bg-gold/10 transition text-xs">📦 Importar regras</button>
-              <button id="admin-scrape-shop-item" class="px-3 py-1.5 rounded-md border border-gold/40 text-goldsoft hover:bg-gold/10 transition text-xs">🕸️ Importar da loja</button>
-              <button id="admin-backfill-item-rules" class="px-3 py-1.5 rounded-md border border-gold/40 text-goldsoft hover:bg-gold/10 transition text-xs">🧩 Backfill attrs</button>
-              <button id="admin-poll" class="gold-btn block px-3 rounded-md bg-gold text-bg font-semibold text-center border border-transparent hover:brightness-110 transition text-xs">Rodar cron agora</button>
+            <div class="relative flex items-center justify-end gap-2 w-full max-w-5xl">
+              <button id="admin-actions-btn" class="h-9 inline-flex items-center justify-center px-3 rounded-md border border-gold/40 text-goldsoft hover:bg-gold/10 transition text-xs whitespace-nowrap">
+                ⚙️ Ações <span class="ml-1 text-[10px] opacity-80">▼</span>
+              </button>
+              <div id="admin-actions-menu" class="hidden absolute right-0 top-[calc(100%+0.5rem)] w-[min(92vw,360px)] rounded-xl border border-border bg-panel shadow-lg overflow-hidden z-20">
+                <div class="px-3 py-2 text-[10px] uppercase tracking-widest text-muted border-b border-border/60">Catálogo</div>
+                <button data-admin-action="scrape" class="w-full text-left px-3 py-2 text-xs hover:bg-bg/60">🛍️ Scrapear catálogo</button>
+                <button data-admin-action="wipe" class="w-full text-left px-3 py-2 text-xs hover:bg-bg/60 text-danger">🧹 Wipe catálogo</button>
+
+                <div class="px-3 py-2 text-[10px] uppercase tracking-widest text-muted border-t border-border/60 border-b border-border/60">Regras / attrs</div>
+                <button data-admin-action="import-rules" class="w-full text-left px-3 py-2 text-xs hover:bg-bg/60">📦 Importar regras</button>
+                <button data-admin-action="import-shop" class="w-full text-left px-3 py-2 text-xs hover:bg-bg/60">🕸️ Importar da loja</button>
+                <button data-admin-action="backfill" class="w-full text-left px-3 py-2 text-xs hover:bg-bg/60">🧩 Backfill attrs</button>
+
+                <div class="px-3 py-2 text-[10px] uppercase tracking-widest text-muted border-t border-border/60 border-b border-border/60">Watchers / cron</div>
+                <button data-admin-action="spawn-watchers" class="w-full text-left px-3 py-2 text-xs hover:bg-bg/60">🤖 Spawn watchers</button>
+                <button data-admin-action="poll" class="w-full text-left px-3 py-2 text-xs hover:bg-bg/60 font-semibold text-goldsoft">⏱️ Rodar cron agora</button>
+
+                <div class="px-3 py-2 text-[10px] uppercase tracking-widest text-muted border-t border-border/60 border-b border-border/60">Ferramentas</div>
+                <button data-admin-action="compare" class="w-full text-left px-3 py-2 text-xs hover:bg-bg/60">📈 Comparar</button>
+              </div>
+
+              <!-- Hidden buttons to reuse existing handlers -->
+              <div class="hidden">
+                <button id="admin-compare">comparar</button>
+                <button id="admin-scrape-items">scrape</button>
+                <button id="admin-wipe-items">wipe</button>
+                <button id="admin-import-item-rules">import rules</button>
+                <button id="admin-scrape-shop-item">import shop</button>
+                <button id="admin-backfill-item-rules">backfill</button>
+                <button id="admin-spawn-watchers">spawn watchers</button>
+                <button id="admin-poll">poll</button>
+              </div>
             </div>
           </div>
           <div id="admin-comparison-chart" class="hidden mb-6 bg-bg/50 p-4 rounded-xl border border-border"></div>
@@ -2737,7 +2762,54 @@ if ($("admin-backfill-item-rules")) $("admin-backfill-item-rules").onclick = asy
     }
   } catch (err) { toast(err.message, "err"); }
 };
+if ($("admin-spawn-watchers")) $("admin-spawn-watchers").onclick = async (e) => {
+  const btn = e.currentTarget;
+  try {
+    const r = await withSpinner(btn, () => fetchJSON("/api/admin/watchers/spawn-all", { method: "POST" }));
+    toast("watchers: " + r.spawned + " ok / " + r.failed + " falhas (" + r.total + " chars)", "ok");
+  } catch (err) { toast(err.message, "err"); }
+};
 if ($("admin-health-refresh")) $("admin-health-refresh").onclick = () => loadAdminHealth();
+
+// Admin actions dropdown (single entry point for admin operations).
+if ($("admin-actions-btn")) {
+  const btn = $("admin-actions-btn");
+  const menu = $("admin-actions-menu");
+  const hide = () => menu.classList.add("hidden");
+  const toggle = () => menu.classList.toggle("hidden");
+
+  btn.onclick = (e) => { e.preventDefault(); e.stopPropagation(); toggle(); };
+
+  document.addEventListener("click", (e) => {
+    if (menu.classList.contains("hidden")) return;
+    const t = e.target;
+    if (t === btn || (btn && btn.contains(t))) return;
+    if (menu && menu.contains(t)) return;
+    hide();
+  });
+  document.addEventListener("keydown", (e) => { if (e.key === "Escape") hide(); });
+
+  const map = {
+    compare: "admin-compare",
+    scrape: "admin-scrape-items",
+    wipe: "admin-wipe-items",
+    "import-rules": "admin-import-item-rules",
+    "import-shop": "admin-scrape-shop-item",
+    backfill: "admin-backfill-item-rules",
+    "spawn-watchers": "admin-spawn-watchers",
+    poll: "admin-poll",
+  };
+  menu.querySelectorAll("[data-admin-action]").forEach((el) => {
+    el.onclick = () => {
+      const a = el.getAttribute("data-admin-action");
+      hide();
+      const id = map[a];
+      const b = id ? $(id) : null;
+      if (b) b.click();
+      else toast("ação não encontrada: " + a, "err");
+    };
+  });
+}
 
 async function loadAdminEvents() {
   const tbody = $("admin-events");
