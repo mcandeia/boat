@@ -305,6 +305,16 @@ export const INDEX_HTML = /* html */ `<!doctype html>
             </details>
           </div>
         </div>
+
+        <div class="bg-panel border border-border rounded-xl p-5">
+          <h2 class="text-xs uppercase tracking-widest text-muted mb-3">🎉 Eventos GM</h2>
+          <div id="user-custom-events" class="space-y-2"></div>
+          <div class="mt-4 pt-4 border-t border-border">
+            <h3 class="text-xs uppercase tracking-widest text-muted mb-2">Avisar em qualquer evento que dropa…</h3>
+            <p class="text-[11px] text-muted mb-3">Receba ping em todo evento GM cujo prêmio inclua o tipo selecionado, sem precisar marcar um por um.</p>
+            <div id="user-gift-subs" class="flex flex-wrap gap-2 items-center"></div>
+          </div>
+        </div>
       </div>
 
       <!-- Market panel -->
@@ -392,6 +402,15 @@ export const INDEX_HTML = /* html */ `<!doctype html>
                 <tbody id="admin-events"></tbody>
               </table>
             </div>
+          </div>
+
+          <!-- Admin: custom (GM) events -->
+          <div class="mt-5 pt-4 border-t border-border">
+            <div class="flex items-center justify-between gap-3 mb-2 flex-wrap">
+              <h3 class="text-xs uppercase tracking-widest text-gold">Eventos GM (customizados)</h3>
+              <button id="admin-new-custom-event" class="gold-btn inline-flex items-center px-3 rounded-md bg-gold text-bg font-semibold text-xs border border-transparent hover:brightness-110">+ novo evento</button>
+            </div>
+            <div id="admin-custom-events" class="space-y-2"></div>
           </div>
         </div>
       </div> <!-- /main content -->
@@ -723,7 +742,10 @@ function renderDash() {
     loadAdminHealth();
     loadAdminChars();
     loadAdminEvents();
+    loadAdminCustomEvents();
   }
+  loadUserCustomEvents();
+  loadUserGiftSubs();
 
   // Initial tab on load: ?market=N from a Telegram link wins, else the
   // last persisted choice, else the dashboard.
@@ -2496,6 +2518,7 @@ if ($("admin-spawn-watchers")) $("admin-spawn-watchers").onclick = async (e) => 
   } catch (err) { toast(err.message, "err"); }
 };
 if ($("admin-health-refresh")) $("admin-health-refresh").onclick = () => loadAdminHealth();
+if ($("admin-new-custom-event")) $("admin-new-custom-event").onclick = () => openCustomEventForm(null);
 
 async function loadAdminEvents() {
   const tbody = $("admin-events");
@@ -2539,6 +2562,346 @@ function wireAdminEventRow(ev) {
       toast("evento atualizado", "ok");
       loadAdminEvents();
     } catch (e) { toast(e.message, "err"); }
+  };
+}
+
+// ---- Custom (GM) events ----
+
+function fmtGiftsPretty(giftsJson) {
+  if (!giftsJson) return "";
+  try {
+    const arr = JSON.parse(giftsJson);
+    return arr.map((g) => {
+      if (g.kind === "rarius" && g.qty != null) return "🪙 " + g.qty + " rarius";
+      if (g.kind === "kundun" && g.tier != null) return "📦 Box of Kundun +" + g.tier;
+      if (g.kind === "custom" && g.name) return "⚔️ " + g.name;
+      return "";
+    }).filter(Boolean).join(" · ");
+  } catch { return ""; }
+}
+
+function fmtCustomEventSchedule(ev) {
+  if (ev.schedule_type === "once" && ev.schedule_at) {
+    const d = new Date(ev.schedule_at * 1000);
+    return d.toLocaleString("pt-BR", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" });
+  }
+  if (ev.schedule_type === "daily") return "diário " + (ev.schedule_time || "?");
+  if (ev.schedule_type === "weekly") {
+    const days = ["dom", "seg", "ter", "qua", "qui", "sex", "sáb"];
+    return (days[ev.schedule_dow] || "?") + " " + (ev.schedule_time || "?");
+  }
+  return "—";
+}
+
+async function loadUserCustomEvents() {
+  const list = $("user-custom-events");
+  if (!list) return;
+  list.innerHTML = '<div class="text-xs text-muted">carregando...</div>';
+  try {
+    const data = await fetchJSON("/api/custom-events");
+    const events = data.events || [];
+    if (events.length === 0) {
+      list.innerHTML = '<div class="text-xs text-muted py-2">nenhum evento ativo. quando os admins cadastrarem, aparece aqui.</div>';
+      return;
+    }
+    list.innerHTML = "";
+    for (const ev of events) {
+      if (!ev.active) continue;
+      const item = document.createElement("div");
+      item.className = "rounded-md border border-border bg-bg/40 px-3 py-2 flex items-start justify-between gap-3 flex-wrap";
+      const giftsHtml = fmtGiftsPretty(ev.gifts);
+      const left = '<div class="min-w-0 flex-1">' +
+        '<div class="text-sm font-semibold text-slate-100">' + escapeHtml(ev.name) + '</div>' +
+        '<div class="text-[11px] text-muted">⏰ ' + escapeHtml(fmtCustomEventSchedule(ev)) +
+          (ev.gm_name ? ' · 👤 ' + escapeHtml(ev.gm_name) : '') + '</div>' +
+        (giftsHtml ? '<div class="text-xs text-slate-300 mt-0.5">' + escapeHtml(giftsHtml) + '</div>' : '') +
+        (ev.description ? '<div class="text-[11px] text-muted mt-1 whitespace-pre-wrap">' + escapeHtml(ev.description) + '</div>' : '') +
+        '</div>';
+      const right = '<div class="flex items-center gap-2 shrink-0">' +
+        '<input type="number" min="0" max="1440" value="' + (ev.sub_lead_minutes ?? 5) + '" data-lead class="w-16 h-8 bg-bg border border-border rounded-md px-1.5 text-xs tabular-nums" />' +
+        '<span class="text-[11px] text-muted">min antes</span>' +
+        '<button data-action="' + (ev.subscribed ? 'unsub' : 'sub') + '" class="text-xs px-2 py-1 rounded ' +
+          (ev.subscribed ? 'border border-emerald-500/40 text-emerald-300 hover:bg-emerald-500/10' : 'bg-gold text-bg font-semibold hover:brightness-110') +
+          '">' + (ev.subscribed ? '✓ inscrito' : '🔔 me avise') + '</button>' +
+        '</div>';
+      item.innerHTML = left + right;
+      const btn = item.querySelector("[data-action]");
+      const lead = item.querySelector("[data-lead]");
+      btn.onclick = async () => {
+        const leadVal = Number(lead.value) || 5;
+        try {
+          if (btn.getAttribute("data-action") === "sub") {
+            await fetchJSON("/api/custom-events/" + ev.id + "/subscribe", {
+              method: "POST",
+              body: JSON.stringify({ lead_minutes: leadVal }),
+            });
+            toast("inscrito", "ok");
+          } else {
+            await fetchJSON("/api/custom-events/" + ev.id + "/subscribe", { method: "DELETE" });
+            toast("inscrição removida", "ok");
+          }
+          loadUserCustomEvents();
+        } catch (e) { toast(e.message, "err"); }
+      };
+      list.appendChild(item);
+    }
+  } catch (e) {
+    list.innerHTML = '<div class="text-xs text-danger">' + escapeHtml(e.message) + '</div>';
+  }
+}
+
+async function loadUserGiftSubs() {
+  const cont = $("user-gift-subs");
+  if (!cont) return;
+  try {
+    const data = await fetchJSON("/api/me/gift-subs");
+    const subs = new Map((data.gift_subs || []).map((s) => [s.gift_kind, s]));
+    cont.innerHTML = "";
+    const KINDS = [
+      { v: "rarius", l: "🪙 rarius" },
+      { v: "kundun", l: "📦 kundun" },
+      { v: "custom", l: "⚔️ custom" },
+      { v: "any",    l: "🎁 qualquer" },
+    ];
+    for (const k of KINDS) {
+      const sub = subs.get(k.v);
+      const active = !!sub;
+      const btn = document.createElement("button");
+      btn.className = "text-xs px-2 py-1 rounded border " +
+        (active ? "border-goldsoft text-goldsoft bg-gold/10" : "border-border text-muted hover:text-slate-200");
+      btn.textContent = k.l + (active ? " · " + sub.lead_minutes + "min" : "");
+      btn.onclick = async () => {
+        if (active) {
+          try {
+            await fetchJSON("/api/me/gift-subs/" + k.v, { method: "DELETE" });
+            toast("removido", "ok");
+            loadUserGiftSubs();
+          } catch (e) { toast(e.message, "err"); }
+        } else {
+          const v = window.prompt("Quantos minutos antes te avisar? (0–1440)", "5");
+          if (v == null) return;
+          const lead = Number(v);
+          if (!Number.isInteger(lead) || lead < 0 || lead > 1440) { toast("valor inválido", "err"); return; }
+          try {
+            await fetchJSON("/api/me/gift-subs", {
+              method: "POST",
+              body: JSON.stringify({ gift_kind: k.v, lead_minutes: lead }),
+            });
+            toast("inscrito", "ok");
+            loadUserGiftSubs();
+          } catch (e) { toast(e.message, "err"); }
+        }
+      };
+      cont.appendChild(btn);
+    }
+  } catch (e) {
+    cont.innerHTML = '<div class="text-xs text-danger">' + escapeHtml(e.message) + '</div>';
+  }
+}
+
+// ---- Admin custom events ----
+
+async function loadAdminCustomEvents() {
+  const cont = $("admin-custom-events");
+  if (!cont) return;
+  cont.innerHTML = '<div class="text-xs text-muted">carregando...</div>';
+  try {
+    const data = await fetchJSON("/api/custom-events");
+    const events = data.events || [];
+    if (events.length === 0) {
+      cont.innerHTML = '<div class="text-xs text-muted py-2">nenhum evento. crie um em "+ novo evento".</div>';
+      return;
+    }
+    cont.innerHTML = "";
+    for (const ev of events) {
+      const row = document.createElement("div");
+      row.className = "rounded-md border border-border bg-bg/40 px-3 py-2 flex items-start justify-between gap-3 flex-wrap";
+      const giftsHtml = fmtGiftsPretty(ev.gifts);
+      row.innerHTML =
+        '<div class="min-w-0 flex-1">' +
+          '<div class="text-sm font-semibold text-slate-100">' + escapeHtml(ev.name) + (ev.active ? '' : ' <span class="text-[10px] text-muted">(inativo)</span>') + '</div>' +
+          '<div class="text-[11px] text-muted">⏰ ' + escapeHtml(fmtCustomEventSchedule(ev)) +
+            (ev.gm_name ? ' · 👤 ' + escapeHtml(ev.gm_name) : '') +
+            ' · ' + ev.sub_count + ' inscritos' + '</div>' +
+          (giftsHtml ? '<div class="text-xs text-slate-300 mt-0.5">' + escapeHtml(giftsHtml) + '</div>' : '') +
+          (ev.description ? '<div class="text-[11px] text-muted mt-1 whitespace-pre-wrap">' + escapeHtml(ev.description) + '</div>' : '') +
+        '</div>' +
+        '<div class="flex items-center gap-2 shrink-0">' +
+          '<button data-action="edit" class="text-xs px-2 py-1 rounded border border-border text-muted hover:text-slate-200">editar</button>' +
+          '<button data-action="delete" class="text-xs px-2 py-1 rounded border border-border text-danger hover:bg-danger/10">remover</button>' +
+        '</div>';
+      row.querySelector('[data-action="edit"]').onclick = () => openCustomEventForm(ev);
+      row.querySelector('[data-action="delete"]').onclick = async () => {
+        if (!await confirmModal('Remover evento "' + ev.name + '"?', { okLabel: "Remover", danger: true })) return;
+        try {
+          await fetchJSON("/api/admin/custom-events/" + ev.id, { method: "DELETE" });
+          toast("evento removido", "ok");
+          loadAdminCustomEvents();
+        } catch (e) { toast(e.message, "err"); }
+      };
+      cont.appendChild(row);
+    }
+  } catch (e) {
+    cont.innerHTML = '<div class="text-xs text-danger">' + escapeHtml(e.message) + '</div>';
+  }
+}
+
+function openCustomEventForm(existing) {
+  const isEdit = existing && existing.id;
+  const overlay = document.createElement("div");
+  overlay.className = "fixed inset-0 bg-black/70 flex items-start sm:items-center justify-center z-50 p-3 overflow-y-auto";
+  let gifts = [];
+  if (isEdit && existing.gifts) {
+    try { gifts = JSON.parse(existing.gifts) || []; } catch {}
+  }
+  const dows = ["domingo","segunda","terça","quarta","quinta","sexta","sábado"];
+  // Convert schedule_at to a datetime-local string in the user's TZ.
+  let dtLocal = "";
+  if (isEdit && existing.schedule_type === "once" && existing.schedule_at) {
+    const d = new Date(existing.schedule_at * 1000);
+    const pad = (n) => String(n).padStart(2, "0");
+    dtLocal = d.getFullYear() + "-" + pad(d.getMonth() + 1) + "-" + pad(d.getDate()) + "T" + pad(d.getHours()) + ":" + pad(d.getMinutes());
+  }
+  overlay.innerHTML =
+    '<div class="bg-panel border border-border rounded-xl p-5 w-full max-w-lg my-4">' +
+      '<h3 class="text-sm uppercase tracking-widest text-muted mb-3">' + (isEdit ? "Editar evento GM" : "Novo evento GM") + '</h3>' +
+      '<div class="space-y-3 text-sm">' +
+        '<div><label class="text-[11px] text-muted block mb-1">Nome</label>' +
+          '<input data-f="name" maxlength="80" placeholder="ex.: Find the GM" class="w-full h-10 bg-bg border border-border rounded-md px-2" value="' + (isEdit ? escapeHtml(existing.name) : "") + '" /></div>' +
+        '<div><label class="text-[11px] text-muted block mb-1">GM (opcional)</label>' +
+          '<input data-f="gm_name" maxlength="40" placeholder="ex.: GM Daddy" class="w-full h-10 bg-bg border border-border rounded-md px-2" value="' + (isEdit && existing.gm_name ? escapeHtml(existing.gm_name) : "") + '" /></div>' +
+        '<div><label class="text-[11px] text-muted block mb-1">Descrição (opcional)</label>' +
+          '<textarea data-f="description" rows="2" maxlength="1000" placeholder="qualquer detalhe..." class="w-full bg-bg border border-border rounded-md px-2 py-1.5">' + (isEdit && existing.description ? escapeHtml(existing.description) : "") + '</textarea></div>' +
+        '<div><label class="text-[11px] text-muted block mb-1">Prêmios</label>' +
+          '<div data-gifts class="space-y-1.5"></div>' +
+          '<div class="flex gap-2 mt-2">' +
+            '<button type="button" data-add-gift="rarius" class="text-xs px-2 py-1 rounded border border-border hover:bg-bg/60">+ rarius</button>' +
+            '<button type="button" data-add-gift="kundun" class="text-xs px-2 py-1 rounded border border-border hover:bg-bg/60">+ kundun</button>' +
+            '<button type="button" data-add-gift="custom" class="text-xs px-2 py-1 rounded border border-border hover:bg-bg/60">+ outro</button>' +
+          '</div></div>' +
+        '<div><label class="text-[11px] text-muted block mb-1">Quando</label>' +
+          '<div class="flex gap-3 text-xs mb-2">' +
+            ['once','daily','weekly'].map((v) => {
+              const checked = (isEdit ? existing.schedule_type === v : v === "daily") ? " checked" : "";
+              const label = v === "once" ? "uma vez" : v === "daily" ? "diário" : "semanal";
+              return '<label class="inline-flex items-center gap-1"><input type="radio" name="ce-sched" data-f="schedule_type" value="' + v + '"' + checked + ' class="accent-gold" /> ' + label + '</label>';
+            }).join("") +
+          '</div>' +
+          '<div data-sched-once class="hidden">' +
+            '<input data-f="schedule_at" type="datetime-local" class="w-full h-10 bg-bg border border-border rounded-md px-2" value="' + dtLocal + '" />' +
+          '</div>' +
+          '<div data-sched-daily class="hidden grid grid-cols-2 gap-2">' +
+            '<div><label class="text-[10px] text-muted block">Hora (HH:MM)</label>' +
+              '<input data-f="schedule_time" type="time" class="w-full h-10 bg-bg border border-border rounded-md px-2" value="' + (isEdit && existing.schedule_time ? escapeHtml(existing.schedule_time) : "") + '" /></div>' +
+          '</div>' +
+          '<div data-sched-weekly class="hidden grid grid-cols-2 gap-2">' +
+            '<div><label class="text-[10px] text-muted block">Dia da semana</label>' +
+              '<select data-f="schedule_dow" class="w-full h-10 bg-bg border border-border rounded-md px-2">' +
+                dows.map((d, i) => '<option value="' + i + '"' + (isEdit && existing.schedule_dow === i ? " selected" : "") + '>' + d + '</option>').join("") +
+              '</select></div>' +
+            '<div><label class="text-[10px] text-muted block">Hora (HH:MM)</label>' +
+              '<input data-f="schedule_time_w" type="time" class="w-full h-10 bg-bg border border-border rounded-md px-2" value="' + (isEdit && existing.schedule_time ? escapeHtml(existing.schedule_time) : "") + '" /></div>' +
+          '</div>' +
+        '</div>' +
+        '<label class="inline-flex items-center gap-2 text-xs"><input data-f="active" type="checkbox" class="accent-gold"' + ((!isEdit || existing.active) ? " checked" : "") + ' /> ativo</label>' +
+      '</div>' +
+      '<div class="flex justify-end gap-2 mt-4">' +
+        '<button data-cancel class="px-3 py-1.5 rounded-md border border-border text-sm hover:bg-bg">cancelar</button>' +
+        '<button data-save class="gold-btn inline-flex items-center px-4 rounded-md bg-gold text-bg font-semibold border border-transparent hover:brightness-110">' + (isEdit ? "salvar" : "criar") + '</button>' +
+      '</div>' +
+    '</div>';
+  document.body.appendChild(overlay);
+
+  const giftsBox = overlay.querySelector("[data-gifts]");
+  function renderGifts() {
+    giftsBox.innerHTML = "";
+    gifts.forEach((g, i) => {
+      const row = document.createElement("div");
+      row.className = "flex items-center gap-2";
+      let inner = "";
+      if (g.kind === "rarius") {
+        inner = '<span class="text-xs w-16 text-muted">🪙 rarius</span>' +
+          '<input type="number" min="1" max="100000" value="' + (g.qty ?? "") + '" placeholder="qtd" data-gi="qty" class="flex-1 h-9 bg-bg border border-border rounded-md px-2 text-sm" />';
+      } else if (g.kind === "kundun") {
+        inner = '<span class="text-xs w-16 text-muted">📦 kundun</span>' +
+          '<select data-gi="tier" class="flex-1 h-9 bg-bg border border-border rounded-md px-2 text-sm">' +
+            [1,2,3,4,5].map((t) => '<option value="' + t + '"' + (g.tier === t ? " selected" : "") + '>+' + t + '</option>').join("") +
+          '</select>';
+      } else {
+        inner = '<span class="text-xs w-16 text-muted">⚔️ outro</span>' +
+          '<input type="text" maxlength="60" value="' + escapeHtml(g.name || "") + '" placeholder="ex.: Cape of Lord" data-gi="name" class="flex-1 h-9 bg-bg border border-border rounded-md px-2 text-sm" />';
+      }
+      row.innerHTML = inner + '<button type="button" data-rm="' + i + '" class="text-muted hover:text-danger px-1">×</button>';
+      row.querySelectorAll("[data-gi]").forEach((el) => {
+        el.addEventListener("input", () => {
+          const k = el.getAttribute("data-gi");
+          if (k === "qty") g.qty = Number(el.value) || 0;
+          else if (k === "tier") g.tier = Number(el.value) || 1;
+          else if (k === "name") g.name = el.value;
+        });
+      });
+      row.querySelector("[data-rm]").onclick = () => { gifts.splice(i, 1); renderGifts(); };
+      giftsBox.appendChild(row);
+    });
+  }
+  renderGifts();
+  overlay.querySelectorAll("[data-add-gift]").forEach((b) => {
+    b.onclick = () => {
+      const k = b.getAttribute("data-add-gift");
+      if (k === "rarius") gifts.push({ kind: "rarius", qty: 1 });
+      else if (k === "kundun") gifts.push({ kind: "kundun", tier: 1 });
+      else gifts.push({ kind: "custom", name: "" });
+      renderGifts();
+    };
+  });
+
+  const onceBox = overlay.querySelector("[data-sched-once]");
+  const dailyBox = overlay.querySelector("[data-sched-daily]");
+  const weeklyBox = overlay.querySelector("[data-sched-weekly]");
+  const syncSched = () => {
+    const v = (overlay.querySelector('input[name="ce-sched"]:checked') || {}).value || "daily";
+    onceBox.classList.toggle("hidden", v !== "once");
+    dailyBox.classList.toggle("hidden", v !== "daily");
+    weeklyBox.classList.toggle("hidden", v !== "weekly");
+  };
+  overlay.querySelectorAll('input[name="ce-sched"]').forEach((r) => r.addEventListener("change", syncSched));
+  syncSched();
+
+  overlay.querySelector("[data-cancel]").onclick = () => overlay.remove();
+  overlay.querySelector("[data-save]").onclick = async (e) => {
+    const get = (k) => overlay.querySelector('[data-f="' + k + '"]');
+    const sched = (overlay.querySelector('input[name="ce-sched"]:checked') || {}).value || "daily";
+    const payload = {
+      name: get("name").value.trim(),
+      gm_name: get("gm_name").value.trim() || null,
+      description: get("description").value.trim() || null,
+      gifts,
+      schedule_type: sched,
+      active: get("active").checked,
+    };
+    if (sched === "once") {
+      const v = get("schedule_at").value;
+      if (!v) { toast("informe a data/hora", "err"); return; }
+      payload.schedule_at = Math.floor(new Date(v).getTime() / 1000);
+    } else if (sched === "daily") {
+      payload.schedule_time = get("schedule_time").value;
+    } else if (sched === "weekly") {
+      payload.schedule_time = get("schedule_time_w").value;
+      payload.schedule_dow = Number(get("schedule_dow").value);
+    }
+    if (!payload.name) { toast("informe o nome", "err"); return; }
+    try {
+      await withSpinner(e.currentTarget, async () => {
+        if (isEdit) {
+          await fetchJSON("/api/admin/custom-events/" + existing.id, { method: "PATCH", body: JSON.stringify(payload) });
+        } else {
+          await fetchJSON("/api/admin/custom-events", { method: "POST", body: JSON.stringify(payload) });
+        }
+      });
+      toast(isEdit ? "evento atualizado" : "evento criado", "ok");
+      overlay.remove();
+      loadAdminCustomEvents();
+    } catch (err) { toast(err.message, "err"); }
   };
 }
 

@@ -278,3 +278,37 @@ export function formatServerEventAlert(opts: {
   return `📣 <b>${name}</b> (${room}) começa em <b>${lead} min</b>.${extra}`;
 }
 
+// Format an admin-managed custom event (GM event etc) for Telegram.
+// Schedule is already evaluated by the cron — this is just rendering.
+export function formatCustomEventAlert(opts: {
+  name: string;
+  gmName?: string | null;
+  description?: string | null;
+  gifts?: string | null;     // JSON array
+  leadMinutes: number;
+  scheduleHuman?: string | null;  // e.g. "diário 20:00", "sáb 21:00", "30/04 19:00"
+}): string {
+  const name = escHtml(opts.name);
+  const lead = Number(opts.leadMinutes) || 0;
+
+  let giftsLine = "";
+  if (opts.gifts) {
+    try {
+      const arr = JSON.parse(opts.gifts) as Array<{ kind?: string; qty?: number; tier?: number; name?: string }>;
+      const parts: string[] = [];
+      for (const g of arr) {
+        if (g.kind === "rarius" && g.qty != null) parts.push(`🪙 <b>${g.qty}</b> rarius`);
+        else if (g.kind === "kundun" && g.tier != null) parts.push(`📦 Box of Kundun +<b>${g.tier}</b>`);
+        else if (g.kind === "custom" && g.name) parts.push(`⚔️ ${escHtml(g.name)}`);
+      }
+      if (parts.length > 0) giftsLine = "\n🎁 Prêmios: " + parts.join(" · ");
+    } catch { /* ignore */ }
+  }
+
+  const gmLine = opts.gmName ? `\n👤 GM: <b>${escHtml(opts.gmName)}</b>` : "";
+  const descLine = opts.description ? `\n📝 ${escHtml(opts.description)}` : "";
+  const whenLine = opts.scheduleHuman ? `\n⏰ Quando: <b>${escHtml(opts.scheduleHuman)}</b>` : "";
+
+  return `🎉 <b>Evento GM: ${name}</b> começa em <b>${lead} min</b>.${gmLine}${giftsLine}${descLine}${whenLine}`;
+}
+

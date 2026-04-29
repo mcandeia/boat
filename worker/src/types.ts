@@ -67,6 +67,44 @@ export interface ListingCommentRow {
   created_at: number;
 }
 
+export type CustomEventScheduleType = "once" | "daily" | "weekly";
+
+export interface CustomEventRow {
+  id: number;
+  name: string;
+  gm_name: string | null;
+  description: string | null;
+  gifts: string | null;          // JSON array
+  schedule_type: CustomEventScheduleType;
+  schedule_at: number | null;    // unix seconds (UTC) for 'once'
+  schedule_time: string | null;  // "HH:MM" BR-local for 'daily' and 'weekly'
+  schedule_dow: number | null;   // 0..6 (Sun..Sat) for 'weekly'
+  active: number;
+  created_by: number | null;
+  created_at: number;
+  updated_at: number;
+}
+
+export interface CustomEventSubRow {
+  id: number;
+  custom_event_id: number;
+  user_id: number;
+  lead_minutes: number;
+  last_fired_at: number | null;
+  cooldown_until: number;
+  created_at: number;
+}
+
+export type GiftKind = "rarius" | "kundun" | "custom" | "any";
+
+export interface CustomEventGiftSubRow {
+  id: number;
+  user_id: number;
+  gift_kind: GiftKind;
+  lead_minutes: number;
+  created_at: number;
+}
+
 export interface PendingLoginRow {
   token: string;
   created_at: number;

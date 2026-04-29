@@ -1,8 +1,8 @@
-import type { CharacterRow, Env, ProfileSnapshot, SubscriptionRow } from "./types";
+import type { CharacterRow, CustomEventRow, Env, ProfileSnapshot, SubscriptionRow } from "./types";
 import { parseMap, scrapeOne } from "./scraper";
 import { now } from "./util";
 import { sendTelegram } from "./telegram";
-import { formatAlert, formatServerEventAlert } from "./messages";
+import { formatAlert, formatCustomEventAlert, formatServerEventAlert } from "./messages";
 import { classCodeFor, fetchRankings, findRank, type RankingMap } from "./rankings";
 import {
   brNowParts,
@@ -278,6 +278,210 @@ export async function pollServerEvents(env: Env): Promise<{ refreshed: boolean; 
   }
 
   return { refreshed, fired };
+}
+
+// ---- Custom (admin-managed) events ----------------------------------
+//
+// These are first-class rows in `custom_events` (e.g. "Find the GM"
+// daily 20:00) that users opt into via custom_event_subs with a
+// per-sub lead_minutes. The cron tick walks every active event and
+// fires Telegram for each sub whose (event_time - lead) hits the
+// current minute.
+
+type CustomEventSubAndOwner = {
+  sub_id: number;
+  user_id: number;
+  lead_minutes: number;
+  cooldown_until: number;
+  last_fired_at: number | null;
+  owner_chat_id: number;
+  // event fields
+  id: number;
+  name: string;
+  gm_name: string | null;
+  description: string | null;
+  gifts: string | null;
+  schedule_type: string;
+  schedule_at: number | null;
+  schedule_time: string | null;
+  schedule_dow: number | null;
+};
+
+// Returns true iff `(eventFireMin - leadMinutes)` matches the current
+// BR-local minute (using the event's schedule_type rules). Mirrors
+// shouldFireServerAlert — minute-resolution since cron runs every minute.
+function shouldFireCustomEvent(
+  ev: CustomEventRow,
+  leadMin: number,
+  nowSecs: number,
+): boolean {
+  if (ev.schedule_type === "once") {
+    if (ev.schedule_at == null) return false;
+    const target = ev.schedule_at - leadMin * 60;
+    return Math.abs(target - nowSecs) < 30;  // within the current minute
+  }
+  if (!ev.schedule_time) return false;
+  const m = ev.schedule_time.match(/^(\d{1,2}):(\d{2})$/);
+  if (!m) return false;
+  const h = Number(m[1]); const mm = Number(m[2]);
+  if (!Number.isFinite(h) || !Number.isFinite(mm)) return false;
+  const br = brNowParts(nowSecs);
+  if (ev.schedule_type === "weekly") {
+    if (ev.schedule_dow == null || br.weekday !== ev.schedule_dow) return false;
+  }
+  let alertMin = h * 60 + mm - leadMin;
+  if (alertMin < 0) alertMin += 1440;
+  alertMin %= 1440;
+  return alertMin === br.hour * 60 + br.minute;
+}
+
+function humanSchedule(ev: CustomEventRow): string {
+  if (ev.schedule_type === "once" && ev.schedule_at != null) {
+    const d = new Date((ev.schedule_at - 3 * 3600) * 1000);  // BR-local view
+    const pad = (n: number) => String(n).padStart(2, "0");
+    return `${pad(d.getUTCDate())}/${pad(d.getUTCMonth() + 1)} ${pad(d.getUTCHours())}:${pad(d.getUTCMinutes())}`;
+  }
+  if (ev.schedule_type === "daily" && ev.schedule_time) {
+    return `diário ${ev.schedule_time}`;
+  }
+  if (ev.schedule_type === "weekly" && ev.schedule_time && ev.schedule_dow != null) {
+    const days = ["dom", "seg", "ter", "qua", "qui", "sex", "sáb"];
+    return `${days[ev.schedule_dow]} ${ev.schedule_time}`;
+  }
+  return "";
+}
+
+// Extract the distinct gift kinds (e.g. ['rarius','kundun']) from an
+// event's gifts JSON. Used to match against gift-kind subscriptions.
+function eventGiftKinds(giftsJson: string | null): Set<string> {
+  const out = new Set<string>();
+  if (!giftsJson) return out;
+  try {
+    const arr = JSON.parse(giftsJson) as Array<{ kind?: string }>;
+    for (const g of arr) {
+      if (g && typeof g.kind === "string") out.add(g.kind);
+    }
+  } catch { /* ignore */ }
+  return out;
+}
+
+export async function pollCustomEvents(env: Env): Promise<{ fired: number }> {
+  const t = now();
+
+  // Active events first — most ticks have nothing to fire, this is a
+  // single fast read before we touch the much chattier sub tables.
+  const evRs = await env.DB
+    .prepare(`SELECT * FROM custom_events WHERE active = 1`)
+    .all<CustomEventRow>();
+  const events = evRs.results ?? [];
+  if (events.length === 0) return { fired: 0 };
+
+  // Per-user-per-event opt-ins. We pre-load all of them once and look
+  // them up in memory per (event_id, user_id) — cheaper than N D1 calls.
+  type SubRow = { id: number; custom_event_id: number; user_id: number; lead_minutes: number; cooldown_until: number };
+  const subRs = await env.DB
+    .prepare(`SELECT id, custom_event_id, user_id, lead_minutes, cooldown_until FROM custom_event_subs`)
+    .all<SubRow>();
+  const subsByEvent = new Map<number, SubRow[]>();
+  for (const s of subRs.results ?? []) {
+    const arr = subsByEvent.get(s.custom_event_id) ?? [];
+    arr.push(s);
+    subsByEvent.set(s.custom_event_id, arr);
+  }
+
+  // Gift-kind opt-ins ("ping me on ANY event that drops rarius").
+  type GiftSubRow = { id: number; user_id: number; gift_kind: string; lead_minutes: number };
+  const giftRs = await env.DB
+    .prepare(`SELECT id, user_id, gift_kind, lead_minutes FROM custom_event_gift_subs`)
+    .all<GiftSubRow>();
+  const giftSubs = giftRs.results ?? [];
+
+  // User chat-id lookup for the Telegram send.
+  const userIds = new Set<number>();
+  for (const s of subRs.results ?? []) userIds.add(s.user_id);
+  for (const g of giftSubs) userIds.add(g.user_id);
+  if (userIds.size === 0) return { fired: 0 };
+  const placeholders = [...userIds].map(() => "?").join(",");
+  const userRs = await env.DB
+    .prepare(`SELECT id, telegram_chat_id FROM users WHERE id IN (${placeholders})`)
+    .bind(...[...userIds])
+    .all<{ id: number; telegram_chat_id: number }>();
+  const chatIdByUser = new Map<number, number>();
+  for (const u of userRs.results ?? []) chatIdByUser.set(u.id, u.telegram_chat_id);
+
+  // De-dup window — a single user shouldn't get two pings for the same
+  // event in the same fire (per-event sub + gift-kind sub overlap).
+  // Also prevents daily/weekly events from re-firing within their
+  // cooldown if the cron runs more than once in a minute.
+  const cooldown = Number(env.COOLDOWN_SECONDS || "3600");
+  const recentlyFiredRs = await env.DB
+    .prepare(`SELECT custom_event_id, user_id, ts FROM custom_event_fired WHERE ts > ?`)
+    .bind(t - cooldown)
+    .all<{ custom_event_id: number; user_id: number; ts: number }>();
+  const firedKey = (eid: number, uid: number) => eid + ":" + uid;
+  const recentlyFired = new Set<string>();
+  for (const r of recentlyFiredRs.results ?? []) recentlyFired.add(firedKey(r.custom_event_id, r.user_id));
+
+  let fired = 0;
+  for (const ev of events) {
+    const kinds = eventGiftKinds(ev.gifts);
+    // Build a per-user list of (lead_minutes, source) for this event:
+    // start with explicit per-event subs, then add any gift-kind subs
+    // that match. Per-event lead wins on collision (more specific).
+    type Target = { user_id: number; lead_minutes: number };
+    const targets = new Map<number, Target>();
+    for (const s of subsByEvent.get(ev.id) ?? []) {
+      if (s.cooldown_until > t) continue;
+      targets.set(s.user_id, { user_id: s.user_id, lead_minutes: s.lead_minutes });
+    }
+    for (const g of giftSubs) {
+      if (targets.has(g.user_id)) continue;  // explicit sub wins
+      if (g.gift_kind === "any" || kinds.has(g.gift_kind)) {
+        targets.set(g.user_id, { user_id: g.user_id, lead_minutes: g.lead_minutes });
+      }
+    }
+
+    for (const target of targets.values()) {
+      if (recentlyFired.has(firedKey(ev.id, target.user_id))) continue;
+      if (!shouldFireCustomEvent(ev, target.lead_minutes, t)) continue;
+      const chatId = chatIdByUser.get(target.user_id);
+      if (chatId == null) continue;
+
+      const msg = formatCustomEventAlert({
+        name: ev.name,
+        gmName: ev.gm_name,
+        description: ev.description,
+        gifts: ev.gifts,
+        leadMinutes: target.lead_minutes,
+        scheduleHuman: humanSchedule(ev),
+      });
+      const send = await sendTelegram(env, chatId, msg);
+      if (!send.ok) {
+        console.log(`telegram send FAILED custom-event ev=${ev.id} user=${target.user_id} status=${send.status}`);
+        continue;
+      }
+
+      // Record the fire so the next tick (or any other matching sub)
+      // doesn't double-ping. custom_event_subs.cooldown_until still gets
+      // bumped for explicit subs so they get the standard cooldown.
+      await env.DB.batch([
+        env.DB.prepare("INSERT OR IGNORE INTO custom_event_fired (custom_event_id, user_id, ts) VALUES (?, ?, ?)").bind(ev.id, target.user_id, t),
+        env.DB.prepare("UPDATE custom_event_subs SET cooldown_until = ?, last_fired_at = ? WHERE custom_event_id = ? AND user_id = ?").bind(t + cooldown, t, ev.id, target.user_id),
+      ]);
+      recentlyFired.add(firedKey(ev.id, target.user_id));
+      fired++;
+    }
+
+    // One-shot events: deactivate after first successful fire window.
+    if (ev.schedule_type === "once" && targets.size > 0) {
+      await env.DB.prepare("UPDATE custom_events SET active = 0 WHERE id = ?").bind(ev.id).run();
+    }
+  }
+
+  // Best-effort prune of fired-log rows older than 24h.
+  await env.DB.prepare(`DELETE FROM custom_event_fired WHERE ts < ?`).bind(t - 86400).run().catch(() => {});
+
+  return { fired };
 }
 
 // Threshold format: "<EventName>|<room>|<leadMinutes>", e.g.

@@ -47,7 +47,18 @@ import {
   adminUpdateEvent,
 } from "./routes/admin";
 import { telegramWebhook } from "./routes/telegram-webhook";
-import { pollServerEvents } from "./poll";
+import {
+  adminCreateCustomEvent,
+  adminDeleteCustomEvent,
+  adminUpdateCustomEvent,
+  listCustomEvents,
+  listMyGiftSubs,
+  subscribeCustomEvent,
+  subscribeGiftKind,
+  unsubscribeCustomEvent,
+  unsubscribeGiftKind,
+} from "./routes/custom-events";
+import { pollCustomEvents, pollServerEvents } from "./poll";
 import { setTelegramWebhook } from "./telegram";
 import { INDEX_HTML } from "./ui";
 
@@ -159,6 +170,16 @@ export default {
       if (pathname === "/api/me" && method === "GET") return await me(env, userId);
       if (pathname === "/api/me/nickname" && method === "POST") return await setNickname(env, userId, req);
 
+      // ---- Custom events (admin-managed GM events) ----
+      if (pathname === "/api/custom-events" && method === "GET") return await listCustomEvents(env, userId);
+      const customEvSub = pathname.match(/^\/api\/custom-events\/(\d+)\/subscribe$/);
+      if (customEvSub && method === "POST") return await subscribeCustomEvent(env, userId, Number(customEvSub[1]), req);
+      if (customEvSub && method === "DELETE") return await unsubscribeCustomEvent(env, userId, Number(customEvSub[1]));
+      if (pathname === "/api/me/gift-subs" && method === "GET") return await listMyGiftSubs(env, userId);
+      if (pathname === "/api/me/gift-subs" && method === "POST") return await subscribeGiftKind(env, userId, req);
+      const giftUnsub = pathname.match(/^\/api\/me\/gift-subs\/([a-z]+)$/);
+      if (giftUnsub && method === "DELETE") return await unsubscribeGiftKind(env, userId, giftUnsub[1]);
+
       // ---- Market (writes — public GETs are above the auth gate) ----
       if (pathname === "/api/items/warmup" && method === "POST") return await warmupCatalog(env);
       if (pathname === "/api/market/listings" && method === "POST") return await createListing(env, userId, req);
@@ -231,6 +252,10 @@ export default {
         if (pathname === "/api/admin/poll" && method === "POST") return await adminRunCron(env);
         if (pathname === "/api/admin/items/refresh" && method === "POST") return await adminRefreshItems(env);
         if (pathname === "/api/admin/watchers/spawn-all" && method === "POST") return await adminSpawnAllWatchers(env);
+        if (pathname === "/api/admin/custom-events" && method === "POST") return await adminCreateCustomEvent(env, userId, req);
+        const customEvAdminMatch = pathname.match(/^\/api\/admin\/custom-events\/(\d+)$/);
+        if (customEvAdminMatch && method === "PATCH") return await adminUpdateCustomEvent(env, Number(customEvAdminMatch[1]), req);
+        if (customEvAdminMatch && method === "DELETE") return await adminDeleteCustomEvent(env, Number(customEvAdminMatch[1]));
         const charPoke = pathname.match(/^\/api\/admin\/chars\/(\d+)\/poke$/);
         if (charPoke && method === "POST") return await adminPokeWatcher(env, Number(charPoke[1]));
         if (pathname === "/api/admin/events" && method === "GET") return await adminListEvents(env);
@@ -268,6 +293,13 @@ export default {
       pollServerEvents(env)
         .then((r) => console.log(`server-events: refreshed=${r.refreshed} fired=${r.fired}`))
         .catch((e) => console.error("server-events poll failed", e)),
+    );
+    // Admin-managed GM events (Find the GM, daily/weekly raids, etc.).
+    // Light query — cap is the total number of subs across all events.
+    ctx.waitUntil(
+      pollCustomEvents(env)
+        .then((r) => { if (r.fired > 0) console.log(`custom-events: fired=${r.fired}`); })
+        .catch((e) => console.error("custom-events poll failed", e)),
     );
   },
 };
