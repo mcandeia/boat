@@ -159,14 +159,25 @@ export async function pollOnce(env: Env): Promise<{ scraped: number; fired: numb
       )
       .run();
 
-    // History: insert a snapshot when anything visible changed since the
-    // previous tick. Idle chars don't bloat the table.
+    // History: insert a snapshot when anything visible changed, OR every
+    // ~5 min as a heartbeat so the chart has data even for chars whose
+    // level/map happens to be stable (or whose scraped level appears stuck
+    // because of upstream caching).
     const changed =
       snap.level !== prev.level ||
       snap.resets !== prev.resets ||
       snap.map !== prev.map ||
       snap.status !== prev.status;
-    if (changed) {
+    let needHeartbeat = false;
+    if (!changed) {
+      const lastSnap = await env.DB
+        .prepare("SELECT MAX(ts) AS last_ts FROM char_snapshots WHERE char_id = ?")
+        .bind(char.id)
+        .first<{ last_ts: number | null }>();
+      const lastTs = lastSnap?.last_ts ?? 0;
+      needHeartbeat = (t - lastTs) >= 300;
+    }
+    if (changed || needHeartbeat) {
       await env.DB
         .prepare(
           `INSERT INTO char_snapshots (char_id, ts, level, resets, map, status)

@@ -21,6 +21,10 @@ const BROWSER_HEADERS: Record<string, string> = {
   "sec-fetch-site": "none",
   "sec-fetch-user": "?1",
   "upgrade-insecure-requests": "1",
+  // Hard-fail any cached layer (CF edge, mupatos LiteSpeed) — a few chars
+  // were reading stale levels for hours when something cached a snapshot.
+  "cache-control": "no-cache",
+  "pragma": "no-cache",
 };
 
 export async function scrapeMany(
@@ -41,7 +45,12 @@ export async function scrapeMany(
   const CONCURRENCY = 20;
 
   async function fetchOne(name: string): Promise<void> {
-    const url = `${env.PROFILE_BASE_URL}/${encodeURIComponent(name)}`;
+    // Append a bust param so any intermediate cache (Mupatos LiteSpeed,
+    // their CF edge, etc.) treats each tick as a fresh URL. They ignore
+    // unknown query params for this route, so the response is still the
+    // real profile page.
+    const bust = Math.floor(Date.now() / 1000);
+    const url = `${env.PROFILE_BASE_URL}/${encodeURIComponent(name)}?_=${bust}`;
     try {
       const ctrl = new AbortController();
       const t = setTimeout(() => ctrl.abort(), perCharTimeoutMs);
