@@ -63,7 +63,10 @@ export default {
     const cookie = req.headers.get("cookie");
 
     try {
-      if (pathname === "/" || pathname === "/index.html") {
+      if (pathname === "/" || pathname === "/index.html" || /^\/m\/\d+$/.test(pathname)) {
+        // Single-page worker. The home, the listing PDP (/m/:id), and
+        // the index alias all serve the same HTML; the JS picks up the
+        // path and renders the right view (feed vs PDP).
         return new Response(INDEX_HTML, {
           headers: {
             "content-type": "text/html; charset=utf-8",
@@ -172,7 +175,7 @@ export default {
       if (pingMatch && method === "POST") {
         return await pingListing(env, userId, Number(pingMatch[1]), req, {
           origin: url.origin,
-          buildAppUrl: (origin, id) => origin + "/?market=" + id,
+          buildAppUrl: (origin, id) => origin + "/m/" + id,
         });
       }
 

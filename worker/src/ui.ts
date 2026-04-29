@@ -496,6 +496,9 @@ let state = { user: null, characters: [], subscriptions: [] };
 let userCompareMode = false;
 
 async function refresh() {
+  // Capture the PDP id from the URL ONCE on init — the rest of the app
+  // reads marketState.pdpId.
+  marketState.pdpId = detectPdpId();
   try {
     const data = await fetchJSON("/api/me");
     state = data;
@@ -728,7 +731,7 @@ function renderDash() {
     window.__viewInitialized = true;
     const params = new URLSearchParams(location.search);
     let initial = "dashboard";
-    if (params.get("market")) initial = "market";
+    if (marketState.pdpId || params.get("market")) initial = "market";
     else {
       try {
         const saved = localStorage.getItem("mlw.tab");
@@ -2540,8 +2543,19 @@ function wireAdminEventRow(ev) {
 }
 
 // ---- Market ----
-const marketState = { sort: "hot", side: "", q: "", listings: [] };
+// pdpId: when set, the Mercado view renders ONLY that listing in a
+// focused detail layout (PDP). Mirrors the /m/:id URL.
+const marketState = { sort: "hot", side: "", q: "", listings: [], pdpId: null };
 let marketSearchTimer = null;
+
+function detectPdpId() {
+  const m = location.pathname.match(/^\/m\/(\d+)$/);
+  if (m) return Number(m[1]);
+  // Legacy: ?market=N still works (older Telegram pings) — same effect.
+  const q = new URLSearchParams(location.search).get("market");
+  if (q && /^\d+$/.test(q)) return Number(q);
+  return null;
+}
 
 function wireMarket() {
   if (!$("market-card")) return;
@@ -2576,14 +2590,15 @@ function refreshSideChips() {
 
 let marketWarmupFired = false;
 async function loadMarket() {
-  const list = $("market-list");
-  list.innerHTML = '<div class="text-xs text-muted">carregando...</div>';
-  // Fire-and-forget catalog warmup the first time the user opens Market.
-  // Idempotent server-side: re-runs only when the items table is sparse.
+  // Catalog warmup is harmless either way; fire it once.
   if (!marketWarmupFired) {
     marketWarmupFired = true;
     fetchJSON("/api/items/warmup", { method: "POST" }).catch(() => {});
   }
+  if (marketState.pdpId) return await renderPdp(marketState.pdpId);
+
+  const list = $("market-list");
+  list.innerHTML = '<div class="text-xs text-muted">carregando...</div>';
   try {
     const params = new URLSearchParams();
     params.set("sort", marketState.sort);
@@ -2594,6 +2609,41 @@ async function loadMarket() {
     renderMarket();
   } catch (e) {
     list.innerHTML = '<div class="text-xs text-danger">erro: ' + escapeHtml(e.message) + '</div>';
+  }
+}
+
+// Focused detail page: renders the single listing prominently with
+// comments expanded by default and a "voltar" link back to the feed.
+async function renderPdp(id) {
+  const list = $("market-list");
+  // Drop the grid layout — PDP is centred, not gridded.
+  list.classList.remove("grid", "grid-cols-1", "md:grid-cols-2", "xl:grid-cols-3", "gap-3");
+  list.classList.add("space-y-4");
+  // Hide the toolbar — it doesn't apply to a single listing.
+  document.querySelectorAll(".market-sort, .market-side").forEach((b) => b.parentElement && b.parentElement.classList.add("hidden"));
+  const search = $("market-search"); if (search) search.classList.add("hidden");
+  const newBtn = $("market-new-btn"); if (newBtn) newBtn.classList.add("hidden");
+
+  list.innerHTML = '<div class="text-xs text-muted">carregando anúncio...</div>';
+  try {
+    const data = await fetchJSON("/api/market/listings/" + id);
+    if (!data.listing) {
+      list.innerHTML = '<div class="text-sm text-danger">anúncio não encontrado</div>';
+      return;
+    }
+    const card = renderListingCard(data.listing);
+    card.classList.add("max-w-2xl", "mx-auto", "p-5");
+    list.innerHTML = "";
+    const back = document.createElement("div");
+    back.className = "max-w-2xl mx-auto";
+    back.innerHTML = '<a href="/" class="text-xs text-muted hover:text-slate-200 inline-flex items-center gap-1">← voltar pro Mercado</a>';
+    list.appendChild(back);
+    list.appendChild(card);
+    // Auto-expand the comments thread.
+    const detailBtn = card.querySelector('[data-action="toggle-detail"]');
+    if (detailBtn) detailBtn.click();
+  } catch (e) {
+    list.innerHTML = '<div class="text-sm text-danger">erro: ' + escapeHtml(e.message) + '</div>';
   }
 }
 
@@ -2822,7 +2872,7 @@ function renderListingCard(l) {
     '<div class="flex gap-3 items-start">' +
       (l.item_image_url ? '<img src="' + escapeHtml(proxyImg(l.item_image_url)) + '" class="w-12 h-12 object-contain shrink-0 mt-0.5" loading="lazy" />' : "") +
       '<div class="min-w-0 flex-1">' +
-        '<div class="font-semibold ' + titleClass + ' whitespace-pre-wrap">' + escapeHtml(l.item_name) + '</div>' +
+        '<a href="/m/' + l.id + '" class="block font-semibold ' + titleClass + ' whitespace-pre-wrap hover:underline">' + escapeHtml(l.item_name) + '</a>' +
         charSummary +
         (l.kind !== "char" && attrs ? '<div class="text-xs text-muted mt-0.5">' + escapeHtml(attrs) + '</div>' : "") +
         (price ? '<div class="text-sm text-goldsoft mt-1 tabular-nums">' + escapeHtml(price) + '</div>' : "") +
@@ -2831,10 +2881,11 @@ function renderListingCard(l) {
     '</div>' +
     '<div class="flex flex-wrap items-center gap-1.5 mt-3">' +
       reactionsRow +
+      '<button data-action="share" title="copiar link" class="text-xs px-2 py-0.5 rounded border border-border text-muted hover:text-slate-200 ml-auto">🔗</button>' +
       (isMine
-        ? '<button data-action="edit" class="text-xs px-2 py-0.5 rounded border border-border text-muted hover:text-slate-200 ml-auto">editar</button>' +
+        ? '<button data-action="edit" class="text-xs px-2 py-0.5 rounded border border-border text-muted hover:text-slate-200">editar</button>' +
           '<button data-action="delete" class="text-xs px-2 py-0.5 rounded border border-border text-danger hover:bg-danger/10">remover</button>'
-        : '<button data-action="ping" class="text-xs px-2 py-0.5 rounded bg-gold text-bg font-semibold ml-auto hover:brightness-110">📣 tenho interesse</button>') +
+        : '<button data-action="ping" class="text-xs px-2 py-0.5 rounded bg-gold text-bg font-semibold hover:brightness-110">📣 tenho interesse</button>') +
       '<button data-action="toggle-detail" class="text-xs px-2 py-0.5 rounded border border-border text-muted hover:text-slate-200">💬 <span data-comment-count>' + (l.comment_count || 0) + '</span></button>' +
     '</div>' +
     '<div data-detail class="hidden mt-3 pt-3 border-t border-border/60"></div>';
@@ -2885,6 +2936,18 @@ async function handleListingAction(action, l, card, e) {
     return;
   }
   if (action === "toggle-detail") { toggleListingDetail(l, card); return; }
+  if (action === "share") {
+    const url = location.origin + "/m/" + l.id;
+    try {
+      await navigator.clipboard.writeText(url);
+      toast("link copiado", "ok");
+    } catch {
+      // Clipboard API can fail on insecure origins / older browsers — fall
+      // back to a tiny prompt-like overlay so the user can copy manually.
+      window.prompt("copie o link:", url);
+    }
+    return;
+  }
 }
 
 async function toggleListingDetail(l, card) {
