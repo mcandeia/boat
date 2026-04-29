@@ -989,6 +989,62 @@ async function notifyOfferDecision(
   await sendTelegram(env, bidder.telegram_chat_id, html);
 }
 
+async function notifySellerNewOffer(
+  env: Env,
+  sellerUserId: number,
+  opts: {
+    listing_id: number;
+    listing_item_name: string;
+    bidder_user_id: number;
+    bidder_nickname: string;
+    bidder_char_id: number | null;
+    currency: string | null;
+    price: number | null;
+    message: string | null;
+    expires_at: number;
+  },
+): Promise<void> {
+  const seller = await env.DB
+    .prepare("SELECT telegram_chat_id, nickname FROM users WHERE id = ?")
+    .bind(sellerUserId)
+    .first<{ telegram_chat_id: number; nickname: string | null }>();
+  if (!seller?.telegram_chat_id) return;
+
+  let bidderCharName: string | null = null;
+  if (opts.bidder_char_id != null) {
+    const c = await env.DB
+      .prepare("SELECT name FROM characters WHERE id = ?")
+      .bind(opts.bidder_char_id)
+      .first<{ name: string }>();
+    bidderCharName = c?.name ?? null;
+  }
+
+  const listingLabel = escHtml(opts.listing_item_name || ("#" + opts.listing_id));
+  const bidderLabel = escHtml(opts.bidder_nickname || ("user " + opts.bidder_user_id));
+  const offerValue = (opts.currency || opts.price != null)
+    ? escHtml(
+      opts.currency === "free"
+        ? "grátis"
+        : ((opts.price != null ? Number(opts.price).toLocaleString("pt-BR") + " " : "") + (opts.currency ?? "")),
+    )
+    : "—";
+  const msgLine = opts.message ? ("💬 " + escHtml(opts.message) + "\n") : "";
+  const charLine = bidderCharName ? ("🎭 Char: <b>" + escHtml(bidderCharName) + "</b>\n") : "";
+  const minsLeft = Math.max(0, Math.ceil((opts.expires_at - now()) / 60));
+
+  const html =
+    "💸 <b>Nova oferta recebida</b>\n" +
+    "🛒 Anúncio: <b>" + listingLabel + "</b>\n" +
+    "👤 De: <b>" + bidderLabel + "</b>\n" +
+    charLine +
+    "💰 Oferta: <b>" + offerValue + "</b>\n" +
+    msgLine +
+    "⏳ Expira em ~" + minsLeft + " min\n" +
+    "\nAbra o Mercado → <b>Ofertas recebidas</b> para aceitar/recusar.";
+
+  await sendTelegram(env, seller.telegram_chat_id, html);
+}
+
 export async function createOffer(
   env: Env,
   userId: number,
@@ -1042,6 +1098,23 @@ export async function createOffer(
     )
     .bind(listingId, listing.user_id, userId, bidderCharId, currency, price, message || null, expiresAt, t)
     .run();
+
+  // Notify seller on Telegram (if they have a chat_id).
+  try {
+    await notifySellerNewOffer(env, listing.user_id, {
+      listing_id: listingId,
+      listing_item_name: listing.item_name,
+      bidder_user_id: userId,
+      bidder_nickname: u.nickname ?? ("user " + userId),
+      bidder_char_id: bidderCharId,
+      currency,
+      price,
+      message: message || null,
+      expires_at: expiresAt,
+    });
+  } catch (e) {
+    console.log("notifySellerNewOffer failed: " + (e as Error).message);
+  }
 
   return json({ ok: true, id: r.meta.last_row_id, expires_at: expiresAt });
 }
