@@ -2597,11 +2597,15 @@ function fmtAttrs(attrsJson) {
   try {
     const a = JSON.parse(attrsJson);
     const parts = [];
-    if (a.excellent) parts.push("Excellent");
+    if (a.full) {
+      parts.push("Full");
+    } else {
+      if (a.excellent) parts.push("Excellent");
+      if (a.option != null) parts.push("opt+" + a.option);
+      if (a.luck) parts.push("luck");
+      if (a.skill) parts.push("skill");
+    }
     if (a.refinement != null) parts.push("+" + a.refinement);
-    if (a.option != null) parts.push("opt+" + a.option);
-    if (a.luck) parts.push("luck");
-    if (a.skill) parts.push("skill");
     if (a.ancient) parts.push("ancient: " + a.ancient);
     if (a.extras) parts.push(a.extras);
     return parts.join(" · ");
@@ -2665,17 +2669,24 @@ function renderListingCard(l) {
     '">' + r.kind + (r.count ? ' <span class="tabular-nums">' + r.count + '</span>' : "") + '</button>'
   ).join("");
 
-  // MU color rule: Excellent → emerald glow, Ancient → amber glow,
-  // Char listing → purple, otherwise default.
+  // MU color rule: Full / Excellent → emerald glow, Ancient → amber
+  // glow, Char listing → purple, otherwise default.
+  let parsedAttrs = null;
+  try { parsedAttrs = l.item_attrs ? JSON.parse(l.item_attrs) : null; } catch {}
   const titleClass = (() => {
     if (l.kind === "char") return "text-purple-300";
-    try {
-      const at = l.item_attrs ? JSON.parse(l.item_attrs) : null;
-      if (at?.excellent) return "text-emerald-300 drop-shadow-[0_0_4px_rgba(16,185,129,0.6)]";
-      if (at?.ancient) return "text-amber-300 drop-shadow-[0_0_4px_rgba(245,158,11,0.5)]";
-    } catch {}
+    if (parsedAttrs?.full || parsedAttrs?.excellent) return "text-emerald-300 drop-shadow-[0_0_4px_rgba(16,185,129,0.6)]";
+    if (parsedAttrs?.ancient) return "text-amber-300 drop-shadow-[0_0_4px_rgba(245,158,11,0.5)]";
     return "text-slate-100";
   })();
+  // For char listings, show resets prominently next to the title.
+  const charSummary = l.kind === "char" && parsedAttrs ? (() => {
+    const bits = [];
+    if (parsedAttrs.charClass) bits.push(parsedAttrs.charClass);
+    if (parsedAttrs.resets != null) bits.push('<b class="text-purple-200">' + parsedAttrs.resets + ' resets</b>');
+    if (parsedAttrs.level != null) bits.push("lvl " + parsedAttrs.level);
+    return bits.length ? '<div class="text-xs text-purple-200/80 mt-0.5">' + bits.join(" · ") + '</div>' : "";
+  })() : "";
 
   card.innerHTML =
     '<div class="flex flex-wrap items-center gap-2 text-xs mb-1.5">' +
@@ -2689,7 +2700,8 @@ function renderListingCard(l) {
       (l.item_image_url ? '<img src="' + escapeHtml(l.item_image_url) + '" class="w-12 h-12 object-contain shrink-0 mt-0.5" />' : "") +
       '<div class="min-w-0 flex-1">' +
         '<div class="font-semibold ' + titleClass + ' whitespace-pre-wrap">' + escapeHtml(l.item_name) + '</div>' +
-        (attrs ? '<div class="text-xs text-muted mt-0.5">' + escapeHtml(attrs) + '</div>' : "") +
+        charSummary +
+        (l.kind !== "char" && attrs ? '<div class="text-xs text-muted mt-0.5">' + escapeHtml(attrs) + '</div>' : "") +
         (price ? '<div class="text-sm text-goldsoft mt-1 tabular-nums">' + escapeHtml(price) + '</div>' : "") +
         (l.notes ? '<div class="text-sm text-slate-300 mt-2 whitespace-pre-wrap">' + escapeHtml(l.notes) + '</div>' : "") +
       '</div>' +
@@ -2869,19 +2881,39 @@ function openListingForm(existing) {
             '<div><label class="text-[11px] text-muted block mb-1">Option (0..28)</label>' +
               '<input data-f="option" type="number" min="0" max="28" class="w-full h-10 bg-bg border border-border rounded-md px-2" value="' + (a.option ?? "") + '" /></div>' +
           '</div>' +
-          '<div class="flex flex-wrap gap-3 text-xs">' +
-            '<label class="inline-flex items-center gap-2"><input data-f="excellent" type="checkbox" class="accent-emerald-400"' + (a.excellent ? " checked" : "") + ' /> <span class="text-emerald-300 font-semibold drop-shadow">Excellent</span></label>' +
+          '<div class="flex flex-wrap gap-3 text-xs items-center">' +
+            '<label class="inline-flex items-center gap-2 px-2 py-1 rounded border border-emerald-400/40 bg-emerald-500/10"><input data-f="full" type="checkbox" class="accent-emerald-400"' + (a.full ? " checked" : "") + ' /> <span class="text-emerald-300 font-semibold drop-shadow">⭐ Item Full</span></label>' +
+            '<span class="text-muted">ou:</span>' +
+            '<label class="inline-flex items-center gap-2"><input data-f="excellent" type="checkbox" class="accent-emerald-400"' + (a.excellent ? " checked" : "") + ' /> <span class="text-emerald-300">Excellent</span></label>' +
             '<label class="inline-flex items-center gap-2"><input data-f="luck" type="checkbox" class="accent-gold"' + (a.luck ? " checked" : "") + ' /> luck</label>' +
             '<label class="inline-flex items-center gap-2"><input data-f="skill" type="checkbox" class="accent-gold"' + (a.skill ? " checked" : "") + ' /> skill</label>' +
           '</div>' +
+          '<div class="text-[11px] text-muted -mt-1">"Item Full" = Excellent + opt 28 + luck + skill. Refinamento (+0..+13) você ainda escolhe acima.</div>' +
           '<div><label class="text-[11px] text-muted block mb-1">Conjunto ancient</label>' +
             '<input data-f="ancient" maxlength="40" placeholder="ex.: Gaion, Anonymous, Hyon..." class="w-full h-10 bg-bg border border-border rounded-md px-2" value="' + (a.ancient ? escapeHtml(a.ancient) : "") + '" /></div>' +
           '<div><label class="text-[11px] text-muted block mb-1">Bônus extras (texto livre)</label>' +
             '<input data-f="extras" maxlength="240" placeholder="ex.: dmg+15%, refl+5%, dr+5..." class="w-full h-10 bg-bg border border-border rounded-md px-2" value="' + (a.extras ? escapeHtml(a.extras) : "") + '" /></div>' +
           '</div>' + // /data-item-fields
-          '<div data-char-fields class="hidden"><div><label class="text-[11px] text-muted block mb-1">Descrição do personagem</label>' +
-            '<textarea data-f="char_desc" rows="3" maxlength="80" placeholder="ex.: MG 244rr, set ancient Hyon, +15..." class="w-full bg-bg border border-border rounded-md px-2 py-1.5">' + (isCharListing ? escapeHtml(existing.item_name) : "") + '</textarea>' +
-            '<div class="text-[11px] text-muted mt-1">livre — qualquer detalhe que descreva o char (classe, level, equipamentos, conta original, etc.)</div></div></div>' +
+          '<div data-char-fields class="hidden space-y-3">' +
+            '<div><label class="text-[11px] text-muted block mb-1">Nome do personagem</label>' +
+              '<input data-f="char_name" maxlength="80" placeholder="ex.: emigeNosfe" class="w-full h-10 bg-bg border border-border rounded-md px-2" value="' + (isCharListing ? escapeHtml(existing.item_name) : "") + '" />' +
+            '</div>' +
+            '<div class="grid grid-cols-3 gap-2">' +
+              '<div><label class="text-[11px] text-muted block mb-1">Resets <span class="text-goldsoft">★</span></label>' +
+                '<input data-f="char_resets" type="number" min="0" max="9999" placeholder="36" class="w-full h-10 bg-bg border border-border rounded-md px-2" value="' + (isCharListing && a.resets != null ? a.resets : "") + '" />' +
+              '</div>' +
+              '<div><label class="text-[11px] text-muted block mb-1">Level</label>' +
+                '<input data-f="char_level" type="number" min="0" max="9999" placeholder="244" class="w-full h-10 bg-bg border border-border rounded-md px-2" value="' + (isCharListing && a.level != null ? a.level : "") + '" />' +
+              '</div>' +
+              '<div><label class="text-[11px] text-muted block mb-1">Classe</label>' +
+                '<select data-f="char_class" class="w-full h-10 bg-bg border border-border rounded-md px-2">' +
+                  ['','Dark Knight','Blade Knight','Blade Master','Magic Gladiator','Duel Master','Dark Lord','Lord Emperor','Dark Wizard','Soul Master','Grand Master','Fairy Elf','Muse Elf','High Elf','Summoner','Bloody Summoner','Dimension Master','Rage Fighter','Fist Master']
+                    .map((cls) => '<option value="' + escapeHtml(cls) + '"' + (isCharListing && a.charClass === cls ? " selected" : "") + '>' + (cls || "—") + '</option>').join("") +
+                '</select>' +
+              '</div>' +
+            '</div>' +
+            '<div class="text-[11px] text-muted">★ resets é o que mais importa — preenche bem!</div>' +
+          '</div>' +
           '<div data-pricing-block class="grid grid-cols-2 gap-2">' +
             '<div><label class="text-[11px] text-muted block mb-1">Moeda</label>' +
               '<select data-f="currency" class="w-full h-10 bg-bg border border-border rounded-md px-2">' +
@@ -2921,6 +2953,30 @@ function openListingForm(existing) {
     };
     overlay.querySelectorAll('input[name="kind"]').forEach((r) => r.addEventListener("change", syncKind));
     syncKind();
+    // "Item Full" — when checked, force-check excellent/luck/skill and
+    // pin option to 28, then disable those fields so the user can't
+    // contradict themselves. Refinement stays editable.
+    const fullChk = overlay.querySelector('[data-f="full"]');
+    const exChk = overlay.querySelector('[data-f="excellent"]');
+    const luckChk = overlay.querySelector('[data-f="luck"]');
+    const skillChk = overlay.querySelector('[data-f="skill"]');
+    const optInput = overlay.querySelector('[data-f="option"]');
+    let savedOption = optInput.value;
+    const syncFull = () => {
+      const on = !!fullChk.checked;
+      if (on) {
+        savedOption = optInput.value;
+        exChk.checked = true; luckChk.checked = true; skillChk.checked = true;
+        optInput.value = "28";
+      }
+      [exChk, luckChk, skillChk, optInput].forEach((el) => {
+        el.disabled = on;
+        el.parentElement.classList.toggle("opacity-50", on);
+      });
+      if (!on) optInput.value = savedOption;
+    };
+    fullChk.addEventListener("change", syncFull);
+    syncFull();
     wireItemTypeahead(overlay);
     overlay.querySelector("[data-cancel]").onclick = () => overlay.remove();
     overlay.querySelector("[data-save]").onclick = async (e) => {
@@ -2928,21 +2984,30 @@ function openListingForm(existing) {
       const get = (k) => overlay.querySelector('[data-f="' + k + '"]');
       const kindVal = (overlay.querySelector('input[name="kind"]:checked') || {}).value || "item";
       const item_name = kindVal === "char"
-        ? get("char_desc").value.trim()
+        ? get("char_name").value.trim()
         : get("item_name").value.trim();
       if (!item_name) {
-        toast(kindVal === "char" ? "informe a descrição do personagem" : "informe o item", "err");
+        toast(kindVal === "char" ? "informe o nome do personagem" : "informe o item", "err");
         return;
       }
       const attrs = {};
       if (kindVal === "item") {
         const refn = Number(get("refinement").value); if (Number.isInteger(refn) && refn >= 0) attrs.refinement = refn;
-        const opt = Number(get("option").value); if (Number.isInteger(opt) && opt >= 0) attrs.option = opt;
-        if (get("excellent").checked) attrs.excellent = true;
-        if (get("luck").checked) attrs.luck = true;
-        if (get("skill").checked) attrs.skill = true;
+        if (get("full").checked) {
+          attrs.full = true;
+        } else {
+          const opt = Number(get("option").value); if (Number.isInteger(opt) && opt >= 0) attrs.option = opt;
+          if (get("excellent").checked) attrs.excellent = true;
+          if (get("luck").checked) attrs.luck = true;
+          if (get("skill").checked) attrs.skill = true;
+        }
         const anc = get("ancient").value.trim(); if (anc) attrs.ancient = anc;
         const ext = get("extras").value.trim(); if (ext) attrs.extras = ext;
+      } else {
+        // Char listings carry resets/level/class as first-class fields.
+        const r = Number(get("char_resets").value); if (Number.isInteger(r) && r >= 0) attrs.resets = r;
+        const lv = Number(get("char_level").value); if (Number.isInteger(lv) && lv >= 0) attrs.level = lv;
+        const cls = get("char_class").value.trim(); if (cls) attrs.charClass = cls;
       }
       const sideVal = get("side").value;
       const isDonate = sideVal === "donate";

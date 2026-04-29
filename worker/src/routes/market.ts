@@ -50,11 +50,16 @@ function formatAttrsLine(attrsJson: string | null): string | null {
   try {
     const a = JSON.parse(attrsJson) as Record<string, unknown>;
     const parts: string[] = [];
-    if (a.excellent) parts.push("Excellent");
+    if (a.full) {
+      // Full implies Excellent + opt 28 + luck + skill — collapse to one tag.
+      parts.push("Full");
+    } else {
+      if (a.excellent) parts.push("Excellent");
+      if (a.option != null) parts.push("opt+" + a.option);
+      if (a.luck) parts.push("luck");
+      if (a.skill) parts.push("skill");
+    }
     if (a.refinement != null) parts.push("+" + a.refinement);
-    if (a.option != null) parts.push("opt+" + a.option);
-    if (a.luck) parts.push("luck");
-    if (a.skill) parts.push("skill");
     if (a.ancient) parts.push("ancient: " + String(a.ancient));
     if (a.extras) parts.push(String(a.extras));
     return parts.length > 0 ? parts.join(" · ") : null;
@@ -246,9 +251,26 @@ function sanitizeAttrs(raw: unknown): string | null {
     const n = Number(obj.option);
     if (Number.isInteger(n) && n >= 0 && n <= 28) out.option = n;
   }
+  // Char listings carry their own structured fields here too — most
+  // importantly resets, which buyers care about more than anything else.
+  if (obj.resets != null) {
+    const n = Number(obj.resets);
+    if (Number.isInteger(n) && n >= 0 && n <= 9999) out.resets = n;
+  }
+  if (obj.level != null) {
+    const n = Number(obj.level);
+    if (Number.isInteger(n) && n >= 0 && n <= 9999) out.level = n;
+  }
+  if (typeof obj.charClass === "string" && obj.charClass.trim()) {
+    out.charClass = obj.charClass.trim().slice(0, 40);
+  }
   if (obj.skill != null) out.skill = !!obj.skill;
   if (obj.luck != null) out.luck = !!obj.luck;
   if (obj.excellent != null) out.excellent = !!obj.excellent;
+  // "Item Full" — MU shorthand for fully-optioned (Excellent + opt 28 +
+  // skill + luck). Stored separately so we can render it as a single
+  // "Full" tag instead of repeating each flag.
+  if (obj.full != null) out.full = !!obj.full;
   if (typeof obj.ancient === "string" && obj.ancient.trim()) {
     out.ancient = obj.ancient.trim().slice(0, 40);
   }
@@ -293,8 +315,9 @@ export async function createListing(env: Env, userId: number, req: Request): Pro
   if (currency === "free") price = null;
 
   const notes = body.notes ? String(body.notes).slice(0, NOTES_MAX) : null;
-  // Char listings don't have item attributes — pure free-form.
-  const attrs = kind === "char" ? null : sanitizeAttrs(body.item_attrs);
+  // Char listings carry resets/class/level instead of refinement/option.
+  // Same sanitizer — keys not relevant to a kind are simply absent.
+  const attrs = sanitizeAttrs(body.item_attrs);
 
   let charId: number | null = body.char_id ?? null;
   if (charId != null) {
@@ -547,7 +570,23 @@ export async function pingListing(
   // Status emoji per side.
   const sideLabel = listing.side === "buy" ? "querendo comprar" : listing.side === "donate" ? "doando" : "vendendo";
   const attrsTxt = formatAttrsLine(listing.item_attrs);
-  const itemLine = "<b>" + escHtml(listing.item_name) + "</b>" + (attrsTxt ? " — " + escHtml(attrsTxt) : "");
+  const isChar = (listing as { kind?: string }).kind === "char";
+  let itemLine: string;
+  if (isChar) {
+    let charBits = "";
+    try {
+      const a = JSON.parse(listing.item_attrs ?? "{}") as { resets?: number; level?: number; charClass?: string };
+      const bits: string[] = [];
+      if (a.charClass) bits.push(escHtml(a.charClass));
+      if (a.resets != null) bits.push("<b>" + a.resets + " resets</b>");
+      if (a.level != null) bits.push("lvl " + a.level);
+      if (bits.length) charBits = " — " + bits.join(" · ");
+    } catch {}
+    itemLine = "<b>" + escHtml(listing.item_name) + "</b>" + charBits;
+  } else {
+    itemLine = "<b>" + escHtml(listing.item_name) + "</b>" + (attrsTxt ? " — " + escHtml(attrsTxt) : "");
+  }
+  const lineLabel = isChar ? "🎮 Char:" : "📦 Item:";
   const priceLine = listing.currency
     ? "\n💰 " + (listing.currency === "free"
         ? "grátis"
@@ -559,7 +598,7 @@ export async function pingListing(
   const html =
     "🛒 <b>Interesse no seu anúncio #" + listingId + "</b>\n" +
     "👤 De: <b>" + escHtml(u.nickname ?? "?") + "</b> (você está " + sideLabel + ")\n" +
-    "📦 Item: " + itemLine +
+    lineLabel + " " + itemLine +
     priceLine +
     buyerCharLine +
     customMsg +
