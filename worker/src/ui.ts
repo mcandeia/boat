@@ -48,6 +48,12 @@ export const INDEX_HTML = /* html */ `<!doctype html>
      auto-removes after a few seconds. -->
 <div id="toasts" class="fixed top-4 right-4 z-[60] flex flex-col items-end gap-2 pointer-events-none max-w-[calc(100%-2rem)]"></div>
 <div id="chart-tip" class="hidden fixed z-[70] pointer-events-none px-2 py-1 rounded bg-bg border border-gold/40 text-xs text-slate-100 shadow-lg whitespace-nowrap"></div>
+<div id="item-tip" class="hidden fixed z-[80] pointer-events-none w-[320px] max-w-[calc(100vw-2rem)]">
+  <div class="rounded-md border border-border bg-[#0b0d12]/95 shadow-[0_12px_40px_rgba(0,0,0,0.65)] overflow-hidden">
+    <div data-title class="px-3 py-2 text-sm font-semibold text-emerald-200 border-b border-border/60"></div>
+    <div data-body class="px-3 py-2 text-xs text-slate-200 space-y-1"></div>
+  </div>
+</div>
 <style>
   @keyframes mlw-toast-in {
     from { transform: translateX(120%); opacity: 0; }
@@ -309,24 +315,33 @@ export const INDEX_HTML = /* html */ `<!doctype html>
 
       <!-- Market panel -->
       <div id="market-card" class="hidden space-y-4">
-        <div class="bg-panel border border-border rounded-xl p-5">
-          <div class="flex items-center justify-between gap-3 flex-wrap mb-3">
+        <div class="bg-panel border border-border rounded-xl p-5 space-y-4">
+          <div class="flex items-center justify-between gap-3 flex-wrap">
             <h2 class="text-xs uppercase tracking-widest text-muted">🛒 Mercado</h2>
             <button id="market-new-btn" class="gold-btn block px-4 rounded-md bg-gold text-bg font-semibold text-center border border-transparent hover:brightness-110 transition">+ novo anúncio</button>
           </div>
-          <div class="flex flex-wrap items-center gap-2 text-xs mb-3">
-            <span class="text-muted mr-1">ordenar:</span>
-            <button data-sort="hot" class="market-sort px-2 py-0.5 rounded border border-goldsoft text-goldsoft">🔥 em alta</button>
-            <button data-sort="new" class="market-sort px-2 py-0.5 rounded border border-border text-muted hover:text-slate-300">🆕 novos</button>
-            <span class="text-muted mx-1">·</span>
-            <span class="text-muted">tipo:</span>
-            <button data-side="" class="market-side px-2 py-0.5 rounded border border-goldsoft text-goldsoft">todos</button>
-            <button data-side="sell" class="market-side px-2 py-0.5 rounded border border-border text-muted hover:text-slate-300">vendendo</button>
-            <button data-side="buy" class="market-side px-2 py-0.5 rounded border border-border text-muted hover:text-slate-300">comprando</button>
-            <button data-side="donate" class="market-side px-2 py-0.5 rounded border border-border text-muted hover:text-slate-300">doação</button>
-            <input id="market-search" placeholder="buscar item ou nota..." class="ml-auto h-8 bg-bg border border-border rounded-md px-2 outline-none focus:border-gold/60 text-xs min-w-[160px]" />
+          <div class="rounded-lg border border-border/70 bg-bg/30 p-3 space-y-3">
+            <div class="flex flex-wrap items-center gap-2 text-xs">
+              <span class="text-muted mr-1">ordenar:</span>
+              <button data-sort="hot" class="market-sort h-8 px-3 rounded border border-goldsoft text-goldsoft">🔥 em alta</button>
+              <button data-sort="new" class="market-sort h-8 px-3 rounded border border-border text-muted hover:text-slate-300">🆕 novos</button>
+              <span class="text-muted mx-1">|</span>
+              <span class="text-muted">tipo:</span>
+              <button data-side="" class="market-side h-8 px-3 rounded border border-goldsoft text-goldsoft">todos</button>
+              <button data-side="sell" class="market-side h-8 px-3 rounded border border-border text-muted hover:text-slate-300">vendendo</button>
+              <button data-side="buy" class="market-side h-8 px-3 rounded border border-border text-muted hover:text-slate-300">comprando</button>
+              <button data-side="donate" class="market-side h-8 px-3 rounded border border-border text-muted hover:text-slate-300">doação</button>
+            </div>
+            <input id="market-search" placeholder="buscar item ou nota..." class="w-full h-9 bg-bg border border-border rounded-md px-3 outline-none focus:border-gold/60 text-sm" />
           </div>
-          <div id="market-list" class="space-y-3"></div>
+          <div id="market-offers" class="hidden rounded-lg border border-border bg-bg/40 p-3">
+            <div class="flex items-center justify-between gap-2 mb-2">
+              <div class="text-xs uppercase tracking-widest text-goldsoft">Ofertas recebidas</div>
+              <button id="market-offers-refresh" class="px-2 py-1 rounded border border-border text-[11px] hover:bg-bg">↻ atualizar</button>
+            </div>
+            <div id="market-offers-list" class="grid gap-2 text-xs md:grid-cols-2"></div>
+          </div>
+          <div id="market-list" class="grid grid-cols-1 lg:grid-cols-2 gap-3"></div>
         </div>
       </div>
 
@@ -337,6 +352,10 @@ export const INDEX_HTML = /* html */ `<!doctype html>
             <div class="flex gap-2">
               <button id="admin-compare" class="px-3 py-1.5 rounded-md border border-gold/40 text-goldsoft hover:bg-gold/10 transition text-xs">📈 Comparar</button>
               <button id="admin-scrape-items" class="px-3 py-1.5 rounded-md border border-gold/40 text-goldsoft hover:bg-gold/10 transition text-xs">🛍️ Scrapear catálogo</button>
+              <button id="admin-wipe-items" class="px-3 py-1.5 rounded-md border border-danger/40 text-danger hover:bg-danger/10 transition text-xs">🧹 Wipe catálogo</button>
+              <button id="admin-import-item-rules" class="px-3 py-1.5 rounded-md border border-gold/40 text-goldsoft hover:bg-gold/10 transition text-xs">📦 Importar regras</button>
+              <button id="admin-scrape-shop-item" class="px-3 py-1.5 rounded-md border border-gold/40 text-goldsoft hover:bg-gold/10 transition text-xs">🕸️ Importar da loja</button>
+              <button id="admin-backfill-item-rules" class="px-3 py-1.5 rounded-md border border-gold/40 text-goldsoft hover:bg-gold/10 transition text-xs">🧩 Backfill attrs</button>
               <button id="admin-poll" class="gold-btn block px-3 rounded-md bg-gold text-bg font-semibold text-center border border-transparent hover:brightness-110 transition text-xs">Rodar cron agora</button>
             </div>
           </div>
@@ -510,7 +529,7 @@ function setAppAdminLayout(isAdmin) {
   const app = $("app");
   if (!app) return;
   app.classList.remove("max-w-3xl", "max-w-6xl");
-  app.classList.add(isAdmin ? "max-w-6xl" : "max-w-3xl");
+  app.classList.add("max-w-6xl");
 }
 
 function relativeTime(unixSeconds) {
@@ -522,6 +541,16 @@ function relativeTime(unixSeconds) {
   if (diff < 86400) return Math.floor(diff / 3600) + "h atrás";
   return Math.floor(diff / 86400) + " d atrás";
 }
+function relativeFutureMinutes(unixSeconds) {
+  if (!unixSeconds) return null;
+  const diff = unixSeconds - Math.floor(Date.now() / 1000);
+  if (diff <= 0) return "agora";
+  const mins = Math.ceil(diff / 60);
+  if (mins < 60) return mins + "min";
+  const h = Math.floor(mins / 60);
+  const rem = mins % 60;
+  return rem > 0 ? (h + "h " + rem + "min") : (h + "h");
+}
 function formatDuration(seconds) {
   if (seconds == null || isNaN(seconds)) return null;
   const s = Math.round(seconds);
@@ -532,6 +561,234 @@ function formatDuration(seconds) {
 }
 function escapeHtml(s) {
   return String(s).replace(/[&<>]/g, (c) => c === "&" ? "&amp;" : c === "<" ? "&lt;" : "&gt;");
+}
+
+function normalizeAncientSetName(raw) {
+  return String(raw || "")
+    // Note: this file is embedded into HTML as a template string, so regex
+    // backslashes must be escaped (\\s) to survive TS -> HTML string output.
+    .replace(/\\s*\\+\\s*(?:5|10)\\s*$/i, "")
+    .replace(/\\s{2,}/g, " ")
+    .trim();
+}
+
+function ancientAttrsHtml(linesRaw) {
+  const lines = (Array.isArray(linesRaw) ? linesRaw : [])
+    .map((s) => String(s || "").trim())
+    .filter(Boolean)
+    // Filter noise that sometimes leaks from the Fanz page scrape.
+    .filter((s) => !/^def:\\s*\\+/i.test(s))
+    .filter((s) => !/^(one|two)-handed dmg:/i.test(s))
+    .filter((s) => !/^def\\b/i.test(s) || /^def\\s*\\+\\d/i.test(s)); // keep "DEF +40" but drop "DEF: +48"
+
+  const groups = [];
+  let cur = null;
+  const pushCur = () => { if (cur && cur.items.length) groups.push(cur); };
+  for (const s of lines) {
+    const m = s.match(/^x(\d+)\s*items?:\s*(.*)$/i);
+    if (m) {
+      pushCur();
+      cur = { title: "x" + m[1] + " items", items: [] };
+      const rest = (m[2] || "").trim();
+      if (rest) cur.items.push(rest);
+      continue;
+    }
+    if (!cur) {
+      cur = { title: "Bônus", items: [] };
+    }
+    cur.items.push(s);
+  }
+  pushCur();
+
+  if (groups.length === 0) return '<div class="text-[12px] text-muted">• (sem dados)</div>';
+  return groups.map((g) => (
+    '<div class="mt-1.5">' +
+      '<div class="text-[11px] text-amber-200 uppercase tracking-widest">' + escapeHtml(g.title) + "</div>" +
+      g.items.slice(0, 12).map((it) => '<div class="text-[12px] text-amber-50">• ' + escapeHtml(it) + "</div>").join("") +
+    "</div>"
+  )).join("");
+}
+
+function muItemTooltipParts(itemName, attrsJson) {
+  let attrs = null;
+  try { attrs = attrsJson ? JSON.parse(attrsJson) : null; } catch {}
+  const lines = [];
+  let titleClass = "text-slate-100";
+  if (attrs?.full || attrs?.excellent) titleClass = "text-emerald-200";
+  else if (attrs?.ancient) titleClass = "text-amber-200";
+  if (!attrs) {
+    return { title: escapeHtml(itemName || ""), titleClass, lines: ['<div class="text-muted">sem atributos</div>'] };
+  }
+  const nm = String(itemName || "");
+  const inferIsArmor = () => {
+    // Heuristic: we don't store item category on listings.
+    // Prefer explicit armor keywords; otherwise treat as weapon.
+    return /(shield|escudo|helm|elmo|armor|armour|armadura|plate|peitoral|pants|calça|gloves|luvas|boots|botas|set\b|greaves|gauntlets)/i.test(nm);
+  };
+  const isArmor = inferIsArmor();
+  const lifeOpt = (attrs.option != null && Number.isFinite(Number(attrs.option)))
+    ? Number(attrs.option)
+    : null;
+  const lifeLabel = lifeOpt != null && lifeOpt >= 16 ? ("+Life +" + lifeOpt) : null;
+
+  if (attrs.full) {
+    lines.push('<div class="text-emerald-200 font-semibold">⭐ Item Full</div>');
+    lines.push('<div class="text-muted">Excelente (6 opções) · ' + escapeHtml(lifeLabel || "Adicional") + ' · Luck</div>');
+    lines.push('<div class="mt-2 text-[11px] text-muted uppercase tracking-widest">Opções Excellent</div>');
+    if (isArmor) {
+      lines.push('<div class="text-[12px]">• Defense Success Rate +10% <span class="text-muted">(Miss)</span></div>');
+      lines.push('<div class="text-[12px]">• Damage Decrease +4%</div>');
+      lines.push('<div class="text-[12px]">• Reflect Damage +5%</div>');
+      lines.push('<div class="text-[12px]">• Increase HP +4%</div>');
+      lines.push('<div class="text-[12px]">• Increase Mana +4%</div>');
+      lines.push('<div class="text-[12px]">• Increase Zen +40%</div>');
+    } else {
+      lines.push('<div class="text-[12px]">• Excellent Damage Rate +10%</div>');
+      lines.push('<div class="text-[12px]">• Increase Damage +Level/20</div>');
+      lines.push('<div class="text-[12px]">• Increase Damage +2%</div>');
+      lines.push('<div class="text-[12px]">• Attack Speed +7</div>');
+      lines.push('<div class="text-[12px]">• Life after hunt +Life/8</div>');
+      lines.push('<div class="text-[12px]">• Mana after hunt +Mana/8</div>');
+    }
+    if (lifeLabel) lines.push('<div class="mt-2 text-[12px]">• <b class="text-goldsoft">' + escapeHtml(lifeLabel) + "</b></div>");
+    lines.push('<div class="text-[12px]">• <b class="text-goldsoft">Luck</b></div>');
+  } else {
+    if (attrs.excellent) lines.push('<div class="text-emerald-200 font-semibold">Excellent</div>');
+    if (attrs.option != null) lines.push('<div><span class="text-muted">Option:</span> <b>+' + escapeHtml(String(attrs.option)) + '</b></div>');
+    if (attrs.luck) lines.push('<div><b class="text-goldsoft">Luck</b></div>');
+    if (attrs.skill) lines.push('<div><b class="text-goldsoft">Skill</b></div>');
+  }
+  if (attrs.refinement != null) {
+    lines.push('<div><span class="text-muted">Refinamento:</span> <b>+' + escapeHtml(String(attrs.refinement)) + '</b></div>');
+  }
+  if (attrs.harmony) {
+    lines.push('<div><span class="text-muted">Harmony:</span> <b class="text-slate-200">' + escapeHtml(String(attrs.harmony)) + '</b></div>');
+  }
+  if (attrs.ancient) {
+    lines.push('<div><span class="text-muted">Ancient:</span> <b class="text-amber-200">' + escapeHtml(String(attrs.ancient)) + '</b></div>');
+  }
+  if (lines.length === 0) lines.push('<div class="text-muted">sem atributos</div>');
+  return { title: escapeHtml(itemName || ""), titleClass, lines };
+}
+
+const itemdbCache = new Map();
+async function getItemDbInfo(name, itemSlug) {
+  const key = (itemSlug ? ("slug:" + itemSlug) : ("name:" + (name || "").trim().toLowerCase()));
+  if (!key) return null;
+  if (itemdbCache.has(key)) return itemdbCache.get(key);
+  const p = (async () => {
+    // Prefer deterministic server rules (99z+custom), then fall back to MU Fanz.
+    try {
+      const qs = new URLSearchParams();
+      if (name) qs.set("name", name);
+      if (itemSlug) qs.set("slug", itemSlug);
+      const rr = await fetchJSON("/api/items/rules?" + qs.toString());
+      if (rr && rr.ok) return rr;
+    } catch {}
+    try {
+      const r = await fetchJSON("/api/items/fanz?name=" + encodeURIComponent(name));
+      return (r && r.ok) ? r : null;
+    } catch { return null; }
+  })();
+  itemdbCache.set(key, p);
+  return p;
+}
+
+function wireMarketItemTooltips() {
+  const tip = $("item-tip");
+  if (!tip) return;
+  const titleEl = tip.querySelector("[data-title]");
+  const bodyEl = tip.querySelector("[data-body]");
+  if (!titleEl || !bodyEl) return;
+
+  let current = null;
+  const hide = () => { tip.classList.add("hidden"); current = null; };
+    const showFor = async (el, x, y) => {
+    const name = el.textContent || "";
+    const attrsJson = el.dataset.attrs || "";
+      const itemSlug = el.dataset.itemSlug || "";
+    // First render a fast local tooltip, then enrich with itemdb (async).
+    const p = muItemTooltipParts(name, attrsJson);
+    titleEl.className = "px-3 py-2 text-sm font-semibold border-b border-border/60 " + p.titleClass;
+    titleEl.innerHTML = p.title || "";
+    bodyEl.innerHTML = p.lines.join("") + '<div class="mt-2 text-[11px] text-muted">buscando itemdb...</div>';
+    tip.classList.remove("hidden");
+    position(x, y);
+
+    // Enrich with MU Online Fanz itemdb info.
+    const info = await getItemDbInfo(name, itemSlug);
+    if (!info) return;
+    let ancientSection = "";
+    const anc = (() => {
+      try {
+        const a = attrsJson ? JSON.parse(attrsJson) : null;
+        return a && a.ancient ? normalizeAncientSetName(String(a.ancient)) : "";
+      } catch { return ""; }
+    })();
+    if (anc) {
+      const sets = info && info.ancient_sets ? info.ancient_sets : null;
+      const lines = anc && sets && sets[anc] ? sets[anc] : null;
+      ancientSection =
+        '<div class="mt-2 text-[11px] text-muted uppercase tracking-widest">Ancient · ' + escapeHtml(anc) + "</div>" +
+        (
+          Array.isArray(lines) && lines.length > 0
+            ? ancientAttrsHtml(lines)
+            : '<div class="text-[12px] text-muted">• (sem dados do set ainda — rode o sync)</div>'
+        );
+    }
+    const details = (info.details || []).slice(0, 6).map((s) => '<div class="text-[12px] text-slate-200">• ' + escapeHtml(s) + "</div>").join("");
+    const reqs = (info.requirements || []).slice(0, 6).map((s) => '<div class="text-[12px] text-slate-200">• ' + escapeHtml(s) + "</div>").join("");
+    const sections = [
+      details ? ('<div class="mt-2 text-[11px] text-muted uppercase tracking-widest">Item</div>' + details) : "",
+      reqs ? ('<div class="mt-2 text-[11px] text-muted uppercase tracking-widest">Requisitos</div>' + reqs) : "",
+      ancientSection,
+      info.source ? ('<div class="mt-2 text-[10px] text-muted">fonte: ' + escapeHtml(info.source.replace(/^https?:\\/\\//, "")) + "</div>") : "",
+    ].filter(Boolean).join("");
+
+    // Only update if we're still hovering the same element.
+    if (current === el) {
+      bodyEl.innerHTML = p.lines.join("") + sections;
+      position(x, y);
+    }
+  };
+  const position = (x, y) => {
+    const pad = 12;
+    const offX = 14;
+    const offY = 14;
+    const w = tip.offsetWidth || 320;
+    const h = tip.offsetHeight || 160;
+    const vw = window.innerWidth;
+    const vh = window.innerHeight;
+    let left = x + offX;
+    let top = y + offY;
+    if (left + w + pad > vw) left = Math.max(pad, x - w - offX);
+    if (top + h + pad > vh) top = Math.max(pad, y - h - offY);
+    tip.style.left = left + "px";
+    tip.style.top = top + "px";
+  };
+
+  document.addEventListener("mousemove", (e) => {
+    if (tip.classList.contains("hidden")) return;
+    position(e.clientX, e.clientY);
+  });
+  document.addEventListener("mouseover", (e) => {
+    const t = e.target;
+    if (!(t instanceof Element)) return;
+    const el = t.closest("[data-item-tip]");
+    if (!el) return;
+    current = el;
+    showFor(el, e.clientX, e.clientY);
+  });
+  document.addEventListener("mouseout", (e) => {
+    if (!current) return;
+    const to = e.relatedTarget;
+    if (to instanceof Node && current.contains(to)) return;
+    // If leaving the trigger, hide.
+    const from = e.target;
+    if (from instanceof Node && current.contains(from)) hide();
+  });
+  window.addEventListener("scroll", hide, { passive: true });
+  window.addEventListener("blur", hide);
 }
 
 // ---- Class symbols (MU) ----
@@ -2453,6 +2710,33 @@ if ($("admin-scrape-items")) $("admin-scrape-items").onclick = async (e) => {
     toast("catálogo: " + r.scraped + " itens em " + r.categories + " categorias", "ok");
   } catch (err) { toast(err.message, "err"); }
 };
+if ($("admin-wipe-items")) $("admin-wipe-items").onclick = async (e) => {
+  const btn = e.currentTarget;
+  if (!await confirmModal("Apagar o catálogo inteiro? (items, sources, rules)", { okLabel: "Wipe", danger: true })) return;
+  try {
+    const r = await withSpinner(btn, () => fetchJSON("/api/admin/items/wipe", { method: "POST" }));
+    toast("wipe ok: items=" + r.deleted.items + " rules=" + r.deleted.item_rules, "ok");
+  } catch (err) { toast(err.message, "err"); }
+};
+if ($("admin-import-item-rules")) $("admin-import-item-rules").onclick = () => openImportItemRulesModal();
+if ($("admin-scrape-shop-item")) $("admin-scrape-shop-item").onclick = () => openScrapeShopItemModal();
+if ($("admin-backfill-item-rules")) $("admin-backfill-item-rules").onclick = async (e) => {
+  const btn = e.currentTarget;
+  // Optional cookie improves reliability when the shop blocks worker logins.
+  const prevCookie = localStorage.getItem("admin_backfill_cookie") || "";
+  const cookie = prompt("Cookie (opcional). Se vazio, usa creds do env.\\n\\nCole o header Cookie do browser logado:", prevCookie) || "";
+  localStorage.setItem("admin_backfill_cookie", cookie.trim());
+  try {
+    const body = { limit: 40, concurrency: 50 };
+    if (cookie && cookie.trim()) body.cookie = cookie.trim();
+    const r = await withSpinner(btn, () => fetchJSON("/api/admin/item-rules/backfill", { method: "POST", body: JSON.stringify(body) }));
+    if (r && r.errors && r.errors.length) {
+      toast("backfill: " + r.imported + "/" + r.attempted + " · " + r.errors[0], "err");
+    } else {
+      toast("backfill: " + r.imported + "/" + r.attempted, r.imported ? "ok" : "info");
+    }
+  } catch (err) { toast(err.message, "err"); }
+};
 if ($("admin-health-refresh")) $("admin-health-refresh").onclick = () => loadAdminHealth();
 
 async function loadAdminEvents() {
@@ -2501,7 +2785,7 @@ function wireAdminEventRow(ev) {
 }
 
 // ---- Market ----
-const marketState = { sort: "hot", side: "", q: "", listings: [] };
+const marketState = { sort: "hot", side: "", q: "", listings: [], offers: [] };
 let marketSearchTimer = null;
 
 function wireMarket() {
@@ -2520,18 +2804,19 @@ function wireMarket() {
     }, 250);
   });
   $("market-new-btn").onclick = openListingForm;
+  if ($("market-offers-refresh")) $("market-offers-refresh").onclick = () => loadMarketOffers();
 }
 
 function refreshSortChips() {
   document.querySelectorAll(".market-sort").forEach((b) => {
     const active = b.getAttribute("data-sort") === marketState.sort;
-    b.className = "market-sort px-2 py-0.5 rounded border " + (active ? "border-goldsoft text-goldsoft" : "border-border text-muted hover:text-slate-300");
+    b.className = "market-sort h-8 px-3 rounded border text-xs transition " + (active ? "border-goldsoft text-goldsoft bg-gold/10" : "border-border text-muted hover:text-slate-300 hover:bg-bg/70");
   });
 }
 function refreshSideChips() {
   document.querySelectorAll(".market-side").forEach((b) => {
     const active = (b.getAttribute("data-side") || "") === marketState.side;
-    b.className = "market-side px-2 py-0.5 rounded border " + (active ? "border-goldsoft text-goldsoft" : "border-border text-muted hover:text-slate-300");
+    b.className = "market-side h-8 px-3 rounded border text-xs transition " + (active ? "border-goldsoft text-goldsoft bg-gold/10" : "border-border text-muted hover:text-slate-300 hover:bg-bg/70");
   });
 }
 
@@ -2552,9 +2837,90 @@ async function loadMarket() {
     if (marketState.q) params.set("q", marketState.q);
     const data = await fetchJSON("/api/market/listings?" + params.toString());
     marketState.listings = data.listings || [];
+    await loadMarketOffers();
     renderMarket();
   } catch (e) {
     list.innerHTML = '<div class="text-xs text-danger">erro: ' + escapeHtml(e.message) + '</div>';
+  }
+}
+
+async function loadMarketOffers() {
+  const wrap = $("market-offers");
+  const list = $("market-offers-list");
+  if (!wrap || !list) return;
+  list.innerHTML = '<div class="text-muted">carregando...</div>';
+  try {
+    const data = await fetchJSON("/api/market/offers/received");
+    const offers = data.offers || [];
+    marketState.offers = offers;
+    wrap.classList.toggle("hidden", offers.length === 0);
+    if (offers.length === 0) {
+      list.className = "";
+      list.innerHTML = '<div class="text-muted">sem ofertas recebidas</div>';
+      return;
+    }
+    list.className = "grid grid-cols-1 sm:grid-cols-2 gap-2";
+    list.innerHTML = offers.map((o) => {
+      const statusClass =
+        o.status === "pending" ? "text-goldsoft"
+        : o.status === "accepted" ? "text-ok"
+        : o.status === "rejected" ? "text-danger"
+        : "text-muted";
+      const statusLabel =
+        o.status === "pending" ? "pendente"
+        : o.status === "accepted" ? "aceita"
+        : o.status === "rejected" ? "recusada"
+        : "expirada";
+      const offerValue = (o.currency || o.price != null)
+        ? (o.currency === "free"
+            ? "grátis"
+            : ((o.price != null ? Number(o.price).toLocaleString("pt-BR") + " " : "") + (o.currency || "")))
+        : "—";
+      const expires = o.status === "pending" ? (" · expira em " + relativeFutureMinutes(o.expires_at)) : "";
+      const actions = o.status === "pending"
+        ? (
+          '<div class="flex gap-1 mt-1">' +
+            '<button data-offer-action="accept" data-offer-id="' + o.id + '" class="px-2 py-0.5 rounded border border-ok/40 text-ok hover:bg-ok/10">aceitar</button>' +
+            '<button data-offer-action="reject" data-offer-id="' + o.id + '" class="px-2 py-0.5 rounded border border-danger/40 text-danger hover:bg-danger/10">recusar</button>' +
+          "</div>"
+        )
+        : "";
+      return (
+        '<div class="rounded-md border border-border bg-bg/70 p-3 hover:bg-bg/90 transition-colors min-w-0">' +
+          '<div class="flex items-start gap-2">' +
+            '<span class="font-semibold text-goldsoft">#' + o.id + "</span>" +
+            '<div class="min-w-0 flex-1"><span class="text-muted">para</span> <b class="truncate block">' + escapeHtml(o.listing_item_name || ("#" + o.listing_id)) + "</b></div>" +
+            '<span class="ml-auto uppercase text-[10px] tracking-wide ' + statusClass + '">' + statusLabel + "</span>" +
+          "</div>" +
+          '<div class="mt-1 text-muted">de <b class="text-slate-200">' + escapeHtml(o.bidder_nickname || ("user " + o.bidder_user_id)) + "</b>" +
+            (o.bidder_char_name ? (" · char: " + escapeHtml(o.bidder_char_name)) : "") +
+          "</div>" +
+          '<div class="mt-1">💰 ' + escapeHtml(offerValue) + '<span class="text-muted">' + escapeHtml(expires) + "</span></div>" +
+          (o.message ? ('<div class="mt-1 text-slate-300">💬 ' + escapeHtml(o.message) + "</div>") : "") +
+          actions +
+        "</div>"
+      );
+    }).join("");
+
+    list.querySelectorAll("[data-offer-action]").forEach((btn) => {
+      btn.onclick = async () => {
+        const id = Number(btn.getAttribute("data-offer-id"));
+        const action = btn.getAttribute("data-offer-action");
+        try {
+          await fetchJSON("/api/market/offers/" + id, {
+            method: "PATCH",
+            body: JSON.stringify({ action }),
+          });
+          toast("oferta " + (action === "accept" ? "aceita" : "recusada"), "ok");
+          await loadMarket();
+        } catch (e) {
+          toast(e.message, "err");
+        }
+      };
+    });
+  } catch (e) {
+    wrap.classList.remove("hidden");
+    list.innerHTML = '<div class="text-danger">erro: ' + escapeHtml(e.message) + "</div>";
   }
 }
 
@@ -2591,6 +2957,9 @@ function wireItemTypeahead(scope) {
       }
     }
     results.classList.add("hidden");
+    try {
+      scope.dispatchEvent(new CustomEvent("item-picked", { detail: item }));
+    } catch {}
   };
 
   if (clearBtn) clearBtn.onclick = () => {
@@ -2598,6 +2967,7 @@ function wireItemTypeahead(scope) {
     input.value = "";
     if (chip) chip.classList.add("hidden");
     input.focus();
+    try { scope.dispatchEvent(new CustomEvent("item-cleared")); } catch {}
   };
 
   const fetchAndRender = async (q) => {
@@ -2663,11 +3033,20 @@ function wireItemTypeahead(scope) {
 // template-render time and the served JS parses as a syntax error.
 function proxyImg(url) {
   if (!url) return url;
+  let u = String(url).trim();
+
+  // Some scrapes accidentally persist "undefined/..." when a base URL was missing.
+  // Normalize the common MuPatos sprite path shapes into an absolute URL.
+  if (u.toLowerCase().indexOf("undefined/") === 0) u = u.slice("undefined/".length);
+  const ul = u.toLowerCase();
+  if (ul.indexOf("site/resources/images/") === 0) u = "https://mupatos.com.br/" + u;
+  if (ul.indexOf("/site/resources/images/") === 0) u = "https://mupatos.com.br" + u;
+
   const prefix = "https://mupatos.com.br/site/resources/images/";
-  if (url.toLowerCase().indexOf(prefix) === 0) {
-    return "/img-proxy?u=" + encodeURIComponent(url);
+  if (u.toLowerCase().indexOf(prefix) === 0) {
+    return "/img-proxy?u=" + encodeURIComponent(u);
   }
-  return url;
+  return u;
 }
 
 function fmtAttrs(attrsJson) {
@@ -2694,6 +3073,7 @@ function renderMarket() {
   refreshSortChips();
   refreshSideChips();
   const list = $("market-list");
+  list.className = "grid grid-cols-1 lg:grid-cols-2 gap-3";
   list.innerHTML = "";
   if (marketState.listings.length === 0) {
     list.innerHTML = '<div class="text-xs text-muted py-4">nenhum anúncio. seja o primeiro!</div>';
@@ -2714,7 +3094,7 @@ function renderMarket() {
 
 function renderListingCard(l) {
   const card = document.createElement("div");
-  card.className = "border border-border rounded-md bg-bg/60 p-3";
+  card.className = "border border-border rounded-lg bg-bg/60 p-3.5 flex flex-col h-full";
   card.dataset.listingId = String(l.id);
   const sideBadge = l.side === "buy"
     ? '<span class="px-1.5 py-0.5 rounded bg-blue-500/15 text-blue-300 border border-blue-500/30 text-[10px] uppercase">comprar</span>'
@@ -2748,8 +3128,8 @@ function renderListingCard(l) {
   const ago = fmtAgo(state.now ? state.now - l.created_at : Math.floor(Date.now() / 1000) - l.created_at);
 
   const reactionsRow = l.reactions.map((r) =>
-    '<button data-action="react" data-kind="' + escapeHtml(r.kind) + '" class="text-xs px-2 py-0.5 rounded border ' +
-    (r.mine ? "border-goldsoft bg-gold/10 text-goldsoft" : "border-border text-muted hover:text-slate-200") +
+    '<button data-action="react" data-kind="' + escapeHtml(r.kind) + '" class="h-7 inline-flex items-center gap-1 text-xs px-2 rounded border transition tabular-nums shrink-0 ' +
+    (r.mine ? "border-goldsoft bg-gold/10 text-goldsoft" : "border-border text-muted hover:text-slate-200 hover:bg-bg/70") +
     '">' + r.kind + (r.count ? ' <span class="tabular-nums">' + r.count + '</span>' : "") + '</button>'
   ).join("");
 
@@ -2759,9 +3139,15 @@ function renderListingCard(l) {
   try { parsedAttrs = l.item_attrs ? JSON.parse(l.item_attrs) : null; } catch {}
   const titleClass = (() => {
     if (l.kind === "char") return "text-purple-300";
-    if (parsedAttrs?.full || parsedAttrs?.excellent) return "text-emerald-300 drop-shadow-[0_0_4px_rgba(16,185,129,0.6)]";
     if (parsedAttrs?.ancient) return "text-amber-300 drop-shadow-[0_0_4px_rgba(245,158,11,0.5)]";
+    if (parsedAttrs?.full || parsedAttrs?.excellent) return "text-emerald-300 drop-shadow-[0_0_4px_rgba(16,185,129,0.6)]";
     return "text-slate-100";
+  })();
+  const refineSuffix = (() => {
+    if (l.kind === "char" || l.side !== "sell") return "";
+    const n = parsedAttrs && parsedAttrs.refinement != null ? Number(parsedAttrs.refinement) : NaN;
+    if (!Number.isFinite(n) || n < 1) return "";
+    return ' <span class="text-goldsoft tabular-nums">+' + escapeHtml(String(Math.floor(n))) + "</span>";
   })();
   // For char listings, show resets prominently next to the title.
   const charSummary = l.kind === "char" && parsedAttrs ? (() => {
@@ -2773,37 +3159,58 @@ function renderListingCard(l) {
   })() : "";
 
   card.innerHTML =
-    '<div class="flex flex-wrap items-center gap-2 text-xs mb-1.5">' +
+    '<div class="flex flex-wrap items-center gap-2 text-xs mb-2">' +
       sideBadge + kindBadge + statusBadge +
       '<span class="text-muted">por <b class="text-goldsoft">' + escapeHtml(l.nickname ?? "?") + '</b></span>' +
       (charLine ? '<span class="text-muted">· ' + charLine + '</span>' : "") +
       (charStatusBadge ? ' ' + charStatusBadge : '') +
       '<span class="text-muted ml-auto" title="' + escapeHtml(date.toLocaleString("pt-BR")) + '">' + escapeHtml(ago) + '</span>' +
     '</div>' +
-    '<div class="flex gap-3 items-start">' +
-      (l.item_image_url ? '<img src="' + escapeHtml(proxyImg(l.item_image_url)) + '" class="w-12 h-12 object-contain shrink-0 mt-0.5" loading="lazy" />' : "") +
+    '<div class="flex-1">' +
+    '<div class="flex gap-3 items-start min-w-0">' +
+      (l.item_image_url
+        ? '<img src="' + escapeHtml(proxyImg(l.item_image_url)) + '" class="w-12 h-12 object-contain shrink-0 mt-0.5" loading="lazy" />'
+        : '<div class="w-12 h-12 shrink-0 mt-0.5 rounded-md border border-border bg-bg/60 flex items-center justify-center text-muted">📦</div>') +
       '<div class="min-w-0 flex-1">' +
-        '<div class="font-semibold ' + titleClass + ' whitespace-pre-wrap">' + escapeHtml(l.item_name) + '</div>' +
+        '<div class="font-semibold text-base leading-tight ' + titleClass + ' whitespace-pre-wrap">' +
+          (l.kind !== "char"
+            ? ('<span data-item-tip class="cursor-help">' + escapeHtml(l.item_name) + "</span>" + refineSuffix)
+            : escapeHtml(l.item_name)) +
+        "</div>" +
         charSummary +
         (l.kind !== "char" && attrs ? '<div class="text-xs text-muted mt-0.5">' + escapeHtml(attrs) + '</div>' : "") +
-        (price ? '<div class="text-sm text-goldsoft mt-1 tabular-nums">' + escapeHtml(price) + '</div>' : "") +
+        (price ? '<div class="text-sm text-goldsoft mt-1.5 tabular-nums">' + escapeHtml(price) + '</div>' : "") +
         (l.notes ? '<div class="text-sm text-slate-300 mt-2 whitespace-pre-wrap">' + escapeHtml(l.notes) + '</div>' : "") +
       '</div>' +
     '</div>' +
-    '<div class="flex flex-wrap items-center gap-1.5 mt-3">' +
-      reactionsRow +
-      (isMine
-        ? '<button data-action="edit" class="text-xs px-2 py-0.5 rounded border border-border text-muted hover:text-slate-200 ml-auto">editar</button>' +
-          '<button data-action="delete" class="text-xs px-2 py-0.5 rounded border border-border text-danger hover:bg-danger/10">remover</button>'
-        : '<button data-action="ping" class="text-xs px-2 py-0.5 rounded bg-gold text-bg font-semibold ml-auto hover:brightness-110">📣 tenho interesse</button>') +
-      '<button data-action="toggle-detail" class="text-xs px-2 py-0.5 rounded border border-border text-muted hover:text-slate-200">💬 <span data-comment-count>' + (l.comment_count || 0) + '</span></button>' +
-    '</div>' +
+    "</div>" + // flex-1
+    '<div class="mt-auto pt-2 border-t border-border/40">' +
+      '<div class="flex items-center justify-end gap-1.5 overflow-x-auto whitespace-nowrap pb-1 -mx-0.5 px-0.5">' + reactionsRow + "</div>" +
+      '<div class="flex items-center gap-2 justify-end pt-1">' +
+        (isMine
+          ? (
+            '<button data-action="edit" class="h-8 inline-flex items-center text-xs px-2 rounded border border-border text-muted hover:text-slate-200 hover:bg-bg/70">editar</button>' +
+            '<button data-action="delete" class="h-8 inline-flex items-center text-xs px-2 rounded border border-border text-danger hover:bg-danger/10">remover</button>'
+          )
+          : (
+            '<button data-action="ping" class="h-8 inline-flex items-center text-xs px-2 rounded bg-gold text-bg font-semibold hover:brightness-110">📣 tenho interesse</button>' +
+            '<button data-action="offer" class="h-8 inline-flex items-center text-xs px-2 rounded border border-gold/40 text-goldsoft hover:bg-gold/10">💸 fazer oferta</button>'
+          )
+        ) +
+        '<button data-action="toggle-detail" class="h-8 inline-flex items-center gap-1 text-xs px-2 rounded border border-border text-muted hover:text-slate-200 hover:bg-bg/70">💬 <span data-comment-count class="tabular-nums">' + (l.comment_count || 0) + '</span></button>' +
+      "</div>" +
+    "</div>" +
     '<div data-detail class="hidden mt-3 pt-3 border-t border-border/60"></div>';
 
   card.querySelectorAll("[data-action]").forEach((btn) => {
     const action = btn.getAttribute("data-action");
     btn.onclick = (e) => handleListingAction(action, l, card, e);
   });
+  const tipEl = card.querySelector("[data-item-tip]");
+  if (tipEl) {
+    if (l.item_attrs) tipEl.dataset.attrs = l.item_attrs;
+    if (l.item_slug) tipEl.dataset.itemSlug = l.item_slug;
+  }
   return card;
 }
 
@@ -2845,7 +3252,111 @@ async function handleListingAction(action, l, card, e) {
     openPingModal(l);
     return;
   }
-  if (action === "toggle-detail") { toggleListingDetail(l, card); return; }
+  if (action === "offer") {
+    if (!await ensureNickname()) return;
+    openOfferModal(l);
+    return;
+  }
+  if (action === "toggle-detail") { openCommentsModal(l, card); return; }
+}
+
+async function openCommentsModal(l, card) {
+  const overlay = document.createElement("div");
+  overlay.className = "fixed inset-0 bg-black/70 flex items-start sm:items-center justify-center z-50 p-3";
+  const priceLine = fmtPriceCurrency(l);
+  overlay.innerHTML =
+    '<div class="bg-panel border border-border rounded-xl w-full max-w-lg my-4 overflow-hidden flex flex-col max-h-[calc(100vh-2rem)]">' +
+      '<div class="px-4 py-3 border-b border-border/60">' +
+        '<div class="flex items-center gap-2">' +
+          '<div class="text-xs uppercase tracking-widest text-muted">Comentários</div>' +
+          '<div class="min-w-0 ml-2 text-sm font-semibold text-slate-100 truncate">' + escapeHtml(l.item_name || ("#" + l.id)) + '</div>' +
+          '<div class="ml-auto text-xs text-muted">#' + escapeHtml(String(l.id)) + '</div>' +
+          '<button type="button" data-close class="ml-2 h-8 w-8 rounded-md border border-border text-muted hover:text-slate-200 hover:bg-bg/70">×</button>' +
+        "</div>" +
+        '<div class="mt-1 flex items-center gap-2 text-xs">' +
+          '<div class="min-w-0 text-muted truncate">por <b class="text-goldsoft">' + escapeHtml(l.nickname || "?") + '</b></div>' +
+          (priceLine ? ('<div class="ml-auto text-goldsoft tabular-nums shrink-0">' + escapeHtml(priceLine) + '</div>') : "") +
+        "</div>" +
+      "</div>" +
+      '<div class="px-4 py-3 overflow-y-auto flex-1 min-h-0" data-body>' +
+        '<div class="text-xs text-muted">carregando...</div>' +
+      "</div>" +
+      '<div class="px-4 py-3 border-t border-border/60 bg-panel shrink-0">' +
+        '<div class="flex gap-2">' +
+          '<input data-comment-input type="text" maxlength="500" placeholder="comentário..." class="flex-1 h-9 bg-bg border border-border rounded-md px-2 outline-none focus:border-gold/60 text-sm" />' +
+          '<button data-comment-send class="h-9 px-3 rounded-md border border-border text-sm hover:bg-bg transition">enviar</button>' +
+        "</div>" +
+      "</div>" +
+    "</div>";
+  document.body.appendChild(overlay);
+
+  const close = () => overlay.remove();
+  overlay.querySelector("[data-close]").onclick = close;
+  overlay.addEventListener("click", (e) => { if (e.target === overlay) close(); });
+  window.addEventListener("keydown", function onKey(ev) {
+    if (ev.key === "Escape") { window.removeEventListener("keydown", onKey); close(); }
+  });
+
+  const body = overlay.querySelector("[data-body]");
+  const input = overlay.querySelector("[data-comment-input]");
+  const send = overlay.querySelector("[data-comment-send]");
+
+  const render = async () => {
+    body.innerHTML = '<div class="text-xs text-muted">carregando comentários...</div>';
+    try {
+      const data = await fetchJSON("/api/market/listings/" + l.id);
+      const comments = data.comments || [];
+      const list = comments.map((c) => {
+        const mine = state.user && c.user_id === state.user.id;
+        const ownerOfListing = state.user && l.user_id === state.user.id;
+        const removable = mine || ownerOfListing;
+        return '<div class="text-sm py-2 border-b border-border/40 last:border-0">' +
+          '<div class="flex items-center gap-2 text-[11px] text-muted">' +
+            '<b class="text-goldsoft">' + escapeHtml(c.nickname ?? "?") + '</b>' +
+            '<span>' + escapeHtml(fmtAgo(Math.floor(Date.now() / 1000) - c.created_at)) + '</span>' +
+            (removable ? '<button data-comment-del="' + c.id + '" class="ml-auto text-danger hover:underline">apagar</button>' : "") +
+          "</div>" +
+          '<div class="whitespace-pre-wrap">' + escapeHtml(c.body) + "</div>" +
+        "</div>";
+      }).join("");
+      body.innerHTML = list || '<div class="text-xs text-muted">sem comentários ainda</div>';
+      body.querySelectorAll("[data-comment-del]").forEach((b) => {
+        b.onclick = async () => {
+          if (!await confirmModal("Apagar comentário?", { okLabel: "Apagar", danger: true })) return;
+          try {
+            await fetchJSON("/api/market/comments/" + b.getAttribute("data-comment-del"), { method: "DELETE" });
+            await render();
+            // Best-effort: refresh market counts.
+            await loadMarket();
+          } catch (err) { toast(err.message, "err"); }
+        };
+      });
+    } catch (err) {
+      body.innerHTML = '<div class="text-xs text-danger">erro: ' + escapeHtml(err.message) + "</div>";
+    }
+  };
+
+  const submit = async () => {
+    const txt = input.value.trim();
+    if (!txt) return;
+    if (!await ensureNickname()) return;
+    try {
+      await fetchJSON("/api/market/listings/" + l.id + "/comment", {
+        method: "POST",
+        body: JSON.stringify({ body: txt }),
+      });
+      input.value = "";
+      // Update count on the card immediately.
+      const cc = card ? card.querySelector("[data-comment-count]") : null;
+      if (cc) cc.textContent = String((Number(cc.textContent) || 0) + 1);
+      await render();
+      // Keep other cards in sync too.
+      await loadMarket();
+    } catch (err) { toast(err.message, "err"); }
+  };
+  send.onclick = submit;
+  input.addEventListener("keydown", (e) => { if (e.key === "Enter") submit(); });
+  render();
 }
 
 async function toggleListingDetail(l, card) {
@@ -2927,8 +3438,14 @@ function openListingForm(existing) {
     const a = isEdit && existing.item_attrs ? (() => { try { return JSON.parse(existing.item_attrs); } catch { return {}; } })() : {};
     const isCharListing = isEdit && existing.kind === "char";
     overlay.innerHTML =
-      '<div class="bg-panel border border-border rounded-xl p-5 w-full max-w-lg my-4">' +
-        '<h3 class="text-sm uppercase tracking-widest text-muted mb-3">' + (isEdit ? "Editar anúncio" : "Novo anúncio") + '</h3>' +
+      '<div class="bg-panel border border-border rounded-xl p-5 w-full max-w-2xl my-4 overflow-hidden flex flex-col">' +
+        '<div class="flex items-start justify-between gap-3 mb-3 shrink-0">' +
+          '<div>' +
+            '<h3 class="text-sm uppercase tracking-widest text-muted">' + (isEdit ? "Editar anúncio" : "Novo anúncio") + '</h3>' +
+            '<div class="text-[11px] text-muted mt-1" data-step-label></div>' +
+          '</div>' +
+          '<div class="flex items-center gap-1.5 text-[11px] text-muted" data-step-dots></div>' +
+        '</div>' +
         '<div class="space-y-3 text-sm">' +
           '<div class="flex gap-2 text-xs">' +
             '<label class="flex-1 cursor-pointer"><input data-f="kind" type="radio" name="kind" value="item" class="peer sr-only"' + (!isCharListing ? " checked" : "") + ' />' +
@@ -2936,7 +3453,7 @@ function openListingForm(existing) {
             '<label class="flex-1 cursor-pointer"><input data-f="kind" type="radio" name="kind" value="char" class="peer sr-only"' + (isCharListing ? " checked" : "") + ' />' +
               '<div class="px-3 py-2 rounded-md border border-border text-center peer-checked:border-purple-400 peer-checked:bg-purple-500/15 peer-checked:text-purple-300 hover:bg-bg/60">🎮 Personagem</div></label>' +
           '</div>' +
-          '<div class="grid grid-cols-2 gap-2">' +
+          '<div class="grid grid-cols-2 gap-2" data-step="1">' +
             '<div><label class="text-[11px] text-muted block mb-1">Tipo</label>' +
               '<select data-f="side" class="w-full h-10 bg-bg border border-border rounded-md px-2">' +
                 '<option value="sell"' + (isEdit && existing.side === "sell" ? " selected" : "") + '>vender</option>' +
@@ -2949,37 +3466,89 @@ function openListingForm(existing) {
               '</select>' +
               '<div class="text-[11px] text-muted mt-1" data-char-hint>buyers veem o status online/mapa desse char pra saber se podem te chamar agora.</div></div>' +
           '</div>' +
-          '<div data-item-fields class="space-y-3"><div><label class="text-[11px] text-muted block mb-1" data-item-label>Item</label>' +
-            '<div class="relative">' +
-              '<div data-item-chip class="' + (isEdit && existing.item_image_url ? "" : "hidden ") + 'flex items-center gap-2 mb-2 px-2 py-1 rounded-md border border-goldsoft bg-gold/10">' +
-                (isEdit && existing.item_image_url ? '<img src="' + escapeHtml(proxyImg(existing.item_image_url)) + '" class="w-8 h-8 object-contain" />' : '<img class="w-8 h-8 object-contain" />') +
-                '<span data-item-chip-name class="text-sm">' + (isEdit ? escapeHtml(existing.item_name) : "") + '</span>' +
-                '<button type="button" data-item-clear class="ml-auto text-muted hover:text-danger text-xs">&times;</button>' +
+          '<div data-item-fields class="space-y-4">' +
+            '<div class="rounded-lg border border-border/70 bg-bg/30 p-3" data-step-item="2">' +
+              '<div class="text-[11px] text-muted uppercase tracking-widest mb-2" data-item-label>Item</div>' +
+              '<div class="relative">' +
+                '<div data-item-chip class="' + (isEdit && existing.item_image_url ? "" : "hidden ") + 'flex items-center gap-2 mb-2 px-2 py-1 rounded-md border border-goldsoft bg-gold/10">' +
+                  (isEdit && existing.item_image_url ? '<img src="' + escapeHtml(proxyImg(existing.item_image_url)) + '" class="w-8 h-8 object-contain" />' : '<img class="w-8 h-8 object-contain" />') +
+                  '<span data-item-chip-name class="text-sm">' + (isEdit ? escapeHtml(existing.item_name) : "") + '</span>' +
+                  '<button type="button" data-item-clear class="ml-auto text-muted hover:text-danger text-xs">&times;</button>' +
+                '</div>' +
+                '<input data-f="item_name" maxlength="80" placeholder="busque no catálogo (recomendado) ou digite livre..." autocomplete="off" class="w-full h-10 bg-bg border border-border rounded-md px-2" value="' + (isEdit ? escapeHtml(existing.item_name) : "") + '" />' +
+                '<input data-f="item_slug" type="hidden" value="' + (isEdit && existing.item_slug ? escapeHtml(existing.item_slug) : "") + '" />' +
+                '<div data-item-results class="hidden absolute z-10 mt-1 w-full max-h-60 overflow-y-auto bg-panel border border-border rounded-md shadow-lg"></div>' +
               '</div>' +
-              '<input data-f="item_name" maxlength="80" placeholder="busque no catálogo ou digite livre..." autocomplete="off" class="w-full h-10 bg-bg border border-border rounded-md px-2" value="' + (isEdit ? escapeHtml(existing.item_name) : "") + '" />' +
-              '<input data-f="item_slug" type="hidden" value="' + (isEdit && existing.item_slug ? escapeHtml(existing.item_slug) : "") + '" />' +
-              '<div data-item-results class="hidden absolute z-10 mt-1 w-full max-h-60 overflow-y-auto bg-panel border border-border rounded-md shadow-lg"></div>' +
-            '</div></div>' +
-          '<div class="grid grid-cols-2 gap-2">' +
-            '<div><label class="text-[11px] text-muted block mb-1">Refinamento (+0..+13)</label>' +
-              '<input data-f="refinement" type="number" min="0" max="13" class="w-full h-10 bg-bg border border-border rounded-md px-2" value="' + (a.refinement ?? "") + '" /></div>' +
-            '<div><label class="text-[11px] text-muted block mb-1">Option (0..28)</label>' +
-              '<input data-f="option" type="number" min="0" max="28" class="w-full h-10 bg-bg border border-border rounded-md px-2" value="' + (a.option ?? "") + '" /></div>' +
-          '</div>' +
-          '<div class="flex flex-wrap gap-3 text-xs items-center">' +
-            '<label class="inline-flex items-center gap-2 px-2 py-1 rounded border border-emerald-400/40 bg-emerald-500/10"><input data-f="full" type="checkbox" class="accent-emerald-400"' + (a.full ? " checked" : "") + ' /> <span class="text-emerald-300 font-semibold drop-shadow">⭐ Item Full</span></label>' +
-            '<span class="text-muted">ou:</span>' +
-            '<label class="inline-flex items-center gap-2"><input data-f="excellent" type="checkbox" class="accent-emerald-400"' + (a.excellent ? " checked" : "") + ' /> <span class="text-emerald-300">Excellent</span></label>' +
-            '<label class="inline-flex items-center gap-2"><input data-f="luck" type="checkbox" class="accent-gold"' + (a.luck ? " checked" : "") + ' /> luck</label>' +
-            '<label class="inline-flex items-center gap-2"><input data-f="skill" type="checkbox" class="accent-gold"' + (a.skill ? " checked" : "") + ' /> skill</label>' +
-          '</div>' +
-          '<div class="text-[11px] text-muted -mt-1">"Item Full" = Excellent + opt 28 + luck + skill. Refinamento (+0..+13) você ainda escolhe acima.</div>' +
-          '<div><label class="text-[11px] text-muted block mb-1">Conjunto ancient</label>' +
-            '<input data-f="ancient" maxlength="40" placeholder="ex.: Gaion, Anonymous, Hyon..." class="w-full h-10 bg-bg border border-border rounded-md px-2" value="' + (a.ancient ? escapeHtml(a.ancient) : "") + '" /></div>' +
-          '<div><label class="text-[11px] text-muted block mb-1">Bônus extras (texto livre)</label>' +
-            '<input data-f="extras" maxlength="240" placeholder="ex.: dmg+15%, refl+5%, dr+5..." class="w-full h-10 bg-bg border border-border rounded-md px-2" value="' + (a.extras ? escapeHtml(a.extras) : "") + '" /></div>' +
+              '<div class="text-[11px] text-muted mt-2">Dica: escolhendo pelo catálogo, o form mostra só as opções permitidas pra esse item.</div>' +
+            '</div>' +
+
+            '<div class="rounded-lg border border-border/70 bg-bg/30 p-3 space-y-3" data-step-item="2">' +
+              '<div class="text-[11px] text-muted uppercase tracking-widest">Opções rápidas</div>' +
+              '<div class="grid grid-cols-1 sm:grid-cols-2 gap-3">' +
+                '<div data-attr-wrap="refinement" class="rounded-md border border-border/60 bg-bg/20 p-2.5">' +
+                  '<div class="flex items-center justify-between gap-2 mb-2">' +
+                    '<label class="text-[11px] text-muted block">Refinamento <span class="text-muted">·</span> <span class="text-muted">+<span data-ref-val class="text-goldsoft">' + (a.refinement ?? "—") + '</span></span></label>' +
+                    '<button type="button" data-ref-clear class="px-2 py-0.5 rounded border border-border text-[11px] text-muted hover:bg-bg">limpar</button>' +
+                  '</div>' +
+                  '<input data-f="refinement" type="hidden" value="' + (a.refinement ?? "") + '" />' +
+                  '<div class="grid grid-cols-7 gap-1.5">' +
+                    new Array(14).fill(0).map((_, i) => '<button type="button" data-ref-pick="' + i + '" class="h-8 rounded border border-border bg-bg/40 hover:bg-bg text-xs font-semibold tabular-nums">+' + i + '</button>').join("") +
+                  '</div>' +
+                '</div>' +
+                '<div data-attr-wrap="life" class="rounded-md border border-border/60 bg-bg/20 p-2.5">' +
+                  '<div class="flex items-center justify-between gap-2 mb-2">' +
+                    '<label class="text-[11px] text-muted block">Adicional (Life) <span class="text-muted">·</span> <span class="text-muted">+<span data-life-val class="text-goldsoft">' + (a.option ?? "—") + '</span></span></label>' +
+                    '<button type="button" data-life-clear class="px-2 py-0.5 rounded border border-border text-[11px] text-muted hover:bg-bg">limpar</button>' +
+                  '</div>' +
+                  '<input data-f="option" type="hidden" value="' + (a.option ?? "") + '" />' +
+                  '<div class="grid grid-cols-4 gap-1.5">' +
+                    [0,4,8,12,16,20,24,28].map((n) => '<button type="button" data-life-pick="' + n + '" class="h-8 rounded border border-border bg-bg/40 hover:bg-bg text-xs font-semibold tabular-nums">+' + n + '</button>').join("") +
+                  '</div>' +
+                '</div>' +
+              '</div>' +
+              '<div class="flex flex-wrap gap-3 text-xs items-center" data-attr-wrap="excRow">' +
+                '<label data-attr-wrap="full" class="inline-flex items-center gap-2 px-2 py-1 rounded border border-emerald-400/40 bg-emerald-500/10"><input data-f="full" type="checkbox" class="accent-emerald-400"' + (a.full ? " checked" : "") + ' /> <span class="text-emerald-300 font-semibold drop-shadow">⭐ Full</span></label>' +
+                '<span class="text-muted">ou:</span>' +
+                '<label data-attr-wrap="excellent" class="inline-flex items-center gap-2"><input data-f="excellent" type="checkbox" class="accent-emerald-400"' + (a.excellent ? " checked" : "") + ' /> <span class="text-emerald-300">Excellent</span></label>' +
+                '<label data-attr-wrap="luck" class="inline-flex items-center gap-2"><input data-f="luck" type="checkbox" class="accent-gold"' + (a.luck ? " checked" : "") + ' /> luck</label>' +
+                '<label data-attr-wrap="skill" class="inline-flex items-center gap-2"><input data-f="skill" type="checkbox" class="accent-gold"' + (a.skill ? " checked" : "") + ' /> skill</label>' +
+              '</div>' +
+              '<div data-attr-wrap="fullHint" class="text-[11px] text-muted">Full = Excellent + Life+28 + Luck + Skill (se o item suportar).</div>' +
+            '</div>' +
+
+            '<div class="rounded-lg border border-border/70 bg-bg/30 p-3 space-y-2" data-step-item="3">' +
+              '<div class="text-[11px] text-muted uppercase tracking-widest">Excellent (selecione as opções)</div>' +
+              '<div class="text-[11px] text-muted">As opções Excellent não têm valor — é só adicionar as que o item pode ter.</div>' +
+              '<input data-f="extras" type="hidden" value="' + (a.extras ? escapeHtml(a.extras) : "") + '" />' +
+              '<div class="rounded-md border border-border bg-bg/40 p-2 space-y-2" data-extra-wrap>' +
+                '<div class="relative">' +
+                  '<input data-extra-search type="text" placeholder="filtrar (ex.: defense, reflect, hp)..." class="w-full h-9 bg-bg border border-border rounded-md px-2 outline-none focus:border-gold/60 text-sm" />' +
+                  '<div data-extra-dd class="hidden absolute z-20 mt-1 w-full max-h-56 overflow-y-auto bg-panel border border-border rounded-md shadow-lg"></div>' +
+                '</div>' +
+                '<div data-extra-list class="space-y-2"></div>' +
+                '<div class="text-[11px] text-muted">Opções já adicionadas não aparecem mais no dropdown.</div>' +
+              '</div>' +
+            '</div>' +
+
+            '<details class="rounded-lg border border-border/70 bg-bg/30 p-3" data-step-item="3">' +
+              '<summary class="cursor-pointer text-[11px] text-muted uppercase tracking-widest">Avançado</summary>' +
+              '<div class="space-y-3 mt-3">' +
+                '<div data-attr-wrap="ancient"><label class="text-[11px] text-muted block mb-1">Conjunto ancient</label>' +
+                  '<input data-f="ancient" type="hidden" value="' + (a.ancient ? escapeHtml(a.ancient) : "") + '" />' +
+                  '<select data-ancient-select class="w-full h-10 bg-bg border border-border rounded-md px-2">' +
+                    '<option value="">—</option>' +
+                    (a.ancient ? ('<option value="' + escapeHtml(a.ancient) + '" selected>' + escapeHtml(a.ancient) + "</option>") : "") +
+                  '</select>' +
+                  '<input data-ancient-free type="text" maxlength="40" placeholder="ex.: Gaion, Anonymous, Hyon..." class="hidden w-full h-10 bg-bg border border-border rounded-md px-2" value="' + (a.ancient ? escapeHtml(a.ancient) : "") + '" />' +
+                  '<div class="text-[11px] text-muted mt-1">mostramos apenas os ancients permitidos para esse item (via crawler).</div>' +
+                  '<div data-ancient-attrs class="hidden mt-2 rounded-md border border-amber-400/20 bg-amber-500/10 p-2"></div>' +
+                '</div>' +
+                '<div data-attr-wrap="harmony"><label class="text-[11px] text-muted block mb-1">Jewel of Harmony</label>' +
+                  '<input data-f="harmony" maxlength="60" placeholder="ex.: Increase Damage +2%" class="w-full h-10 bg-bg border border-border rounded-md px-2" value="' + (a.harmony ? escapeHtml(a.harmony) : "") + '" /></div>' +
+              '</div>' +
+            '</details>' +
           '</div>' + // /data-item-fields
-          '<div data-char-fields class="hidden space-y-3">' +
+          '<div data-char-fields class="hidden space-y-3" data-step-char="2">' +
             '<div><label class="text-[11px] text-muted block mb-1">Nome do personagem</label>' +
               '<input data-f="char_name" maxlength="80" placeholder="ex.: emigeNosfe" class="w-full h-10 bg-bg border border-border rounded-md px-2" value="' + (isCharListing ? escapeHtml(existing.item_name) : "") + '" />' +
             '</div>' +
@@ -3001,34 +3570,125 @@ function openListingForm(existing) {
             '</div>' +
             '<div class="text-[11px] text-muted">★ resets é o destaque. Se escolher um char vinculado acima, preenchemos resets/level/classe direto do site.</div>' +
           '</div>' +
-          '<div data-pricing-block class="grid grid-cols-2 gap-2">' +
-            '<div><label class="text-[11px] text-muted block mb-1">Moeda</label>' +
-              '<select data-f="currency" class="w-full h-10 bg-bg border border-border rounded-md px-2">' +
-                '<option value="">—</option>' +
-                ['zeny','gold','cash'].map((v) => '<option value="' + v + '"' + (isEdit && existing.currency === v ? " selected" : "") + '>' + v + '</option>').join("") +
-              '</select></div>' +
-            '<div><label class="text-[11px] text-muted block mb-1">Preço</label>' +
-              '<input data-f="price" type="number" min="0" placeholder="0" class="w-full h-10 bg-bg border border-border rounded-md px-2" value="' + (isEdit && existing.price != null ? existing.price : "") + '" /></div>' +
+          '<div data-pricing-block data-step-item="4" data-step-char="3" class="space-y-2">' +
+            '<div class="grid grid-cols-2 gap-2" data-pricing-fields>' +
+              '<div><label data-currency-label class="text-[11px] text-muted block mb-1">Moeda</label>' +
+                '<select data-f="currency" class="w-full h-10 bg-bg border border-border rounded-md px-2">' +
+                  '<option value="">—</option>' +
+                  ['zeny','gold','cash'].map((v) => '<option value="' + v + '"' + (isEdit && existing.currency === v ? " selected" : "") + '>' + v + '</option>').join("") +
+                '</select></div>' +
+              '<div><label data-price-label class="text-[11px] text-muted block mb-1">Preço</label>' +
+                '<input data-f="price" type="number" min="0" placeholder="0" class="w-full h-10 bg-bg border border-border rounded-md px-2" value="' + (isEdit && existing.price != null ? existing.price : "") + '" /></div>' +
+            '</div>' +
           '</div>' +
-          '<div><label class="text-[11px] text-muted block mb-1">Notas (opcional)</label>' +
+          '<div data-step-item="4" data-step-char="3"><label data-notes-label class="text-[11px] text-muted block mb-1">Notas (opcional)</label>' +
             '<textarea data-f="notes" maxlength="1000" rows="2" placeholder="qualquer detalhe..." class="w-full bg-bg border border-border rounded-md px-2 py-1.5">' + (isEdit && existing.notes ? escapeHtml(existing.notes) : "") + '</textarea></div>' +
-          '<label class="inline-flex items-center gap-2 text-xs"><input data-f="allow_message" type="checkbox" class="accent-gold"' + (!isEdit || existing.allow_message ? " checked" : "") + ' /> permitir mensagem ao pingar</label>' +
+          '<label data-step-item="4" data-step-char="3" class="inline-flex items-center gap-2 text-xs"><input data-f="allow_message" type="checkbox" class="accent-gold"' + (!isEdit || existing.allow_message ? " checked" : "") + ' /> permitir mensagem ao pingar</label>' +
         '</div>' +
-        '<div class="flex justify-end gap-2 mt-4">' +
+        '<div class="flex items-center justify-between gap-2 mt-4 pt-3 border-t border-border/60 shrink-0 bg-panel">' +
+          '<div class="flex items-center gap-2">' +
+            '<button type="button" data-prev class="px-3 py-1.5 rounded-md border border-border text-sm hover:bg-bg hidden">voltar</button>' +
+            '<button type="button" data-next class="px-3 py-1.5 rounded-md border border-border text-sm hover:bg-bg">próximo</button>' +
+          '</div>' +
+          '<div class="flex items-center gap-2">' +
           '<button data-cancel class="px-3 py-1.5 rounded-md border border-border text-sm hover:bg-bg">cancelar</button>' +
           '<button data-save class="gold-btn block px-4 rounded-md bg-gold text-bg font-semibold text-center border border-transparent hover:brightness-110">' + (isEdit ? "salvar" : "publicar") + '</button>' +
+          '</div>' +
         '</div>' +
       '</div>';
     document.body.appendChild(overlay);
+
+    // Wizard pagination (no internal scrolling).
+    const stepLabel = overlay.querySelector("[data-step-label]");
+    const stepDots = overlay.querySelector("[data-step-dots]");
+    const prevBtn = overlay.querySelector("[data-prev]");
+    const nextBtn = overlay.querySelector("[data-next]");
+    const saveBtn = overlay.querySelector("[data-save]");
+    let step = 1;
+    const stepMeta = (kind) => {
+      // Keep each page short: item has one extra step for Excellent/Avançado.
+      const isChar = kind === "char";
+      const labels = isChar
+        ? ["Básico", "Personagem", "Preço"]
+        : ["Básico", "Item", "Excellent", "Preço"];
+      return { total: labels.length, labels };
+    };
+    const currentKind = () => (overlay.querySelector('input[name="kind"]:checked') || {}).value || "item";
+    const applyStepUI = () => {
+      const kind = currentKind();
+      const meta = stepMeta(kind);
+      const total = meta.total;
+      if (step < 1) step = 1;
+      if (step > total) step = total;
+
+      overlay.querySelectorAll("[data-step],[data-step-item],[data-step-char]").forEach((el) => {
+        const raw = (kind === "char"
+          ? (el.getAttribute("data-step-char") || el.getAttribute("data-step"))
+          : (el.getAttribute("data-step-item") || el.getAttribute("data-step"))
+        );
+        if (!raw) return;
+        el.classList.toggle("hidden", Number(raw) !== step);
+      });
+
+      if (stepLabel) stepLabel.textContent = "Passo " + step + "/" + total + " · " + meta.labels[step - 1];
+      if (stepDots) {
+        stepDots.innerHTML = new Array(total).fill(0).map((_, i) => {
+          const on = i + 1 === step;
+          return '<span class="inline-block w-2 h-2 rounded-full ' + (on ? "bg-goldsoft" : "bg-border") + '"></span>';
+        }).join("");
+      }
+
+      if (prevBtn) prevBtn.classList.toggle("hidden", step === 1);
+      if (nextBtn) nextBtn.classList.toggle("hidden", step === total);
+      if (saveBtn) saveBtn.classList.toggle("hidden", step !== total);
+    };
+    if (prevBtn) prevBtn.addEventListener("click", () => { step -= 1; applyStepUI(); });
+    if (nextBtn) nextBtn.addEventListener("click", () => { step += 1; applyStepUI(); });
+
     // Doação implies free — hide moeda/preço when side=doar.
     const sideSel = overlay.querySelector('[data-f="side"]');
     const pricingBlock = overlay.querySelector('[data-pricing-block]');
+    const pricingFields = overlay.querySelector("[data-pricing-fields]");
+    const currencyLabel = overlay.querySelector("[data-currency-label]");
+    const priceLabel = overlay.querySelector("[data-price-label]");
+    const notesLabel = overlay.querySelector("[data-notes-label]");
+    const notesInput = overlay.querySelector('[data-f="notes"]');
+    const currencySel = overlay.querySelector('[data-f="currency"]');
+    const priceInput = overlay.querySelector('[data-f="price"]');
+    let lastNonDonateCurrency = currencySel ? String(currencySel.value || "") : "";
+    let lastNonDonatePrice = priceInput ? String(priceInput.value || "") : "";
     const syncPricing = () => {
       const isDonate = sideSel.value === "donate";
-      pricingBlock.classList.toggle("hidden", isDonate);
+      // Don't fight the wizard pagination: only hide the inner pricing fields.
+      if (pricingFields) pricingFields.classList.toggle("hidden", isDonate);
+      // Preserve previous non-donate values when toggling donate on/off.
+      if (currencySel && priceInput) {
+        if (isDonate) {
+          lastNonDonateCurrency = String(currencySel.value || "");
+          lastNonDonatePrice = String(priceInput.value || "");
+          currencySel.value = "";
+          priceInput.value = "";
+        } else {
+          if (!currencySel.value && lastNonDonateCurrency) currencySel.value = lastNonDonateCurrency;
+          if ((priceInput.value === "" || priceInput.value == null) && lastNonDonatePrice) priceInput.value = lastNonDonatePrice;
+        }
+      }
+    };
+    const syncSideText = () => {
+      const side = sideSel.value;
+      if (currencyLabel) currencyLabel.textContent =
+        side === "buy" ? "Moeda (você paga)" : "Moeda";
+      if (priceLabel) priceLabel.textContent =
+        side === "buy" ? "Quanto você paga" : "Preço";
+      if (notesLabel) notesLabel.textContent =
+        side === "buy" ? "Detalhes do pedido (opcional)" : "Notas (opcional)";
+      if (notesInput) notesInput.placeholder =
+        side === "buy" ? "ex.: pago hoje, aceito variações, posso trocar..." : "qualquer detalhe...";
     };
     sideSel.addEventListener("change", syncPricing);
+    sideSel.addEventListener("change", syncSideText);
     syncPricing();
+    syncSideText();
     // Item ↔ Personagem mode toggle. Char listings drop the catalog
     // combobox and item-attribute fields; they're pure free-form.
     const itemFields = overlay.querySelector('[data-item-fields]');
@@ -3045,9 +3705,12 @@ function openListingForm(existing) {
       if (charHintEl) charHintEl.textContent = kind === "char"
         ? "se selecionar, preenchemos resets/level/classe do site automaticamente."
         : "buyers veem o status online/mapa desse char pra saber se podem te chamar agora.";
+      step = 1;
+      applyStepUI();
     };
     overlay.querySelectorAll('input[name="kind"]').forEach((r) => r.addEventListener("change", syncKind));
     syncKind();
+    applyStepUI();
     // When a char is linked AND we're in char-listing mode, auto-fill
     // name/resets/level/class from the registered character — saves the
     // user retyping and keeps the listing in sync with the live profile.
@@ -3075,6 +3738,395 @@ function openListingForm(existing) {
       const isCharMode = (overlay.querySelector('input[name="kind"]:checked') || {}).value === "char";
       if (isCharMode) fillFromLinkedChar();
     });
+    const setWrap = (k, on) => {
+      const els = overlay.querySelectorAll('[data-attr-wrap="' + k + '"]');
+      els.forEach((el) => el.classList.toggle("hidden", !on));
+    };
+    const clearIfHidden = (sel) => {
+      const el = overlay.querySelector(sel);
+      if (!el) return;
+      // If any ancestor has data-attr-wrap and is hidden, clear/untick it.
+      let p = el;
+      while (p && p !== overlay) {
+        if (p instanceof Element && p.hasAttribute("data-attr-wrap") && p.classList.contains("hidden")) {
+          if (el.type === "checkbox") el.checked = false;
+          else el.value = "";
+          return;
+        }
+        p = p.parentElement;
+      }
+    };
+
+    const applyAllowedAttrs = (info) => {
+      // Default: permissive (free-text item or itemdb failed).
+      const opts = info && info.options ? info.options : null;
+      const allowExcellent = opts ? !!opts.excellent : true;
+      const allowLuck = opts ? !!opts.luck : true;
+      const allowSkill = opts ? !!opts.skill : true;
+      const allowLife = opts ? !!opts.life : true;
+      const allowHarmony = opts ? !!opts.harmony : true;
+      const allowAncient = opts ? !!opts.ancient : true;
+
+      setWrap("life", allowLife);
+      setWrap("excellent", allowExcellent);
+      // Full should be available whenever the item supports any of the bits;
+      // when checked, we fill "all possible" according to allowed flags.
+      setWrap("full", allowExcellent || allowLuck || allowSkill || allowLife);
+      setWrap("luck", allowLuck);
+      setWrap("skill", allowSkill);
+      setWrap("harmony", allowHarmony);
+      setWrap("ancient", allowAncient);
+      setWrap("fullHint", allowExcellent || allowLuck || allowSkill || allowLife);
+      // Row wrapper stays visible if any of the bits exist.
+      setWrap("excRow", allowExcellent || allowLuck || allowSkill || allowLife);
+
+      // Clear values that became invalid.
+      clearIfHidden('[data-f="option"]');
+      clearIfHidden('[data-f="excellent"]');
+      clearIfHidden('[data-f="luck"]');
+      clearIfHidden('[data-f="skill"]');
+      clearIfHidden('[data-f="full"]');
+      clearIfHidden('[data-f="harmony"]');
+      clearIfHidden('[data-f="ancient"]');
+    };
+
+    const applyAncientOptions = (info) => {
+      if (!ancientInput) return;
+      const current = normalizeAncientSetName(String(ancientInput.value || ""));
+      const suggested = info && info.suggested ? info.suggested : null;
+      const vals = (suggested && Array.isArray(suggested.ancient_values)) ? suggested.ancient_values : [];
+      const list = (vals || []).map((s) => String(s).trim()).filter(Boolean).slice(0, 20);
+      // Always include current value so edit mode doesn't lose it.
+      const uniq = [...new Set([current, ...list].filter(Boolean))];
+      const allow = uniq.length > 0;
+      setWrap("ancient", true);
+      const sel = overlay.querySelector("[data-ancient-select]");
+      const free = overlay.querySelector("[data-ancient-free]");
+      if (sel && free) {
+        // If we have a deterministic list, show dropdown. Otherwise, allow free text.
+        sel.classList.toggle("hidden", !allow);
+        free.classList.toggle("hidden", allow);
+        if (allow) {
+          sel.innerHTML =
+            '<option value="">—</option>' +
+            uniq.map((s) => '<option value="' + escapeHtml(s) + '">' + escapeHtml(s) + "</option>").join("");
+          sel.value = current || "";
+        } else {
+          free.value = current || "";
+        }
+      }
+    };
+
+    const renderAncientAttrs = (info) => {
+      const box = overlay.querySelector("[data-ancient-attrs]");
+      if (!box || !ancientInput) return;
+      const name = normalizeAncientSetName(String(ancientInput.value || ""));
+      const sets = info && info.ancient_sets ? info.ancient_sets : null;
+      const lines = name && sets && sets[name] ? sets[name] : null;
+      if (!name || !Array.isArray(lines) || lines.length === 0) {
+        box.classList.add("hidden");
+        box.innerHTML = "";
+        return;
+      }
+      box.classList.remove("hidden");
+      box.innerHTML =
+        '<div class="text-[11px] text-amber-200 uppercase tracking-widest mb-1">Bônus do Ancient</div>' +
+        ancientAttrsHtml(lines);
+    };
+
+    const wireExtrasPicker = () => {
+      const hidden = overlay.querySelector('[data-f="extras"]');
+      const wrap = overlay.querySelector("[data-extra-wrap]");
+      const search = overlay.querySelector("[data-extra-search]");
+      const dd = overlay.querySelector("[data-extra-dd]");
+      const list = overlay.querySelector("[data-extra-list]");
+      if (!hidden || !wrap || !search || !dd || !list) return;
+
+      let options = [];
+      let selected = [];
+
+      const parseExisting = () => {
+        const raw = (hidden.value || "").trim();
+        if (!raw) return;
+        // Accept "key: val, key2: val2" or "key=val" formats.
+        const parts = raw.split(/[,;\\n]+/).map((s) => s.trim()).filter(Boolean);
+        for (const p of parts) {
+          const m = p.match(/^(.+?)(?:\\s*[:=]\\s*(.+))?$/);
+          if (!m) continue;
+          const key = m[1].trim();
+          const val = (m[2] ?? "").trim();
+          if (!key) continue;
+          if (selected.some((x) => x.key.toLowerCase() === key.toLowerCase())) continue;
+          const fixed = key.toLowerCase().indexOf("excellent: ") === 0;
+          selected.push({ key, val, fixed });
+        }
+      };
+
+      const serialize = () => {
+        const txt = selected
+          .map((x) => x.val ? (x.key + ": " + x.val) : x.key)
+          .join(", ");
+        hidden.value = txt.slice(0, 240);
+      };
+
+      const addKeys = (keys) => {
+        if (!Array.isArray(keys) || keys.length === 0) return;
+        for (const kRaw of keys) {
+          const key = String(kRaw || "").trim();
+          if (!key) continue;
+          if (selected.some((x) => x.key.toLowerCase() === key.toLowerCase())) continue;
+          const fixed = key.toLowerCase().indexOf("excellent: ") === 0;
+          selected.push({ key, val: "", fixed });
+        }
+        serialize();
+        renderList();
+      };
+
+      const renderList = () => {
+        if (selected.length === 0) {
+          list.innerHTML = '<div class="text-xs text-muted">nenhum atributo adicionado ainda</div>';
+          return;
+        }
+        list.innerHTML = selected.map((x, idx) => {
+          const valInput = x.fixed
+            ? '<div class="flex-1 h-9 px-2 flex items-center text-xs text-muted">—</div>'
+            : '<input data-extra-val="' + idx + '" type="text" maxlength="60" class="flex-1 h-9 bg-bg border border-border rounded-md px-2 text-sm" placeholder="valor..." value="' + escapeHtml(x.val || "") + '" />';
+          return (
+            '<div class="flex gap-2 items-center">' +
+              '<div class="px-2 py-1 rounded border border-border bg-bg/60 text-xs text-slate-200 min-w-[140px]">' + escapeHtml(x.key) + '</div>' +
+              valInput +
+              '<button type="button" data-extra-del="' + idx + '" class="h-9 w-9 rounded-md border border-border text-muted hover:text-danger hover:bg-danger/10">×</button>' +
+            '</div>'
+          );
+        }).join("");
+        list.querySelectorAll("[data-extra-val]").forEach((inp) => {
+          inp.oninput = () => {
+            const i = Number(inp.getAttribute("data-extra-val"));
+            if (!Number.isFinite(i) || !selected[i]) return;
+            selected[i].val = inp.value.trim();
+            serialize();
+          };
+        });
+        list.querySelectorAll("[data-extra-del]").forEach((btn) => {
+          btn.onclick = () => {
+            const i = Number(btn.getAttribute("data-extra-del"));
+            if (!Number.isFinite(i)) return;
+            selected.splice(i, 1);
+            serialize();
+            renderList();
+          };
+        });
+      };
+
+      const renderDropdown = (q) => {
+        const qq = (q || "").trim().toLowerCase();
+        // Filter out options already applied (either in the extras list OR in structured fields).
+        const luckOn = !!(overlay.querySelector('[data-f="luck"]')?.checked);
+        const skillOn = !!(overlay.querySelector('[data-f="skill"]')?.checked);
+        const lifeVal = (overlay.querySelector('[data-f="option"]')?.value ?? "").trim();
+        const harmonyVal = (overlay.querySelector('[data-f="harmony"]')?.value ?? "").trim();
+        const base = options.filter((s) => {
+          const key = String(s || "");
+          const low = key.toLowerCase();
+          if (selected.some((x) => x.key.toLowerCase() === low)) return false;
+          if (low === "luck" && luckOn) return false;
+          if (low === "skill" && skillOn) return false;
+          if (low === "jewel of life" && lifeVal) return false;
+          if (low.indexOf("life: +") === 0 && lifeVal) {
+            const n = Number(key.slice("Life: +".length));
+            if (Number.isFinite(n) && String(n) === lifeVal) return false;
+          }
+          if (low === "jewel of harmony" && harmonyVal) return false;
+          if (low.indexOf("harmony: ") === 0 && harmonyVal) {
+            const h = key.slice("Harmony: ".length).trim();
+            if (h && h.toLowerCase() === harmonyVal.toLowerCase()) return false;
+          }
+          return true;
+        });
+        const hits = (qq
+          ? base.filter((s) => s.toLowerCase().indexOf(qq) !== -1)
+          : base
+        ).slice(0, 12);
+        if (hits.length === 0) {
+          dd.innerHTML = '<div class="px-3 py-2 text-xs text-muted">nenhum atributo</div>';
+          dd.classList.remove("hidden");
+          return;
+        }
+        dd.innerHTML = hits.map((s) =>
+          '<button type="button" data-extra-pick="' + escapeHtml(s) + '" class="w-full px-3 py-2 text-left text-sm hover:bg-bg/60">' + escapeHtml(s) + "</button>"
+        ).join("");
+        dd.classList.remove("hidden");
+        dd.querySelectorAll("[data-extra-pick]").forEach((b) => {
+          b.onclick = () => {
+            const key = b.getAttribute("data-extra-pick") || "";
+            if (!key) return;
+            // Some picks map to structured fields instead of extras text.
+            if (key === "Jewel of Harmony") {
+              const h = overlay.querySelector('[data-f="harmony"]');
+              if (h && !h.disabled) {
+                h.focus();
+                dd.classList.add("hidden");
+                dd.innerHTML = "";
+                search.value = "";
+                return;
+              }
+            }
+            if (key.indexOf("Harmony: ") === 0) {
+              const h = overlay.querySelector('[data-f="harmony"]');
+              if (h && !h.disabled) {
+                h.value = key.slice("Harmony: ".length);
+                h.focus();
+                dd.classList.add("hidden");
+                dd.innerHTML = "";
+                search.value = "";
+                return;
+              }
+            }
+            if (key === "Jewel of Life") {
+              const o = overlay.querySelector('[data-f="option"]');
+              if (o && !o.disabled) {
+                o.focus();
+                dd.classList.add("hidden");
+                dd.innerHTML = "";
+                search.value = "";
+                return;
+              }
+            }
+            if (key.indexOf("Life: +") === 0) {
+              const o = overlay.querySelector('[data-f="option"]');
+              if (o && !o.disabled) {
+                const n = Number(key.slice("Life: +".length));
+                if (Number.isFinite(n)) o.value = String(n);
+                o.focus();
+                dd.classList.add("hidden");
+                dd.innerHTML = "";
+                search.value = "";
+                return;
+              }
+            }
+            if (key === "Luck") {
+              const l = overlay.querySelector('[data-f="luck"]');
+              if (l && !l.disabled) {
+                l.checked = true;
+                dd.classList.add("hidden");
+                dd.innerHTML = "";
+                search.value = "";
+                return;
+              }
+            }
+            if (key === "Skill") {
+              const s = overlay.querySelector('[data-f="skill"]');
+              if (s && !s.disabled) {
+                s.checked = true;
+                dd.classList.add("hidden");
+                dd.innerHTML = "";
+                search.value = "";
+                return;
+              }
+            }
+            // Excellent options are fixed flags (no value).
+            const fixed = key.toLowerCase().indexOf("excellent: ") === 0;
+            selected.push({ key, val: "", fixed });
+            serialize();
+            renderList();
+            search.value = "";
+            dd.classList.add("hidden");
+            dd.innerHTML = "";
+            // focus the newly added value box
+            setTimeout(() => {
+              const last = list.querySelector('[data-extra-val="' + (selected.length - 1) + '"]');
+              if (last) last.focus();
+            }, 0);
+          };
+        });
+      };
+
+      const setOptions = (opts) => {
+        // Excellent options are selectable, but not editable (no value).
+        // Also offer non-excellent add-ons + suggested Harmony/Life values.
+        const out = [];
+        const allow = opts && opts.options ? opts.options : (opts || null);
+        const suggested = opts && opts.suggested ? opts.suggested : null;
+        const excList = (opts && (opts.excellent_options || opts.excellent_values))
+          ? (opts.excellent_options || opts.excellent_values)
+          : [];
+        if (Array.isArray(excList) && excList.length) {
+          excList.slice(0, 20).forEach((s) => out.push("Excellent: " + String(s)));
+        }
+        if (allow && allow.harmony) {
+          const hs = (suggested && suggested.harmony_values) ? suggested.harmony_values : [];
+          if (hs.length) hs.forEach((h) => out.push("Harmony: " + h));
+          else out.push("Jewel of Harmony");
+        }
+        if (allow && allow.life) {
+          const ls = (suggested && suggested.life_values) ? suggested.life_values : [];
+          if (ls.length) ls.forEach((n) => out.push("Life: +" + n));
+          else out.push("Jewel of Life");
+        }
+        if (allow && allow.luck) out.push("Luck");
+        if (allow && allow.skill) out.push("Skill");
+        options = out;
+      };
+
+      // Init from existing string (edit mode).
+      parseExisting();
+      serialize();
+      renderList();
+
+      search.addEventListener("input", () => renderDropdown(search.value));
+      search.addEventListener("focus", () => renderDropdown(search.value));
+      document.addEventListener("click", (e) => { if (!wrap.contains(e.target)) dd.classList.add("hidden"); });
+
+      // Public hook to update allowed attrs from itemdb.
+      wrap.__setExtraOptions = setOptions;
+      // Public hook used by "Full" to add all excellent options at once.
+      wrap.__addExtraKeys = addKeys;
+    };
+
+    // When item is picked from the catalog, fetch itemdb info and restrict
+    // the attribute controls to only the allowed ones for that item.
+    overlay.addEventListener("item-picked", async (ev) => {
+      const it = (ev && ev.detail) ? ev.detail : null;
+      const name = it && it.name ? it.name : (overlay.querySelector('[data-f="item_name"]').value || "");
+      const info = await getItemDbInfo(name, it && it.slug ? it.slug : "");
+      lastItemInfo = info || null;
+      applyAllowedAttrs(info);
+      applyAncientOptions(info);
+      if (ancientSelect && !ancientSelect.classList.contains("hidden")) syncAncientHidden(ancientSelect.value);
+      if (ancientFree && !ancientFree.classList.contains("hidden")) syncAncientHidden(ancientFree.value);
+      renderAncientAttrs(info);
+      const wrap = overlay.querySelector("[data-extra-wrap]");
+        if (wrap && wrap.__setExtraOptions) wrap.__setExtraOptions(info || null);
+      // If Full is now hidden, ensure syncFull doesn't lock fields.
+      syncFull();
+    });
+
+    // If the item is cleared or is free-text (no catalog slug), allow attrs freely.
+    overlay.addEventListener("item-cleared", () => {
+      lastItemInfo = null;
+      applyAllowedAttrs(null);
+      applyAncientOptions(null);
+      if (ancientFree) syncAncientHidden(ancientFree.value);
+      renderAncientAttrs(null);
+      const wrap = overlay.querySelector("[data-extra-wrap]");
+      if (wrap && wrap.__setExtraOptions) wrap.__setExtraOptions(null);
+      syncFull();
+    });
+    const itemNameInput = overlay.querySelector('[data-f="item_name"]');
+    const itemSlugInput = overlay.querySelector('[data-f="item_slug"]');
+    if (itemNameInput && itemSlugInput) {
+      itemNameInput.addEventListener("input", () => {
+        if (!String(itemSlugInput.value || "").trim()) {
+          lastItemInfo = null;
+          applyAllowedAttrs(null);
+          applyAncientOptions(null);
+          if (ancientFree) syncAncientHidden(ancientFree.value);
+          renderAncientAttrs(null);
+          syncFull();
+        }
+      });
+    }
+
     // "Item Full" — when checked, force-check excellent/luck/skill and
     // pin option to 28, then disable everything that Full implies (and
     // ancient/extras too — Full means the canonical fully-optioned item;
@@ -3085,26 +4137,182 @@ function openListingForm(existing) {
     const luckChk = overlay.querySelector('[data-f="luck"]');
     const skillChk = overlay.querySelector('[data-f="skill"]');
     const optInput = overlay.querySelector('[data-f="option"]');
+    const refInput = overlay.querySelector('[data-f="refinement"]');
     const ancientInput = overlay.querySelector('[data-f="ancient"]');
+    const ancientSelect = overlay.querySelector("[data-ancient-select]");
+    const ancientFree = overlay.querySelector("[data-ancient-free]");
     const extrasInput = overlay.querySelector('[data-f="extras"]');
+    const lifeVal = overlay.querySelector("[data-life-val]");
+    const refVal = overlay.querySelector("[data-ref-val]");
+    let lastItemInfo = null;
+
+    // Keep Ancient hidden value in sync with whichever control is visible.
+    const syncAncientHidden = (v) => {
+      if (!ancientInput) return;
+      ancientInput.value = normalizeAncientSetName(String(v || ""));
+    };
+    if (ancientSelect) {
+      ancientSelect.addEventListener("change", () => {
+        syncAncientHidden(ancientSelect.value);
+        renderAncientAttrs(lastItemInfo);
+      });
+    }
+    if (ancientFree) {
+      ancientFree.addEventListener("input", () => syncAncientHidden(ancientFree.value));
+      ancientFree.addEventListener("change", () => {
+        syncAncientHidden(ancientFree.value);
+        renderAncientAttrs(lastItemInfo);
+      });
+    }
+    const syncPickUI = () => {
+      const optV = optInput ? String(optInput.value || "") : "";
+      const refV = refInput ? String(refInput.value || "") : "";
+      if (lifeVal) lifeVal.textContent = optV ? optV : "—";
+      if (refVal) refVal.textContent = refV ? refV : "—";
+      overlay.querySelectorAll("[data-life-pick]").forEach((b) => {
+        const v = String(b.getAttribute("data-life-pick") || "");
+        const on = optV !== "" && v === optV;
+        b.classList.toggle("border-goldsoft", on);
+        b.classList.toggle("bg-gold/10", on);
+        b.classList.toggle("text-goldsoft", on);
+      });
+      overlay.querySelectorAll("[data-ref-pick]").forEach((b) => {
+        const v = String(b.getAttribute("data-ref-pick") || "");
+        const on = refV !== "" && v === refV;
+        b.classList.toggle("border-goldsoft", on);
+        b.classList.toggle("bg-gold/10", on);
+        b.classList.toggle("text-goldsoft", on);
+      });
+    };
     let savedOption = optInput.value;
-    const lockedFields = [exChk, luckChk, skillChk, optInput, ancientInput, extrasInput];
+    let savedExtras = extrasInput ? String(extrasInput.value || "") : "";
+    let savedEx = !!(exChk && exChk.checked);
+    let savedLuck = !!(luckChk && luckChk.checked);
+    let savedSkill = !!(skillChk && skillChk.checked);
+    // Full should lock the core option bits, but Ancient is allowed together with Full.
+    const lockedFields = [exChk, luckChk, skillChk, optInput, extrasInput];
     const syncFull = () => {
       const on = !!fullChk.checked;
       if (on) {
         savedOption = optInput.value;
-        exChk.checked = true; luckChk.checked = true; skillChk.checked = true;
-        optInput.value = "28";
+        savedExtras = extrasInput ? String(extrasInput.value || "") : "";
+        savedEx = !!(exChk && exChk.checked);
+        savedLuck = !!(luckChk && luckChk.checked);
+        savedSkill = !!(skillChk && skillChk.checked);
+        if (!exChk.disabled) exChk.checked = true;
+        if (!luckChk.disabled) luckChk.checked = true;
+        if (!skillChk.disabled) skillChk.checked = true;
+        if (!optInput.disabled) optInput.value = "28";
+
+        // Add all possible Excellent options for this item (fixed entries).
+        const wrap = overlay.querySelector("[data-extra-wrap]");
+        const add = wrap && wrap.__addExtraKeys ? wrap.__addExtraKeys : null;
+        if (add && lastItemInfo) {
+          const excList = (lastItemInfo.excellent_options || lastItemInfo.excellent_values || []);
+          if (Array.isArray(excList) && excList.length) {
+            add(excList.slice(0, 20).map((s) => "Excellent: " + String(s)));
+          }
+        }
       }
       lockedFields.forEach((el) => {
         el.disabled = on;
         el.parentElement.classList.toggle("opacity-50", on);
       });
-      if (!on) optInput.value = savedOption;
+      if (!on) {
+        optInput.value = savedOption;
+        if (extrasInput) extrasInput.value = savedExtras;
+        if (exChk && !exChk.disabled) exChk.checked = savedEx;
+        if (luckChk && !luckChk.disabled) luckChk.checked = savedLuck;
+        if (skillChk && !skillChk.disabled) skillChk.checked = savedSkill;
+      }
+      syncPickUI();
     };
     fullChk.addEventListener("change", syncFull);
     syncFull();
+    if (ancientInput) {
+      ancientInput.addEventListener("change", () => {
+        renderAncientAttrs(lastItemInfo);
+      });
+    }
+
+    // Click pickers for Life/Refine (no text input).
+    overlay.querySelectorAll("[data-life-pick]").forEach((b) => {
+      b.addEventListener("click", () => {
+        if (optInput.disabled) return;
+        const v = String(b.getAttribute("data-life-pick") || "");
+        if (v === "") return;
+        optInput.value = v;
+        syncPickUI();
+      });
+    });
+    const lifeClear = overlay.querySelector("[data-life-clear]");
+    if (lifeClear) lifeClear.addEventListener("click", () => {
+      if (optInput.disabled) return;
+      optInput.value = "";
+      syncPickUI();
+    });
+    overlay.querySelectorAll("[data-ref-pick]").forEach((b) => {
+      b.addEventListener("click", () => {
+        if (!refInput || refInput.disabled) return;
+        const v = String(b.getAttribute("data-ref-pick") || "");
+        if (v === "") return;
+        refInput.value = v;
+        syncPickUI();
+      });
+    });
+    const refClear = overlay.querySelector("[data-ref-clear]");
+    if (refClear) refClear.addEventListener("click", () => {
+      if (!refInput || refInput.disabled) return;
+      refInput.value = "";
+      syncPickUI();
+    });
+    syncPickUI();
+
     wireItemTypeahead(overlay);
+    wireExtrasPicker();
+
+    const maybeAutofillExcellentOptions = (info) => {
+      if (!info) return;
+      const ex = overlay.querySelector('[data-f="excellent"]');
+      const full = overlay.querySelector('[data-f="full"]');
+      const extras = overlay.querySelector('[data-f="extras"]');
+      const wrap = overlay.querySelector("[data-extra-wrap]");
+      const add = wrap && wrap.__addExtraKeys ? wrap.__addExtraKeys : null;
+      if (!add || !extras) return;
+      const wants = (full && full.checked) || (ex && ex.checked);
+      if (!wants) return;
+      const raw = String(extras.value || "");
+      if (/(excellent|poss[ií]veis\\s+excelentes)\\s*:/i.test(raw)) return; // already has entries
+      const excList = info.excellent_options || info.excellent_values || [];
+      if (!Array.isArray(excList) || excList.length === 0) return;
+      add(excList.slice(0, 20).map((s) => "Possíveis excelentes: " + String(s)));
+    };
+
+    // Initial restriction for edit mode when a catalog item is already present.
+    setTimeout(async () => {
+      const name = overlay.querySelector('[data-f="item_name"]').value || "";
+      const slug = overlay.querySelector('[data-f="item_slug"]').value || "";
+      if (name && slug) {
+        const info = await getItemDbInfo(name, slug);
+        applyAllowedAttrs(info);
+        applyAncientOptions(info);
+        renderAncientAttrs(info);
+        const wrap = overlay.querySelector("[data-extra-wrap]");
+        if (wrap && wrap.__setExtraOptions) wrap.__setExtraOptions(info || null);
+        maybeAutofillExcellentOptions(info);
+        syncFull();
+      }
+    }, 0);
+
+    // Compatibility: if user toggles Excellent on an older listing without extras,
+    // auto-add the possible Excellent options.
+    const excellentChk = overlay.querySelector('[data-f="excellent"]');
+    if (excellentChk) {
+      excellentChk.addEventListener("change", () => {
+        if (excellentChk.checked) maybeAutofillExcellentOptions(lastItemInfo);
+      });
+    }
+
     overlay.querySelector("[data-cancel]").onclick = () => overlay.remove();
     overlay.querySelector("[data-save]").onclick = async (e) => {
       const saveBtn = e.currentTarget;
@@ -3128,6 +4336,8 @@ function openListingForm(existing) {
           if (get("luck").checked) attrs.luck = true;
           if (get("skill").checked) attrs.skill = true;
         }
+        const h = (get("harmony") ? get("harmony").value.trim() : "");
+        if (h) attrs.harmony = h;
         const anc = get("ancient").value.trim(); if (anc) attrs.ancient = anc;
         const ext = get("extras").value.trim(); if (ext) attrs.extras = ext;
       } else {
@@ -3179,7 +4389,7 @@ function openPingModal(l) {
   overlay.innerHTML =
     '<div class="bg-panel border border-border rounded-xl p-5 w-full max-w-md">' +
       '<h3 class="text-sm uppercase tracking-widest text-muted mb-3">📣 Tenho interesse</h3>' +
-      '<p class="text-xs text-muted mb-3">Vamos enviar um ping no Telegram do anunciante. Limite: 1 por hora.</p>' +
+      '<p class="text-xs text-muted mb-3">Isso avisa o vendedor que você <b class="text-slate-200">aceita o valor do anúncio</b>. Use a mensagem só para combinar <b class="text-slate-200">horário</b> e <b class="text-slate-200">localização</b> (mapa/spot). Limite: 1 por hora.</p>' +
       '<div class="space-y-3 text-sm">' +
         '<div><label class="text-[11px] text-muted block mb-1">Seu personagem (opcional)</label>' +
           '<select data-f="char_id" class="w-full h-10 bg-bg border border-border rounded-md px-2">' +
@@ -3187,7 +4397,7 @@ function openPingModal(l) {
           '</select></div>' +
         (l.allow_message
           ? '<div><label class="text-[11px] text-muted block mb-1">Mensagem (opcional, máx 280 chars)</label>' +
-            '<textarea data-f="message" rows="3" maxlength="280" placeholder="quanto você aceita por isso?" class="w-full bg-bg border border-border rounded-md px-2 py-1.5"></textarea></div>'
+            '<textarea data-f="message" rows="3" maxlength="280" placeholder="ex.: hoje 21:30 em Lorencia (bar) / spot 3" class="w-full bg-bg border border-border rounded-md px-2 py-1.5"></textarea></div>'
           : '<div class="text-[11px] text-muted">o anunciante não habilitou mensagens — ping será enviado sem texto</div>') +
       '</div>' +
       '<div class="flex justify-end gap-2 mt-4">' +
@@ -3211,6 +4421,153 @@ function openPingModal(l) {
       overlay.remove();
       loadMarket();
     } catch (err) { toast(err.message, "err"); }
+  };
+}
+
+function openOfferModal(l) {
+  const overlay = document.createElement("div");
+  overlay.className = "fixed inset-0 bg-black/70 flex items-center justify-center z-50 p-3";
+  const charOpts = (state.characters || []).map((c) =>
+    '<option value="' + c.id + '">' + escapeHtml(c.name) + (c.last_level != null ? " (lvl " + c.last_level + ")" : "") + "</option>"
+  ).join("");
+  overlay.innerHTML =
+    '<div class="bg-panel border border-border rounded-xl p-5 w-full max-w-md">' +
+      '<h3 class="text-sm uppercase tracking-widest text-muted mb-3">💸 Fazer oferta</h3>' +
+      '<p class="text-xs text-muted mb-3">A oferta expira em 1 hora. O vendedor pode aceitar ou recusar.</p>' +
+      '<div class="space-y-3 text-sm">' +
+        '<div><label class="text-[11px] text-muted block mb-1">Seu personagem (opcional)</label>' +
+          '<select data-f="char_id" class="w-full h-10 bg-bg border border-border rounded-md px-2">' +
+            '<option value="">— não informar —</option>' + charOpts +
+          "</select></div>" +
+        '<div class="grid grid-cols-2 gap-2">' +
+          '<div><label class="text-[11px] text-muted block mb-1">Valor</label>' +
+            '<input data-f="price" type="number" min="0" step="1" class="w-full h-10 bg-bg border border-border rounded-md px-2" placeholder="ex.: 250000000" /></div>' +
+          '<div><label class="text-[11px] text-muted block mb-1">Moeda</label>' +
+            '<select data-f="currency" class="w-full h-10 bg-bg border border-border rounded-md px-2">' +
+              '<option value="">— opcional —</option><option value="zeny">zeny</option><option value="gold">gold</option><option value="cash">cash</option>' +
+            "</select></div>" +
+        "</div>" +
+        '<div><label class="text-[11px] text-muted block mb-1">Mensagem (opcional)</label>' +
+          '<textarea data-f="message" rows="3" maxlength="280" placeholder="aceita esse valor?" class="w-full bg-bg border border-border rounded-md px-2 py-1.5"></textarea></div>' +
+      "</div>" +
+      '<div class="flex justify-end gap-2 mt-4">' +
+        '<button data-cancel class="px-3 py-1.5 rounded-md border border-border text-sm hover:bg-bg">cancelar</button>' +
+        '<button data-send class="gold-btn block px-4 rounded-md bg-gold text-bg font-semibold text-center border border-transparent hover:brightness-110">enviar oferta</button>' +
+      "</div>" +
+    "</div>";
+  document.body.appendChild(overlay);
+  overlay.querySelector("[data-cancel]").onclick = () => overlay.remove();
+  overlay.querySelector("[data-send]").onclick = async () => {
+    const charIdVal = overlay.querySelector('[data-f="char_id"]').value;
+    const priceVal = overlay.querySelector('[data-f="price"]').value;
+    const currency = overlay.querySelector('[data-f="currency"]').value || null;
+    const message = overlay.querySelector('[data-f="message"]').value.trim();
+    const payload = {
+      char_id: charIdVal ? Number(charIdVal) : null,
+      price: priceVal === "" ? null : Number(priceVal),
+      currency,
+      message,
+    };
+    try {
+      await fetchJSON("/api/market/listings/" + l.id + "/offers", {
+        method: "POST",
+        body: JSON.stringify(payload),
+      });
+      toast("oferta enviada", "ok");
+      overlay.remove();
+      loadMarket();
+    } catch (err) {
+      toast(err.message, "err");
+    }
+  };
+}
+
+function openImportItemRulesModal() {
+  const overlay = document.createElement("div");
+  overlay.className = "fixed inset-0 bg-black/70 flex items-start sm:items-center justify-center z-50 p-3 overflow-y-auto";
+  overlay.innerHTML =
+    '<div class="bg-panel border border-border rounded-xl p-5 w-full max-w-2xl my-4">' +
+      '<h3 class="text-sm uppercase tracking-widest text-gold mb-3">📦 Importar regras de itens</h3>' +
+      '<p class="text-xs text-muted mb-3">Cole aqui o JSON no formato <code class="text-[11px] bg-bg px-1.5 py-0.5 rounded">{ "rules": [ ... ] }</code> (ou apenas um array <code class="text-[11px] bg-bg px-1.5 py-0.5 rounded">[ ... ]</code>).</p>' +
+      '<textarea data-json rows="12" class="w-full bg-bg border border-border rounded-md px-3 py-2 font-mono text-[12px] text-slate-200 outline-none focus:border-gold/60" placeholder="{ &quot;rules&quot;: [ { &quot;name&quot;: &quot;Bone Armor&quot;, &quot;options&quot;: { &quot;life&quot;: true } } ] }"></textarea>' +
+      '<div data-err class="text-xs text-danger mt-2"></div>' +
+      '<div class="flex justify-end gap-2 mt-4">' +
+        '<button data-cancel class="px-3 py-1.5 rounded-md border border-border text-sm hover:bg-bg">cancelar</button>' +
+        '<button data-send class="gold-btn block px-4 rounded-md bg-gold text-bg font-semibold text-center border border-transparent hover:brightness-110">importar</button>' +
+      "</div>" +
+    "</div>";
+  document.body.appendChild(overlay);
+  overlay.querySelector("[data-cancel]").onclick = () => overlay.remove();
+  overlay.querySelector("[data-send]").onclick = async (e) => {
+    const btn = e.currentTarget;
+    const ta = overlay.querySelector("[data-json]");
+    const err = overlay.querySelector("[data-err]");
+    err.textContent = "";
+    let parsed;
+    try {
+      parsed = JSON.parse(ta.value || "");
+    } catch (ex) {
+      err.textContent = "JSON inválido: " + (ex && ex.message ? ex.message : String(ex));
+      return;
+    }
+    try {
+      const r = await withSpinner(btn, () => fetchJSON("/api/admin/item-rules/import", {
+        method: "POST",
+        body: JSON.stringify(parsed),
+      }));
+      toast("importado: " + (r.upserted || 0), "ok");
+      overlay.remove();
+    } catch (ex) {
+      err.textContent = ex.message || String(ex);
+    }
+  };
+}
+
+function openScrapeShopItemModal() {
+  const overlay = document.createElement("div");
+  overlay.className = "fixed inset-0 bg-black/70 flex items-start sm:items-center justify-center z-50 p-3 overflow-y-auto";
+  overlay.innerHTML =
+    '<div class="bg-panel border border-border rounded-xl p-5 w-full max-w-2xl my-4">' +
+      '<h3 class="text-sm uppercase tracking-widest text-gold mb-3">🕸️ Importar regra da loja</h3>' +
+      '<p class="text-xs text-muted mb-3">A loja pode exigir login e retornar uma página de Login quando acessada pelo Worker. Se isso acontecer, cole abaixo o <b>HTML da página (view-source)</b> já logado.</p>' +
+      '<div class="space-y-3">' +
+        '<div><label class="text-[11px] text-muted block mb-1">URL</label>' +
+          '<input data-url type="text" class="w-full h-10 bg-bg border border-border rounded-md px-3 outline-none focus:border-gold/60 text-sm" placeholder="https://mupatos.com.br/site/shop/shop-gold/sets-armors/bone-armor" />' +
+        '</div>' +
+        '<div><label class="text-[11px] text-muted block mb-1">Cookie (opcional, recomendado se login falhar)</label>' +
+          '<input data-cookie type="text" class="w-full h-10 bg-bg border border-border rounded-md px-3 outline-none focus:border-gold/60 text-sm font-mono" placeholder="morpheus=...; XSRF-TOKEN=... (cole o cookie do browser)" />' +
+          '<div class="text-[11px] text-muted mt-1">Dica: no navegador logado → DevTools → Network → request do item → copie o header <code class="text-[11px] bg-bg px-1.5 py-0.5 rounded">Cookie</code>.</div>' +
+        '</div>' +
+        '<div><label class="text-[11px] text-muted block mb-1">HTML (opcional)</label>' +
+          '<textarea data-html rows="8" class="w-full bg-bg border border-border rounded-md px-3 py-2 font-mono text-[12px] text-slate-200 outline-none focus:border-gold/60" placeholder="Cole o HTML do view-source aqui (se a URL retornar Login)"></textarea>' +
+        '</div>' +
+      '</div>' +
+      '<div data-err class="text-xs text-danger mt-2"></div>' +
+      '<div class="flex justify-end gap-2 mt-4">' +
+        '<button data-cancel class="px-3 py-1.5 rounded-md border border-border text-sm hover:bg-bg">cancelar</button>' +
+        '<button data-send class="gold-btn block px-4 rounded-md bg-gold text-bg font-semibold text-center border border-transparent hover:brightness-110">importar</button>' +
+      '</div>' +
+    '</div>';
+  document.body.appendChild(overlay);
+  overlay.querySelector("[data-cancel]").onclick = () => overlay.remove();
+  overlay.querySelector("[data-send]").onclick = async (e) => {
+    const btn = e.currentTarget;
+    const url = overlay.querySelector("[data-url]").value.trim();
+    const cookie = overlay.querySelector("[data-cookie]").value.trim();
+    const html = overlay.querySelector("[data-html]").value.trim();
+    const err = overlay.querySelector("[data-err]");
+    err.textContent = "";
+    if (!url && !html) { err.textContent = "informe a URL ou cole o HTML"; return; }
+    try {
+      const r = await withSpinner(btn, () => fetchJSON("/api/admin/item-rules/scrape-shop", {
+        method: "POST",
+        body: JSON.stringify({ url: url || undefined, html: html || undefined, cookie: cookie || undefined }),
+      }));
+      toast("importado: " + (r.upserted || 0), "ok");
+      overlay.remove();
+    } catch (ex) {
+      err.textContent = ex.message || String(ex);
+    }
   };
 }
 
@@ -3293,6 +4650,7 @@ $("nav-dashboard").onclick = () => setDashView("dashboard");
 if ($("nav-market")) $("nav-market").onclick = () => setDashView("market");
 if ($("nav-admin")) $("nav-admin").onclick = () => setDashView("admin");
 wireMarket();
+wireMarketItemTooltips();
 // User comparison (own characters)
 if ($("user-compare")) $("user-compare").onclick = async () => {
   const btn = $("user-compare");

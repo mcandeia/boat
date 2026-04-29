@@ -69,6 +69,267 @@ export async function listItems(env: Env, url: URL): Promise<Response> {
   return json({ items: rs.results ?? [] });
 }
 
+// --- MU Online Fanz itemdb integration (server-side fetch + parse) ---
+function normalizeItemNameForFanz(name: string): string {
+  // Fanz itemdb uses pages like:
+  //   Excellent%20Dark%20Reign%20Blade.php
+  // We keep it simple: prefix with "Excellent " and URI-encode spaces.
+  return ("Excellent " + name.trim()).replace(/\s+/g, " ").trim();
+}
+
+function parseFanzListBlock(html: string, header: string): string[] {
+  // Extract lines from a section like "Item details..." where the body is:
+  //   * foo
+  //   * bar
+  // followed by a horizontal rule ("---").
+  const re = new RegExp(header.replace(/[.*+?^${}()|[\]\\]/g, "\\$&") + "[\\s\\S]*?\\n---", "i");
+  const m = html.match(re);
+  if (!m) return [];
+  const block = m[0];
+  const lines = (block.match(/\\*\\s+[^\\n]+/g) ?? []).map((s) => s.replace(/^\\*\\s+/, "").trim());
+  return lines.filter(Boolean).slice(0, 30);
+}
+
+function parseFanzExcellentOptions(html: string): string[] {
+  // In the "Possible additional options..." section, we want only the
+  // list of "Excellent option..." bullets (usually 6).
+  const sec = html.match(/Possible additional options\\.{3}[\\s\\S]*?(?:Notes & links\\.{3}|About us\\.{3})/i)?.[0];
+  if (!sec) return [];
+  const exc = sec.match(/Excellent option[\\s\\S]*?(?:\\+Jewel of Life option|\\+Jewel of Harmony option|\\+Luck option|---)/i)?.[0] ?? sec;
+  const raw = (exc.match(/\\*\\s+[^\\n]+/g) ?? []).map((s) => s.replace(/^\\*\\s+/, "").trim());
+  const cleaned = raw
+    .filter((s) => !/^Possible additional options/i.test(s))
+    .filter((s) => !/^Excellent option/i.test(s))
+    .filter((s) => !/^\\+Jewel of /i.test(s))
+    .filter((s) => !/^\\+Luck option/i.test(s))
+    .filter((s) => !/^\\*?the item's/i.test(s))
+    .filter(Boolean);
+  return cleaned.slice(0, 12);
+}
+
+function parseFanzAdditionalFlags(html: string): {
+  has_life: boolean;
+  has_luck: boolean;
+  has_skill: boolean;
+  has_harmony: boolean;
+} {
+  const sec = html.match(/Possible additional options\\.{3}[\\s\\S]*?(?:Notes & links\\.{3}|About us\\.{3})/i)?.[0] ?? "";
+  return {
+    has_life: /\\+Jewel of Life option/i.test(sec),
+    has_luck: /\\+Luck option/i.test(sec),
+    has_skill: /\\+Skill option/i.test(sec),
+    has_harmony: /\\+Jewel of Harmony option/i.test(sec),
+  };
+}
+
+function suggestedLifeOptions(): number[] {
+  // Classic MU: JoL add options commonly go 4..28 in steps of 4.
+  return [4, 8, 12, 16, 20, 24, 28];
+}
+
+function suggestedHarmonyOptions(): string[] {
+  // MU Fanz item pages don't enumerate harmony options per item, only
+  // whether Harmony is possible. Provide the common Harmony lines so the
+  // UI can pick one quickly.
+  return [
+    "Increase Damage +2%",
+    "Increase Damage +Min",
+    "Increase Damage +Max",
+    "Increase Damage +Min/Max",
+    "Increase Attack Speed",
+    "Increase Critical Damage",
+    "Increase Skill Damage",
+    "Decrease Damage",
+    "Increase Defense",
+    "Increase Defense Success Rate",
+    "Increase HP",
+    "Increase Mana",
+  ];
+}
+
+export async function getItemInfoFanz(env: Env, url: URL): Promise<Response> {
+  const name = (url.searchParams.get("name") ?? "").trim();
+  if (!name) return bad(400, "name obrigatório");
+
+  const normalized = normalizeItemNameForFanz(name);
+  const page = "https://muonlinefanz.com/tools/items/data/itemdb/" + encodeURIComponent(normalized).replace(/%2F/g, "/") + ".php";
+
+  try {
+    const ctrl = new AbortController();
+    const t = setTimeout(() => ctrl.abort(), 8000);
+    const res = await fetch(page, {
+      headers: {
+        "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+        "accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+      },
+      signal: ctrl.signal,
+      cf: { cacheTtl: 86400, cacheEverything: true } as RequestInitCfProperties,
+    });
+    clearTimeout(t);
+    if (!res.ok) return bad(502, "upstream " + res.status);
+    const html = await res.text();
+
+    const details = parseFanzListBlock(html, "Item details...");
+    const reqs = parseFanzListBlock(html, "Requirements...");
+    const excOptions = parseFanzExcellentOptions(html);
+    const flags = parseFanzAdditionalFlags(html);
+
+    return json({
+      ok: true,
+      name,
+      source: page,
+      details,
+      requirements: reqs,
+      excellent_options: excOptions,
+      options: {
+        life: flags.has_life,
+        luck: flags.has_luck,
+        skill: flags.has_skill,
+        harmony: flags.has_harmony,
+        excellent: excOptions.length > 0,
+      },
+      suggested: {
+        life_values: flags.has_life ? suggestedLifeOptions() : [],
+        harmony_values: flags.has_harmony ? suggestedHarmonyOptions() : [],
+      },
+    });
+  } catch (e) {
+    return bad(502, "falha ao buscar itemdb: " + (e as Error).message);
+  }
+}
+
+function normalizeItemSlug(name: string): string {
+  return name.trim().toLowerCase().replace(/\s+/g, " ");
+}
+
+export async function getItemRules(env: Env, url: URL): Promise<Response> {
+  const name = (url.searchParams.get("name") ?? "").trim();
+  const itemSlug = (url.searchParams.get("slug") ?? "").trim();
+  if (!name && !itemSlug) return bad(400, "name ou slug obrigatório");
+  const slug = name ? normalizeItemSlug(name) : "";
+  const row = await env.DB
+    .prepare(
+      `SELECT slug, name, kind,
+              item_slug,
+              allow_excellent, allow_luck, allow_skill, allow_life, allow_harmony,
+              life_values, harmony_values, excellent_values, ancient_values, updated_at
+         FROM item_rules
+        WHERE (${itemSlug ? "item_slug = ?" : "1=0"}) OR (${name ? "slug = ?" : "1=0"})
+        LIMIT 1`,
+    )
+    .bind(...(itemSlug ? [itemSlug] : []), ...(name ? [slug] : []))
+    .first<{
+      slug: string;
+      name: string;
+      kind: string | null;
+      item_slug: string | null;
+      allow_excellent: number;
+      allow_luck: number;
+      allow_skill: number;
+      allow_life: number;
+      allow_harmony: number;
+      life_values: string | null;
+      harmony_values: string | null;
+      excellent_values: string | null;
+      ancient_values: string | null;
+      updated_at: number;
+    }>();
+  // If no custom rule exists yet, fall back to MU Fanz so the UI can still work
+  // while the server-specific rules are being imported.
+  if (!row) {
+    const fallbackUrl = new URL(url.toString());
+    fallbackUrl.pathname = "/api/items/fanz";
+    return await getItemInfoFanz(env, fallbackUrl);
+  }
+  let lifeVals: number[] = [];
+  let harmonyVals: string[] = [];
+  let excVals: string[] = [];
+  let ancientVals: string[] = [];
+  try { lifeVals = row.life_values ? JSON.parse(row.life_values) : []; } catch {}
+  try { harmonyVals = row.harmony_values ? JSON.parse(row.harmony_values) : []; } catch {}
+  try { excVals = row.excellent_values ? JSON.parse(row.excellent_values) : []; } catch {}
+  try { ancientVals = row.ancient_values ? JSON.parse(row.ancient_values) : []; } catch {}
+
+  // Load ancient set attributes from local DB (best-effort).
+  const ancientSets: Record<string, string[]> = {};
+  const canonicalAncients: string[] = [];
+  if (ancientVals.length > 0) {
+    const uniq = [...new Set(ancientVals.map((s) => String(s).trim()).filter(Boolean))].slice(0, 20);
+    if (uniq.length > 0) {
+      // The shop sometimes provides short names (e.g. "Evis") while the Fanz
+      // DB stores full set names (e.g. "Evis' ... Set"). Try exact first, then
+      // prefix match.
+      const clauses: string[] = [];
+      const binds: string[] = [];
+      for (const v of uniq) {
+        clauses.push("name = ?");
+        binds.push(v);
+        clauses.push("name LIKE ?");
+        binds.push(v + "%");
+      }
+      const rs = await env.DB
+        .prepare("SELECT name, attrs FROM ancient_sets WHERE " + clauses.join(" OR "))
+        .bind(...binds)
+        .all<{ name: string; attrs: string | null }>();
+      const rows = rs.results ?? [];
+      const byName = new Map<string, { name: string; attrs: string | null }>();
+      for (const r of rows) {
+        byName.set(r.name, r);
+      }
+      for (const v of uniq) {
+        // Pick exact match; otherwise the shortest prefix match.
+        let picked: { name: string; attrs: string | null } | null = null;
+        if (byName.has(v)) {
+          picked = byName.get(v)!;
+        } else {
+          const candidates = rows.filter((r) => r.name.toLowerCase().startsWith(v.toLowerCase()));
+          if (candidates.length > 0) {
+            candidates.sort((a, b) => a.name.length - b.name.length);
+            picked = candidates[0];
+          }
+        }
+        const canon = picked ? picked.name : v;
+        canonicalAncients.push(canon);
+        if (picked) {
+          try {
+            const arr = picked.attrs ? JSON.parse(picked.attrs) : [];
+            if (Array.isArray(arr)) {
+              const cleaned = arr.map((x) => String(x)).filter(Boolean).slice(0, 12);
+              // Key by canonical name, but also by the short/raw value that
+              // may be stored on listings (e.g. "Evis").
+              ancientSets[canon] = cleaned;
+              if (v !== canon) ancientSets[v] = cleaned;
+            }
+          } catch {}
+        }
+      }
+    }
+  }
+  return json({
+    ok: true,
+    source: "rules",
+    name: row.name,
+    slug: row.slug,
+    kind: row.kind,
+    options: {
+      excellent: !!row.allow_excellent,
+      luck: !!row.allow_luck,
+      skill: !!row.allow_skill,
+      life: !!row.allow_life,
+      harmony: !!row.allow_harmony,
+      ancient: ancientVals.length > 0,
+    },
+    suggested: {
+      life_values: lifeVals,
+      harmony_values: harmonyVals,
+      ancient_values: canonicalAncients.length ? canonicalAncients : ancientVals,
+    },
+    excellent_options: excVals,
+    ancient_sets: ancientSets,
+    updated_at: row.updated_at,
+  });
+}
+
 // Allowed reaction kinds. Telegram-friendly emoji.
 const REACTION_KINDS = new Set(["👍", "❤️", "🔥", "👀", "🤝"]);
 const SIDE_VALUES: ReadonlySet<ListingSide> = new Set(["buy", "sell", "donate"]);
@@ -93,6 +354,7 @@ function formatAttrsLine(attrsJson: string | null): string | null {
       if (a.skill) parts.push("skill");
     }
     if (a.refinement != null) parts.push("+" + a.refinement);
+    if (a.harmony) parts.push("harmony: " + String(a.harmony));
     if (a.ancient) parts.push("ancient: " + String(a.ancient));
     if (a.extras) parts.push(String(a.extras));
     return parts.length > 0 ? parts.join(" · ") : null;
@@ -104,6 +366,8 @@ const NOTES_MAX = 1000;
 const ITEM_NAME_MAX = 80;
 const ATTRS_MAX = 1500;
 const PING_MSG_MAX = 280;
+const OFFER_MSG_MAX = 280;
+const OFFER_TTL_SEC = 3600;
 
 // Hot ranking — engagement scaled by recency. Open listings always rank
 // above held/closed; tie-break by created_at desc.
@@ -310,6 +574,9 @@ function sanitizeAttrs(raw: unknown): string | null {
   // skill + luck). Stored separately so we can render it as a single
   // "Full" tag instead of repeating each flag.
   if (obj.full != null) out.full = !!obj.full;
+  if (typeof obj.harmony === "string" && obj.harmony.trim()) {
+    out.harmony = obj.harmony.trim().slice(0, 60);
+  }
   if (typeof obj.ancient === "string" && obj.ancient.trim()) {
     out.ancient = obj.ancient.trim().slice(0, 40);
   }
@@ -663,4 +930,222 @@ export async function pingListing(
   }
 
   return json({ ok: true });
+}
+
+type OfferStatus = "pending" | "accepted" | "rejected" | "expired";
+
+type OfferRow = {
+  id: number;
+  listing_id: number;
+  seller_user_id: number;
+  bidder_user_id: number;
+  bidder_char_id: number | null;
+  currency: string | null;
+  price: number | null;
+  message: string | null;
+  status: OfferStatus;
+  expires_at: number;
+  created_at: number;
+  decided_at: number | null;
+};
+
+async function notifyOfferDecision(
+  env: Env,
+  offer: OfferRow & { listing_item_name: string; seller_nickname: string | null },
+  decision: "accepted" | "rejected" | "expired",
+): Promise<void> {
+  const bidder = await env.DB
+    .prepare("SELECT telegram_chat_id, nickname FROM users WHERE id = ?")
+    .bind(offer.bidder_user_id)
+    .first<{ telegram_chat_id: number; nickname: string | null }>();
+  if (!bidder?.telegram_chat_id) return;
+
+  const listingLabel = escHtml(offer.listing_item_name || ("#" + offer.listing_id));
+  const sellerLabel = escHtml(offer.seller_nickname || ("user " + offer.seller_user_id));
+  const offerLine = (offer.currency || offer.price != null)
+    ? ("💰 Oferta: <b>" + escHtml(
+        offer.currency === "free"
+          ? "grátis"
+          : ((offer.price != null ? Number(offer.price).toLocaleString("pt-BR") + " " : "") + (offer.currency ?? ""))
+      ) + "</b>\n")
+    : "";
+  const stateLabel =
+    decision === "accepted" ? "✅ <b>aceita</b>"
+    : decision === "rejected" ? "❌ <b>recusada</b>"
+    : "⌛ <b>expirada</b>";
+
+  const html =
+    "📨 Sua oferta foi " + stateLabel + "\n" +
+    "🛒 Anúncio: <b>" + listingLabel + "</b>\n" +
+    "👤 Vendedor: <b>" + sellerLabel + "</b>\n" +
+    offerLine;
+
+  await sendTelegram(env, bidder.telegram_chat_id, html);
+}
+
+export async function createOffer(
+  env: Env,
+  userId: number,
+  listingId: number,
+  req: Request,
+): Promise<Response> {
+  const u = await requireNickname(env, userId);
+  if (u instanceof Response) return u;
+
+  const body = (await req.json().catch(() => ({}))) as {
+    char_id?: number | null;
+    currency?: string | null;
+    price?: number | null;
+    message?: string | null;
+  };
+
+  const listing = await env.DB
+    .prepare("SELECT id, user_id, item_name, status FROM listings WHERE id = ?")
+    .bind(listingId)
+    .first<{ id: number; user_id: number; item_name: string; status: string }>();
+  if (!listing) return bad(404, "anúncio não encontrado");
+  if (listing.user_id === userId) return bad(400, "você é o dono do anúncio");
+  if (listing.status === "closed") return bad(400, "anúncio fechado");
+
+  const bidderCharId = body.char_id ?? null;
+  if (bidderCharId != null) {
+    const owned = await env.DB
+      .prepare("SELECT character_id FROM user_characters WHERE user_id = ? AND character_id = ?")
+      .bind(userId, bidderCharId)
+      .first<{ character_id: number }>();
+    if (!owned) return bad(404, "personagem não encontrado");
+  }
+
+  const currency = body.currency ?? null;
+  if (currency != null && !CURRENCY_VALUES.has(currency)) return bad(400, "currency inválida");
+  const price = body.price == null ? null : Number(body.price);
+  if (price != null && (!Number.isFinite(price) || price < 0)) return bad(400, "price inválido");
+  const message = (body.message ?? "").trim();
+  if (message.length > OFFER_MSG_MAX) return bad(400, "mensagem máx " + OFFER_MSG_MAX + " chars");
+  if (!currency && price == null && !message) {
+    return bad(400, "informe valor, moeda ou mensagem da oferta");
+  }
+
+  const t = now();
+  const expiresAt = t + OFFER_TTL_SEC;
+  const r = await env.DB
+    .prepare(
+      `INSERT INTO listing_offers
+         (listing_id, seller_user_id, bidder_user_id, bidder_char_id, currency, price, message, status, expires_at, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?)`,
+    )
+    .bind(listingId, listing.user_id, userId, bidderCharId, currency, price, message || null, expiresAt, t)
+    .run();
+
+  return json({ ok: true, id: r.meta.last_row_id, expires_at: expiresAt });
+}
+
+export async function listReceivedOffers(env: Env, userId: number): Promise<Response> {
+  await expireListingOffers(env);
+  const rs = await env.DB
+    .prepare(
+      `SELECT
+         o.*,
+         l.item_name AS listing_item_name,
+         l.status AS listing_status,
+         u.nickname AS bidder_nickname,
+         c.name AS bidder_char_name
+       FROM listing_offers o
+       LEFT JOIN listings l ON l.id = o.listing_id
+       LEFT JOIN users u ON u.id = o.bidder_user_id
+       LEFT JOIN characters c ON c.id = o.bidder_char_id
+      WHERE o.seller_user_id = ? AND o.status != 'expired'
+      ORDER BY
+        CASE o.status
+          WHEN 'pending' THEN 3
+          WHEN 'accepted' THEN 2
+          WHEN 'rejected' THEN 1
+          ELSE 0
+        END DESC,
+        o.created_at DESC
+      LIMIT 200`,
+    )
+    .bind(userId)
+    .all<
+      OfferRow & {
+        listing_item_name: string | null;
+        listing_status: string | null;
+        bidder_nickname: string | null;
+        bidder_char_name: string | null;
+      }
+    >();
+  return json({ offers: rs.results ?? [] });
+}
+
+export async function decideOffer(
+  env: Env,
+  userId: number,
+  offerId: number,
+  req: Request,
+): Promise<Response> {
+  const body = (await req.json().catch(() => ({}))) as { action?: string };
+  const action = (body.action ?? "").toLowerCase();
+  if (action !== "accept" && action !== "reject") {
+    return bad(400, "ação inválida");
+  }
+
+  await expireListingOffers(env);
+
+  const offer = await env.DB
+    .prepare(
+      `SELECT o.*, l.item_name AS listing_item_name, su.nickname AS seller_nickname
+       FROM listing_offers o
+       JOIN listings l ON l.id = o.listing_id
+       LEFT JOIN users su ON su.id = o.seller_user_id
+       WHERE o.id = ? AND o.seller_user_id = ?`,
+    )
+    .bind(offerId, userId)
+    .first<OfferRow & { listing_item_name: string; seller_nickname: string | null }>();
+  if (!offer) return bad(404, "oferta não encontrada");
+  if (offer.status !== "pending") return bad(409, "oferta já finalizada");
+
+  const t = now();
+  const status: OfferStatus = action === "accept" ? "accepted" : "rejected";
+  await env.DB
+    .prepare("UPDATE listing_offers SET status = ?, decided_at = ? WHERE id = ?")
+    .bind(status, t, offer.id)
+    .run();
+
+  if (status === "accepted") {
+    await env.DB
+      .prepare("UPDATE listings SET status = 'held' WHERE id = ? AND status = 'open'")
+      .bind(offer.listing_id)
+      .run();
+  }
+
+  await notifyOfferDecision(env, offer, status);
+  return json({ ok: true, status });
+}
+
+export async function expireListingOffers(env: Env): Promise<{ expired: number }> {
+  const t = now();
+  const due = await env.DB
+    .prepare(
+      `SELECT o.*, l.item_name AS listing_item_name, su.nickname AS seller_nickname
+       FROM listing_offers o
+       JOIN listings l ON l.id = o.listing_id
+       LEFT JOIN users su ON su.id = o.seller_user_id
+       WHERE o.status = 'pending' AND o.expires_at <= ?`,
+    )
+    .bind(t)
+    .all<OfferRow & { listing_item_name: string; seller_nickname: string | null }>();
+
+  let expired = 0;
+  for (const o of due.results ?? []) {
+    // Mark + notify, then delete so expired offers disappear from the UI.
+    const r = await env.DB
+      .prepare("UPDATE listing_offers SET status = 'expired', decided_at = ? WHERE id = ? AND status = 'pending'")
+      .bind(t, o.id)
+      .run();
+    if ((r.meta as unknown as { changes?: number }).changes === 0) continue;
+    await notifyOfferDecision(env, o, "expired");
+    await env.DB.prepare("DELETE FROM listing_offers WHERE id = ? AND status = 'expired'").bind(o.id).run();
+    expired++;
+  }
+  return { expired };
 }
