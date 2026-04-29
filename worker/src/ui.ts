@@ -2877,6 +2877,7 @@ function renderListingCard(l) {
       (charLine ? '<span class="text-muted">· ' + charLine + '</span>' : "") +
       (charStatusBadge ? ' ' + charStatusBadge : '') +
       '<span class="text-muted ml-auto" title="' + escapeHtml(date.toLocaleString("pt-BR")) + '">' + escapeHtml(ago) + '</span>' +
+      '<button data-action="share" title="copiar link" class="text-xs leading-none px-1.5 py-0.5 rounded border border-border text-muted hover:text-slate-200 hover:border-goldsoft transition">🔗</button>' +
     '</div>' +
     '<div class="flex gap-3 items-start">' +
       (l.item_image_url ? '<img src="' + escapeHtml(proxyImg(l.item_image_url)) + '" class="w-12 h-12 object-contain shrink-0 mt-0.5" loading="lazy" />' : "") +
@@ -2890,11 +2891,10 @@ function renderListingCard(l) {
     '</div>' +
     '<div class="flex flex-wrap items-center gap-1.5 mt-3">' +
       reactionsRow +
-      '<button data-action="share" title="copiar link" class="text-xs px-2 py-0.5 rounded border border-border text-muted hover:text-slate-200 ml-auto">🔗</button>' +
       (isMine
-        ? '<button data-action="edit" class="text-xs px-2 py-0.5 rounded border border-border text-muted hover:text-slate-200">editar</button>' +
+        ? '<button data-action="edit" class="text-xs px-2 py-0.5 rounded border border-border text-muted hover:text-slate-200 ml-auto">editar</button>' +
           '<button data-action="delete" class="text-xs px-2 py-0.5 rounded border border-border text-danger hover:bg-danger/10">remover</button>'
-        : '<button data-action="ping" class="text-xs px-2 py-0.5 rounded bg-gold text-bg font-semibold hover:brightness-110">📣 tenho interesse</button>') +
+        : '<button data-action="ping" class="text-xs px-2 py-0.5 rounded bg-gold text-bg font-semibold ml-auto hover:brightness-110">📣 tenho interesse</button>') +
       '<button data-action="toggle-detail" class="text-xs px-2 py-0.5 rounded border border-border text-muted hover:text-slate-200">💬 <span data-comment-count>' + (l.comment_count || 0) + '</span></button>' +
     '</div>' +
     '<div data-detail class="hidden mt-3 pt-3 border-t border-border/60"></div>';
@@ -2947,12 +2947,21 @@ async function handleListingAction(action, l, card, e) {
   if (action === "toggle-detail") { toggleListingDetail(l, card); return; }
   if (action === "share") {
     const url = location.origin + "/m/" + l.id;
+    const btn = e.currentTarget;
+    const original = btn.innerHTML;
     try {
       await navigator.clipboard.writeText(url);
+      // Brief visual feedback: swap icon to ✓ in goldsoft for ~1.2s.
+      btn.innerHTML = '<span class="text-goldsoft">✓ copiado</span>';
+      btn.classList.add("border-goldsoft");
+      setTimeout(() => {
+        btn.innerHTML = original;
+        btn.classList.remove("border-goldsoft");
+      }, 1200);
       toast("link copiado", "ok");
     } catch {
-      // Clipboard API can fail on insecure origins / older browsers — fall
-      // back to a tiny prompt-like overlay so the user can copy manually.
+      // Clipboard API can fail on insecure origins / older browsers —
+      // fall back to a prompt-like overlay so the user can copy manually.
       window.prompt("copie o link:", url);
     }
     return;
