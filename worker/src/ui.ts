@@ -1671,6 +1671,7 @@ async function toggleUserCharHistory(charId, charName) {
     cell.__drawBars = chart.drawBars;
     cell.__lastLevel = chart.lastLevel;
     wireHistoryTooltips(cell);
+    chart.wireZoom(cell);
 
     const btns = cell.querySelectorAll('.hist-tab-btn');
     btns.forEach(btn => {
@@ -1709,6 +1710,7 @@ async function toggleAdminHistory(charId, charName) {
     cell.__drawBars = chart.drawBars;
     cell.__lastLevel = chart.lastLevel;
     wireHistoryTooltips(cell);
+    chart.wireZoom(cell);
 
     const btns = cell.querySelectorAll('.hist-tab-btn');
     btns.forEach(btn => {
@@ -1862,17 +1864,35 @@ function wireHistoryTooltips(cell) {
 
 // Step-plot of resets over time. Resets only go up, so this shows progress
 // at a glance — slope = leveling speed.
-function renderHistoryChart(data, charName) {
+function renderHistoryChart(data, charName, opts = {}) {
   // Flatten cycles to a single sample list.
-  const samples = [];
-  for (const cyc of data.cycles ?? []) for (const s of cyc.samples) samples.push(s);
-  if (samples.length === 0) {
+  const allSamples = [];
+  for (const cyc of data.cycles ?? []) for (const s of cyc.samples) allSamples.push(s);
+  if (allSamples.length === 0) {
     return {
-      html: '<div class="text-xs text-muted">sem snapshots ainda — espera alguns minutos pro cron registrar mudanças.</div>',
+      html: '<div data-chart-host><div class="text-xs text-muted">sem snapshots ainda — espera alguns minutos pro cron registrar mudanças.</div></div>',
       drawBars: () => {},
+      wireZoom: () => {},
       lastLevel: null,
     };
   }
+
+  // Window the samples by trailing reset cycles. Keeps the chart legible
+  // when a long-running player has 8+ resets in a 14-day window.
+  const allDistinctResets = [...new Set(allSamples.map((s) => s.resets).filter((r) => r != null))].sort((a, b) => a - b);
+  const totalCycles = allDistinctResets.length;
+  const requestedWindow = opts.window != null ? String(opts.window) : (totalCycles > 4 ? "4" : "all");
+
+  let samples;
+  if (requestedWindow === "all" || totalCycles === 0) {
+    samples = allSamples;
+  } else {
+    const n = Math.min(Number(requestedWindow) || totalCycles, totalCycles);
+    const minReset = allDistinctResets[totalCycles - n];
+    const cutoffIdx = allSamples.findIndex((s) => s.resets != null && s.resets >= minReset);
+    samples = cutoffIdx >= 0 ? allSamples.slice(cutoffIdx) : allSamples;
+  }
+  if (samples.length === 0) samples = allSamples;
 
   const tMin = samples[0].ts;
   const tMax = samples[samples.length - 1].ts;
@@ -2044,13 +2064,39 @@ function renderHistoryChart(data, charName) {
     return '<text x="' + x + '" y="' + (H - padB + 14) + '" fill="#8a93a3" font-size="10" text-anchor="' + anchor + '">' + fmt(t) + '</text>';
   }).join("");
 
+  // Zoom toolbar — only render when there's actually something to zoom into.
+  let toolbar = "";
+  if (totalCycles > 1) {
+    const presets = [
+      { v: "3", l: "3 ciclos" },
+      { v: "4", l: "4 ciclos" },
+      { v: "7", l: "7 ciclos" },
+      { v: "all", l: "tudo" },
+    ].filter((p) => p.v === "all" || Number(p.v) < totalCycles);
+    if (presets.length >= 2) {
+      toolbar = '<div class="flex items-center gap-1 mb-2 text-[11px] flex-wrap">' +
+        '<span class="text-muted mr-1">zoom:</span>' +
+        presets.map((p) => {
+          const active = String(requestedWindow) === p.v;
+          const cls = active
+            ? "px-2 py-0.5 rounded border border-goldsoft text-goldsoft"
+            : "px-2 py-0.5 rounded border border-border text-muted hover:text-slate-300";
+          return '<button class="' + cls + '" data-zoom="' + p.v + '">' + p.l + '</button>';
+        }).join("") +
+        '</div>';
+    }
+  }
+
+  const visibleCycles = [...new Set(samples.map((s) => s.resets).filter((r) => r != null))].length;
+  const showingTxt = (requestedWindow === "all" || visibleCycles >= totalCycles)
+    ? 'últimos ' + data.days + ' dias · ' + data.count + ' snapshots · resets ' + rMin + ' → <b class="text-goldsoft">' + rMax + '</b>'
+    : 'mostrando ' + visibleCycles + ' de ' + totalCycles + ' ciclos · ' + samples.length + ' snapshots · resets ' + rMin + ' → <b class="text-goldsoft">' + rMax + '</b>';
   const stats =
     '<div class="text-[11px] text-muted mb-2">' +
-      '<b class="text-goldsoft">' + escapeHtml(charName) + '</b> · últimos ' + data.days + ' dias · ' +
-      data.count + ' snapshots · resets ' + rMin + ' → <b class="text-goldsoft">' + rMax + '</b>' +
+      '<b class="text-goldsoft">' + escapeHtml(charName) + '</b> · ' + showingTxt +
     '</div>';
 
-  const html = stats +
+  const html = '<div data-chart-host>' + stats + toolbar +
     '<svg viewBox="0 0 ' + W + ' ' + H + '" class="w-full h-auto bg-bg border border-border rounded-md">' +
       yTickLines.join("") +
       '<g class="bars-layer">' + markers + '</g>' +
@@ -2060,7 +2106,8 @@ function renderHistoryChart(data, charName) {
       '<g class="labels-layer">' + inlineLabels + '</g>' +
       xLabels +
       legend +
-    '</svg>';
+    '</svg>' +
+    '</div>';
   // Closure that the hover handler can call to repaint bars + labels at
   // whatever level the user points at. The container element it targets
   // must be the one where we set innerHTML = html.
@@ -2071,7 +2118,24 @@ function renderHistoryChart(data, charName) {
     if (barsEl) barsEl.innerHTML = bars;
     if (labelsEl) labelsEl.innerHTML = labels;
   };
-  return { html, drawBars, lastLevel: last?.level ?? null };
+  // Wires the zoom buttons inside the chart-host. On click, re-renders the
+  // host in place — the cell-level mousemove tooltip handler keeps working
+  // because it reads cell.__drawBars / cell.__lastLevel dynamically.
+  const wireZoom = (cell) => {
+    const host = cell.querySelector('[data-chart-host]');
+    if (!host) return;
+    host.querySelectorAll('[data-zoom]').forEach((btn) => {
+      btn.onclick = () => {
+        const w = btn.getAttribute('data-zoom');
+        const next = renderHistoryChart(data, charName, { window: w });
+        host.outerHTML = next.html;
+        cell.__drawBars = next.drawBars;
+        cell.__lastLevel = next.lastLevel;
+        next.wireZoom(cell);
+      };
+    });
+  };
+  return { html, drawBars, wireZoom, lastLevel: last?.level ?? null };
 }
 
 async function toggleAdminSubs(charId) {
