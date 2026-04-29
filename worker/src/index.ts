@@ -38,16 +38,22 @@ import {
   adminListCharSubs,
   adminListChars,
   adminListEvents,
+  adminPokeWatcher,
   adminRefreshChar,
   adminRefreshItems,
   adminRunCron,
   adminSetBlocked,
+  adminSpawnAllWatchers,
   adminUpdateEvent,
 } from "./routes/admin";
 import { telegramWebhook } from "./routes/telegram-webhook";
-import { pollOnce, pollServerEvents } from "./poll";
+import { pollServerEvents } from "./poll";
 import { setTelegramWebhook } from "./telegram";
 import { INDEX_HTML } from "./ui";
+
+// Re-exported so wrangler can register the DO class. The class itself
+// lives in char-watcher.ts; this is just the public binding.
+export { CharWatcher } from "./char-watcher";
 
 export default {
   async fetch(req: Request, env: Env): Promise<Response> {
@@ -207,6 +213,9 @@ export default {
         if (charSnapsClear && method === "DELETE") return await adminClearCharSnapshots(env, Number(charSnapsClear[1]));
         if (pathname === "/api/admin/poll" && method === "POST") return await adminRunCron(env);
         if (pathname === "/api/admin/items/refresh" && method === "POST") return await adminRefreshItems(env);
+        if (pathname === "/api/admin/watchers/spawn-all" && method === "POST") return await adminSpawnAllWatchers(env);
+        const charPoke = pathname.match(/^\/api\/admin\/chars\/(\d+)\/poke$/);
+        if (charPoke && method === "POST") return await adminPokeWatcher(env, Number(charPoke[1]));
         if (pathname === "/api/admin/events" && method === "GET") return await adminListEvents(env);
         const evPatch = pathname.match(/^\/api\/admin\/events\/(\d+)$/);
         if (evPatch && method === "PATCH") return await adminUpdateEvent(env, Number(evPatch[1]), req);
@@ -233,19 +242,15 @@ export default {
   },
 
   async scheduled(event: ScheduledController, env: Env, ctx: ExecutionContext): Promise<void> {
-    ctx.waitUntil(
-      pollOnce(env)
-        .then((r) => console.log(`poll: scraped=${r.scraped} fired=${r.fired}`))
-        .catch((e) => console.error("poll failed", e)),
-    );
+    // Per-char polling is now handled by per-character CharWatcher DOs
+    // (each owns its own 60s alarm). The cron's only remaining job is
+    // the global server-events tick (Chaos Castle / Blood Castle / etc.) —
+    // light, single-pass, no fan-out. That keeps us comfortably inside
+    // the per-tick CPU budget.
     ctx.waitUntil(
       pollServerEvents(env)
         .then((r) => console.log(`server-events: refreshed=${r.refreshed} fired=${r.fired}`))
         .catch((e) => console.error("server-events poll failed", e)),
     );
-    // Catalog warmup intentionally NOT here — running ensureCatalog every
-    // tick, even idempotent, kept tipping the cron over its CPU budget
-    // (exceededCpu) when paired with pollOnce's parallel scrapes. The
-    // user-triggered POST /api/items/warmup covers fresh-DB seeding.
   },
 };
