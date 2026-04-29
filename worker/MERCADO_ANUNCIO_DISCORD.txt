@@ -1,0 +1,32 @@
+🛒 [NOVIDADE] Mercado integrado no painel do bot
+
+Lancei agora a aba **🛒 Mercado** dentro de https://mu-patos.mcandeia.workers.dev (mesmo painel dos alertas no Telegram).
+
+**O que tem:**
+
+📦 **Itens** — autocomplete com imagem do catálogo (3 lojas oficiais + fallback com Storm Crow / Hyon Dragon / Eclipse / jewels / tickets / etc.). Refinamento +0..+13, opt 0..28, luck, skill, ancient set, bônus extras texto livre.
+
+⭐ **Item Full** — em vez de marcar Excellent + opt 28 + luck + skill um por um, 1 clique. Você só escolhe o refinamento.
+
+🎮 **Personagem** — modo separado: nome, ★ resets (destaque), level, classe (DW/SM/GM, DK/BK/BM, Fairy/Muse/High Elf, MG, DL). Se vincular um char registrado, resets/level/classe preenchem sozinhos.
+
+💰 **Moeda** — zeny / gold / cash / doação. Marcou doar? Já fica grátis.
+
+📣 **"Tenho interesse"** — clica, escolhe seu char in-game e (se permitido) escreve um recadinho. O painel manda **ping no Telegram do anunciante** na hora, com seu apelido + char + level/rr e link direto pro anúncio. Limite de 1/h pra mesma pessoa.
+
+🔥 **Reações + comentários** em todo anúncio. "Em alta" prioriza engajamento recente; "novos" é por data.
+
+🟢 **Status do anunciante** — bolinha verde + mapa atual quando ele tá online em algum char.
+
+🎨 **Cores MU** — Excellent/Full → verde neon, Ancient → âmbar, Personagem → roxo.
+
+🔗 Link no ping abre direto o anúncio. Aba ativa lembrada se der F5.
+
+**Pra usar:**
+1. https://mu-patos.mcandeia.workers.dev
+2. Login com Telegram (1 clique no @mu_patos_bot)
+3. Menu → 🛒 Mercado
+
+Apelido obrigatório só pro Mercado (privacidade — outros só veem o apelido). Os outros recursos do painel continuam: alertas de level, idle, GM online, eventos com X minutos antes, comparativo de resets/dia, histórico de char com gráfico.
+
+Bug, sugestão, item faltando? Manda aqui ou no jogo (daddy). Bom MU 🍻

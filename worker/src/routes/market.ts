@@ -3,6 +3,39 @@ import { bad, json, now } from "../util";
 import { escHtml, sendTelegram } from "../telegram";
 import { ensureCatalog } from "../items-scrape";
 
+// Same-origin proxy for mupatos.com.br item sprites. Some browsers cache
+// stale 404s or block cross-origin webps inconsistently — proxying makes
+// the image load deterministic and lets us share the CF edge cache.
+export async function imgProxy(_env: Env, url: URL): Promise<Response> {
+  const target = url.searchParams.get("u") ?? "";
+  if (!/^https:\/\/mupatos\.com\.br\/site\/resources\/images\//i.test(target)) {
+    return new Response("forbidden", { status: 403 });
+  }
+  try {
+    const ctrl = new AbortController();
+    const t = setTimeout(() => ctrl.abort(), 8000);
+    const res = await fetch(target, {
+      headers: {
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+        "accept": "image/webp,image/*,*/*;q=0.8",
+      },
+      signal: ctrl.signal,
+      cf: { cacheTtl: 86400, cacheEverything: true } as RequestInitCfProperties,
+    });
+    clearTimeout(t);
+    if (!res.ok) return new Response("upstream " + res.status, { status: 502 });
+    const ct = res.headers.get("content-type") ?? "image/webp";
+    return new Response(res.body, {
+      headers: {
+        "content-type": ct,
+        "cache-control": "public, max-age=86400, immutable",
+      },
+    });
+  } catch (e) {
+    return new Response("err: " + (e as Error).message, { status: 502 });
+  }
+}
+
 export async function warmupCatalog(env: Env): Promise<Response> {
   try {
     const r = await ensureCatalog(env);

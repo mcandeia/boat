@@ -23,6 +23,7 @@ import {
   deleteComment,
   deleteListing,
   getListing,
+  imgProxy,
   listItems,
   listListings,
   pingListing,
@@ -78,6 +79,11 @@ export default {
       if (pathname === "/api/telegram/webhook" && method === "POST") {
         return await telegramWebhook(env, req);
       }
+
+      // Same-origin proxy for mupatos sprite URLs. Public, whitelisted to
+      // mupatos.com.br/site/resources/images/* — fixes inconsistent
+      // cross-origin image loads in some browsers.
+      if (pathname === "/img-proxy" && method === "GET") return await imgProxy(env, url);
 
       // Public schedule list (used by the alert form to populate the
       // event-name dropdown). Read-only.

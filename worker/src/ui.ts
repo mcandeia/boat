@@ -2522,7 +2522,7 @@ function wireItemTypeahead(scope) {
       chip.classList.remove("hidden");
       chipName.textContent = item.name;
       if (chipImg) {
-        if (item.image_url) chipImg.src = item.image_url;
+        if (item.image_url) chipImg.src = proxyImg(item.image_url);
         else chipImg.removeAttribute("src");
       }
     }
@@ -2547,7 +2547,7 @@ function wireItemTypeahead(scope) {
       }
       results.innerHTML = items.map((it) =>
         '<button type="button" data-pick="' + escapeHtml(it.slug) + '" class="w-full flex items-center gap-2 px-2 py-1 hover:bg-bg/60 text-left text-sm">' +
-          (it.image_url ? '<img src="' + escapeHtml(it.image_url) + '" class="w-8 h-8 object-contain shrink-0" />' : '<div class="w-8 h-8 shrink-0"></div>') +
+          (it.image_url ? '<img src="' + escapeHtml(proxyImg(it.image_url)) + '" class="w-8 h-8 object-contain shrink-0" loading="lazy" />' : '<div class="w-8 h-8 shrink-0"></div>') +
           '<span class="flex-1 min-w-0 truncate">' + escapeHtml(it.name) + '</span>' +
           '<span class="text-[10px] text-muted">' + escapeHtml(it.category || "") + '</span>' +
         '</button>'
@@ -2590,6 +2590,16 @@ function wireItemTypeahead(scope) {
   document.addEventListener("click", (e) => {
     if (!scope.contains(e.target)) results.classList.add("hidden");
   });
+}
+
+// Route mupatos sprite URLs through our same-origin proxy. Anything else
+// passes through unchanged (e.g. user-supplied URLs we don't host).
+function proxyImg(url) {
+  if (!url) return url;
+  if (/^https:\/\/mupatos\.com\.br\/site\/resources\/images\//i.test(url)) {
+    return "/img-proxy?u=" + encodeURIComponent(url);
+  }
+  return url;
 }
 
 function fmtAttrs(attrsJson) {
@@ -2700,7 +2710,7 @@ function renderListingCard(l) {
       '<span class="text-muted ml-auto" title="' + escapeHtml(date.toLocaleString("pt-BR")) + '">' + escapeHtml(ago) + '</span>' +
     '</div>' +
     '<div class="flex gap-3 items-start">' +
-      (l.item_image_url ? '<img src="' + escapeHtml(l.item_image_url) + '" class="w-12 h-12 object-contain shrink-0 mt-0.5" />' : "") +
+      (l.item_image_url ? '<img src="' + escapeHtml(proxyImg(l.item_image_url)) + '" class="w-12 h-12 object-contain shrink-0 mt-0.5" loading="lazy" />' : "") +
       '<div class="min-w-0 flex-1">' +
         '<div class="font-semibold ' + titleClass + ' whitespace-pre-wrap">' + escapeHtml(l.item_name) + '</div>' +
         charSummary +
@@ -2870,7 +2880,7 @@ function openListingForm(existing) {
           '<div data-item-fields class="space-y-3"><div><label class="text-[11px] text-muted block mb-1" data-item-label>Item</label>' +
             '<div class="relative">' +
               '<div data-item-chip class="' + (isEdit && existing.item_image_url ? "" : "hidden ") + 'flex items-center gap-2 mb-2 px-2 py-1 rounded-md border border-goldsoft bg-gold/10">' +
-                (isEdit && existing.item_image_url ? '<img src="' + escapeHtml(existing.item_image_url) + '" class="w-8 h-8 object-contain" />' : '<img class="w-8 h-8 object-contain" />') +
+                (isEdit && existing.item_image_url ? '<img src="' + escapeHtml(proxyImg(existing.item_image_url)) + '" class="w-8 h-8 object-contain" />' : '<img class="w-8 h-8 object-contain" />') +
                 '<span data-item-chip-name class="text-sm">' + (isEdit ? escapeHtml(existing.item_name) : "") + '</span>' +
                 '<button type="button" data-item-clear class="ml-auto text-muted hover:text-danger text-xs">&times;</button>' +
               '</div>' +
