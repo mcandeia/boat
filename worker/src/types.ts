@@ -42,6 +42,8 @@ export interface ListingRow {
   char_id: number | null;
   side: ListingSide;
   item_name: string;
+  item_slug: string | null;
+  item_image_url: string | null;
   item_attrs: string | null;
   currency: string | null;
   price: number | null;

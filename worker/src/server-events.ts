@@ -226,3 +226,28 @@ export function shouldFireServerAlert(
   }
   return false;
 }
+
+// Next absolute UTC second when an alert for `schedule` (BR-local times)
+// at `leadMinutes` lead-time will fire, given `nowSecs` (UTC). Returns null
+// if the schedule is empty.
+export function nextServerEventFireAt(
+  schedule: Array<{ h: number; m: number }>,
+  leadMinutes: number,
+  nowSecs: number,
+): number | null {
+  if (schedule.length === 0) return null;
+  const br = brNowParts(nowSecs);
+  const secWithinMin = ((nowSecs % 60) + 60) % 60;
+  const brSec = (br.hour * 60 + br.minute) * 60 + secWithinMin;
+  let bestUntil: number | null = null;
+  for (const s of schedule) {
+    let alertMin = s.h * 60 + s.m - leadMinutes;
+    if (alertMin < 0) alertMin += 1440;
+    alertMin %= 1440;
+    const alertSec = alertMin * 60;
+    let until = alertSec - brSec;
+    if (until <= 0) until += 86400;
+    if (bestUntil == null || until < bestUntil) bestUntil = until;
+  }
+  return bestUntil != null ? nowSecs + bestUntil : null;
+}

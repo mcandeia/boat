@@ -3,6 +3,7 @@ import { bad, json, now } from "../util";
 import { scrapeOne } from "../scraper";
 import { pollOnce } from "../poll";
 import { buildHistoryResponse } from "./characters";
+import { refreshCatalog } from "../items-scrape";
 
 // Every admin route assumes the gate in index.ts already verified the
 // caller has users.admin = 1.
@@ -134,6 +135,15 @@ export async function adminClearCharSnapshots(env: Env, charId: number): Promise
     .bind(charId)
     .run();
   return json({ ok: true, deleted: r.meta.changes });
+}
+
+export async function adminRefreshItems(env: Env): Promise<Response> {
+  try {
+    const r = await refreshCatalog(env);
+    return json({ ok: true, ...r });
+  } catch (e) {
+    return bad(500, "scrape falhou: " + (e as Error).message);
+  }
 }
 
 interface AdminEventRow {

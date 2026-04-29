@@ -3,6 +3,7 @@ import { bad, json, now } from "../util";
 import { currentlyMatches, formatAlert } from "../messages";
 import { parseMap } from "../scraper";
 import { sendTelegram } from "../telegram";
+import { nextServerEventFireAt, parseSchedule } from "../server-events";
 
 const EVENT_TYPES: ReadonlySet<EventType> = new Set([
   "level_gte",
@@ -21,7 +22,45 @@ export async function listSubscriptions(env: Env, userId: number): Promise<Respo
     .prepare("SELECT * FROM subscriptions WHERE user_id = ? ORDER BY id DESC")
     .bind(userId)
     .all<SubscriptionRow>();
-  return json({ subscriptions: rows.results ?? [] });
+  const subscriptions = await enrichServerEventSubs(env, rows.results ?? [], now());
+  return json({ subscriptions });
+}
+
+// Adds a `next_fire_at` (UTC seconds) to every server_event sub by looking
+// up the matching server_events.schedule and applying the threshold's
+// leadMinutes. Other event types just pass through unchanged.
+export async function enrichServerEventSubs<T extends SubscriptionRow>(
+  env: Env,
+  rows: T[],
+  nowSecs: number,
+): Promise<(T & { next_fire_at?: number | null })[]> {
+  if (rows.length === 0) return rows as (T & { next_fire_at?: number | null })[];
+  const serverSubs = rows.filter((r) => r.event_type === "server_event");
+  if (serverSubs.length === 0) return rows as (T & { next_fire_at?: number | null })[];
+
+  const events = (
+    await env.DB
+      .prepare("SELECT name, room, schedule FROM server_events")
+      .all<{ name: string; room: string; schedule: string }>()
+  ).results ?? [];
+  const scheduleByKey = new Map<string, string>();
+  for (const ev of events) {
+    scheduleByKey.set((ev.name + "|" + ev.room).toLowerCase(), ev.schedule);
+  }
+
+  const out = rows.map((r) => ({ ...r })) as (T & { next_fire_at?: number | null })[];
+  for (const r of out) {
+    if (r.event_type !== "server_event" || !r.threshold) continue;
+    const m = r.threshold.match(/^([^|]+)\|([^|]+)\|(\d+)$/);
+    if (!m) continue;
+    const name = m[1].trim();
+    const room = m[2].toLowerCase();
+    const lead = Number(m[3]) || 0;
+    const sched = scheduleByKey.get((name + "|" + room).toLowerCase());
+    if (!sched) { r.next_fire_at = null; continue; }
+    r.next_fire_at = nextServerEventFireAt(parseSchedule(sched), lead, nowSecs);
+  }
+  return out;
 }
 
 export async function createSubscription(env: Env, userId: number, req: Request): Promise<Response> {

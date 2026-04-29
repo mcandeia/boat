@@ -2,6 +2,30 @@ import type { Env, ListingRow, ListingSide, UserRow } from "../types";
 import { bad, json, now } from "../util";
 import { escHtml, sendTelegram } from "../telegram";
 
+export async function listItems(env: Env, url: URL): Promise<Response> {
+  const q = (url.searchParams.get("q") ?? "").trim();
+  const category = (url.searchParams.get("category") ?? "").trim();
+  const limit = Math.min(Math.max(Number(url.searchParams.get("limit") ?? 30), 1), 100);
+
+  const wheres: string[] = ["1=1"];
+  const binds: (string | number)[] = [];
+  if (q) {
+    wheres.push("name LIKE ? COLLATE NOCASE");
+    binds.push("%" + q.replace(/[%_]/g, "") + "%");
+  }
+  if (category) {
+    wheres.push("category = ?");
+    binds.push(category);
+  }
+  const sql =
+    "SELECT slug, name, category, image_url FROM items " +
+    "WHERE " + wheres.join(" AND ") + " ORDER BY name COLLATE NOCASE LIMIT ?";
+  const rs = await env.DB.prepare(sql).bind(...binds, limit).all<{
+    slug: string; name: string; category: string | null; image_url: string | null;
+  }>();
+  return json({ items: rs.results ?? [] });
+}
+
 // Allowed reaction kinds. Telegram-friendly emoji.
 const REACTION_KINDS = new Set(["👍", "❤️", "🔥", "👀", "🤝"]);
 const SIDE_VALUES: ReadonlySet<ListingSide> = new Set(["buy", "sell", "donate"]);
@@ -210,6 +234,7 @@ export async function createListing(env: Env, userId: number, req: Request): Pro
     side?: string;
     char_id?: number | null;
     item_name?: string;
+    item_slug?: string | null;
     item_attrs?: unknown;
     currency?: string;
     price?: number | null;
@@ -242,14 +267,27 @@ export async function createListing(env: Env, userId: number, req: Request): Pro
     if (!owned) return bad(404, "personagem não encontrado");
   }
 
+  // Resolve item_slug → image_url if a slug was supplied. Slug is just a
+  // hint; we don't fail when it's stale.
+  let itemSlug: string | null = body.item_slug ?? null;
+  let itemImageUrl: string | null = null;
+  if (itemSlug) {
+    const it = await env.DB
+      .prepare("SELECT image_url FROM items WHERE slug = ?")
+      .bind(itemSlug)
+      .first<{ image_url: string | null }>();
+    if (it) itemImageUrl = it.image_url;
+    else itemSlug = null;
+  }
+
   const allowMessage = body.allow_message === false ? 0 : 1;
   const t = now();
   const r = await env.DB
     .prepare(
-      "INSERT INTO listings (user_id, char_id, side, item_name, item_attrs, currency, price, notes, allow_message, status, created_at) " +
-      "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'open', ?)",
+      "INSERT INTO listings (user_id, char_id, side, item_name, item_slug, item_image_url, item_attrs, currency, price, notes, allow_message, status, created_at) " +
+      "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'open', ?)",
     )
-    .bind(userId, charId, side, itemName, attrs, currency, price, notes, allowMessage, t)
+    .bind(userId, charId, side, itemName, itemSlug, itemImageUrl, attrs, currency, price, notes, allowMessage, t)
     .run();
   return json({ ok: true, id: r.meta.last_row_id });
 }
@@ -286,6 +324,20 @@ export async function updateListing(env: Env, userId: number, listingId: number,
   }
   if (body.item_attrs !== undefined) {
     sets.push("item_attrs = ?"); binds.push(sanitizeAttrs(body.item_attrs));
+  }
+  if ((body as { item_slug?: string | null }).item_slug !== undefined) {
+    let slug: string | null = (body as { item_slug?: string | null }).item_slug ?? null;
+    let imgUrl: string | null = null;
+    if (slug) {
+      const it = await env.DB
+        .prepare("SELECT image_url FROM items WHERE slug = ?")
+        .bind(slug)
+        .first<{ image_url: string | null }>();
+      if (it) imgUrl = it.image_url;
+      else slug = null;
+    }
+    sets.push("item_slug = ?"); binds.push(slug);
+    sets.push("item_image_url = ?"); binds.push(imgUrl);
   }
   if (body.currency !== undefined) {
     if (body.currency != null && !CURRENCY_VALUES.has(body.currency)) return bad(400, "currency inválida");

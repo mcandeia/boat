@@ -1,5 +1,6 @@
 import type { CharacterRow, Env, SubscriptionRow, UserRow } from "../types";
-import { bad, json } from "../util";
+import { bad, json, now } from "../util";
+import { enrichServerEventSubs } from "./subscriptions";
 
 export async function me(env: Env, userId: number): Promise<Response> {
   const user = await env.DB
@@ -26,12 +27,13 @@ export async function me(env: Env, userId: number): Promise<Response> {
       .all<Row>()
   ).results ?? [];
 
-  const subscriptions = (
+  const subRows = (
     await env.DB
       .prepare("SELECT * FROM subscriptions WHERE user_id = ? ORDER BY id DESC")
       .bind(userId)
       .all<SubscriptionRow>()
   ).results ?? [];
+  const subscriptions = await enrichServerEventSubs(env, subRows, now());
 
   return json({
     user: {

@@ -336,6 +336,7 @@ export const INDEX_HTML = /* html */ `<!doctype html>
             <h2 class="text-xs uppercase tracking-widest text-gold">Admin</h2>
             <div class="flex gap-2">
               <button id="admin-compare" class="px-3 py-1.5 rounded-md border border-gold/40 text-goldsoft hover:bg-gold/10 transition text-xs">📈 Comparar</button>
+              <button id="admin-scrape-items" class="px-3 py-1.5 rounded-md border border-gold/40 text-goldsoft hover:bg-gold/10 transition text-xs">🛍️ Scrapear catálogo</button>
               <button id="admin-poll" class="gold-btn block px-3 rounded-md bg-gold text-bg font-semibold text-center border border-transparent hover:brightness-110 transition text-xs">Rodar cron agora</button>
             </div>
           </div>
@@ -785,6 +786,10 @@ function renderDash() {
     else if (s.event_type === "server_event") {
       const parts = (s.threshold || "").split("|");
       label = '📣 <b class="text-goldsoft">' + (parts[0] || "?") + '</b> (' + (parts[1] || "?").toUpperCase() + ') — ' + (parts[2] || "?") + ' min antes';
+      if (s.next_fire_at) {
+        const secs = s.next_fire_at - now;
+        if (secs > 0) label += ' · <span class="text-muted">próximo em <b class="text-goldsoft">' + escapeHtml(formatDuration(secs)) + '</b></span>';
+      }
     }
     const activeBadge = s.active
       ? '<span class="px-2 py-0.5 rounded-full bg-ok/10 text-ok border border-ok/20 text-xs">ativo</span>'
@@ -2357,6 +2362,13 @@ $("admin-poll").onclick = async (e) => {
   } catch (err) { toast(err.message, "err"); }
 };
 if ($("admin-compare")) $("admin-compare").onclick = compareSelectedChars;
+if ($("admin-scrape-items")) $("admin-scrape-items").onclick = async (e) => {
+  const btn = e.currentTarget;
+  try {
+    const r = await withSpinner(btn, () => fetchJSON("/api/admin/items/refresh", { method: "POST" }));
+    toast("catálogo: " + r.scraped + " itens em " + r.categories + " categorias", "ok");
+  } catch (err) { toast(err.message, "err"); }
+};
 
 async function loadAdminEvents() {
   const tbody = $("admin-events");
@@ -2462,6 +2474,96 @@ function fmtPriceCurrency(listing) {
   return ico + " " + price + " " + listing.currency;
 }
 
+function wireItemTypeahead(scope) {
+  const input = scope.querySelector('[data-f="item_name"]');
+  const slug = scope.querySelector('[data-f="item_slug"]');
+  const chip = scope.querySelector('[data-item-chip]');
+  const chipName = scope.querySelector('[data-item-chip-name]');
+  const chipImg = chip ? chip.querySelector("img") : null;
+  const clearBtn = scope.querySelector('[data-item-clear]');
+  const results = scope.querySelector('[data-item-results]');
+  if (!input || !results) return;
+
+  let timer = null;
+  let lastQuery = "";
+
+  const setSelected = (item) => {
+    input.value = item.name;
+    slug.value = item.slug;
+    if (chip) {
+      chip.classList.remove("hidden");
+      chipName.textContent = item.name;
+      if (chipImg) {
+        if (item.image_url) chipImg.src = item.image_url;
+        else chipImg.removeAttribute("src");
+      }
+    }
+    results.classList.add("hidden");
+  };
+
+  if (clearBtn) clearBtn.onclick = () => {
+    slug.value = "";
+    input.value = "";
+    if (chip) chip.classList.add("hidden");
+    input.focus();
+  };
+
+  const fetchAndRender = async (q) => {
+    try {
+      const data = await fetchJSON("/api/items?limit=20&q=" + encodeURIComponent(q));
+      const items = data.items || [];
+      if (items.length === 0) {
+        results.innerHTML = '<div class="px-3 py-2 text-xs text-muted">nenhum item — vai como texto livre</div>';
+        results.classList.remove("hidden");
+        return;
+      }
+      results.innerHTML = items.map((it) =>
+        '<button type="button" data-pick="' + escapeHtml(it.slug) + '" class="w-full flex items-center gap-2 px-2 py-1 hover:bg-bg/60 text-left text-sm">' +
+          (it.image_url ? '<img src="' + escapeHtml(it.image_url) + '" class="w-8 h-8 object-contain shrink-0" />' : '<div class="w-8 h-8 shrink-0"></div>') +
+          '<span class="flex-1 min-w-0 truncate">' + escapeHtml(it.name) + '</span>' +
+          '<span class="text-[10px] text-muted">' + escapeHtml(it.category || "") + '</span>' +
+        '</button>'
+      ).join("");
+      results.classList.remove("hidden");
+      results.querySelectorAll("[data-pick]").forEach((btn) => {
+        btn.onclick = () => {
+          const s = btn.getAttribute("data-pick");
+          const it = items.find((x) => x.slug === s);
+          if (it) setSelected(it);
+        };
+      });
+    } catch (e) {
+      results.innerHTML = '<div class="px-3 py-2 text-xs text-danger">' + escapeHtml(e.message) + '</div>';
+      results.classList.remove("hidden");
+    }
+  };
+
+  input.addEventListener("input", () => {
+    // Typing invalidates any previously-picked slug.
+    if (slug.value) {
+      slug.value = "";
+      if (chip) chip.classList.add("hidden");
+    }
+    const q = input.value.trim();
+    if (timer) clearTimeout(timer);
+    if (q.length < 2) {
+      results.classList.add("hidden");
+      return;
+    }
+    timer = setTimeout(() => {
+      if (q === lastQuery) return;
+      lastQuery = q;
+      fetchAndRender(q);
+    }, 200);
+  });
+  input.addEventListener("focus", () => {
+    if (input.value.trim().length >= 2 && results.children.length > 0) results.classList.remove("hidden");
+  });
+  document.addEventListener("click", (e) => {
+    if (!scope.contains(e.target)) results.classList.add("hidden");
+  });
+}
+
 function fmtAttrs(attrsJson) {
   if (!attrsJson) return null;
   try {
@@ -2533,10 +2635,15 @@ function renderListingCard(l) {
       (charLine ? '<span class="text-muted">· ' + charLine + '</span>' : "") +
       '<span class="text-muted ml-auto" title="' + escapeHtml(date.toLocaleString("pt-BR")) + '">' + escapeHtml(ago) + '</span>' +
     '</div>' +
-    '<div class="font-semibold text-slate-100">' + escapeHtml(l.item_name) + '</div>' +
-    (attrs ? '<div class="text-xs text-muted mt-0.5">' + escapeHtml(attrs) + '</div>' : "") +
-    (price ? '<div class="text-sm text-goldsoft mt-1 tabular-nums">' + escapeHtml(price) + '</div>' : "") +
-    (l.notes ? '<div class="text-sm text-slate-300 mt-2 whitespace-pre-wrap">' + escapeHtml(l.notes) + '</div>' : "") +
+    '<div class="flex gap-3 items-start">' +
+      (l.item_image_url ? '<img src="' + escapeHtml(l.item_image_url) + '" class="w-12 h-12 object-contain shrink-0 mt-0.5" />' : "") +
+      '<div class="min-w-0 flex-1">' +
+        '<div class="font-semibold text-slate-100">' + escapeHtml(l.item_name) + '</div>' +
+        (attrs ? '<div class="text-xs text-muted mt-0.5">' + escapeHtml(attrs) + '</div>' : "") +
+        (price ? '<div class="text-sm text-goldsoft mt-1 tabular-nums">' + escapeHtml(price) + '</div>' : "") +
+        (l.notes ? '<div class="text-sm text-slate-300 mt-2 whitespace-pre-wrap">' + escapeHtml(l.notes) + '</div>' : "") +
+      '</div>' +
+    '</div>' +
     '<div class="flex flex-wrap items-center gap-1.5 mt-3">' +
       reactionsRow +
       (isMine
@@ -2689,7 +2796,16 @@ function openListingForm(existing) {
               '</select></div>' +
           '</div>' +
           '<div><label class="text-[11px] text-muted block mb-1">Item</label>' +
-            '<input data-f="item_name" maxlength="80" placeholder="ex.: Excellent Bone Blade" class="w-full h-10 bg-bg border border-border rounded-md px-2" value="' + (isEdit ? escapeHtml(existing.item_name) : "") + '" /></div>' +
+            '<div class="relative">' +
+              '<div data-item-chip class="' + (isEdit && existing.item_image_url ? "" : "hidden ") + 'flex items-center gap-2 mb-2 px-2 py-1 rounded-md border border-goldsoft bg-gold/10">' +
+                (isEdit && existing.item_image_url ? '<img src="' + escapeHtml(existing.item_image_url) + '" class="w-8 h-8 object-contain" />' : '<img class="w-8 h-8 object-contain" />') +
+                '<span data-item-chip-name class="text-sm">' + (isEdit ? escapeHtml(existing.item_name) : "") + '</span>' +
+                '<button type="button" data-item-clear class="ml-auto text-muted hover:text-danger text-xs">&times;</button>' +
+              '</div>' +
+              '<input data-f="item_name" maxlength="80" placeholder="busque no catálogo ou digite livre..." autocomplete="off" class="w-full h-10 bg-bg border border-border rounded-md px-2" value="' + (isEdit ? escapeHtml(existing.item_name) : "") + '" />' +
+              '<input data-f="item_slug" type="hidden" value="' + (isEdit && existing.item_slug ? escapeHtml(existing.item_slug) : "") + '" />' +
+              '<div data-item-results class="hidden absolute z-10 mt-1 w-full max-h-60 overflow-y-auto bg-panel border border-border rounded-md shadow-lg"></div>' +
+            '</div></div>' +
           '<div class="grid grid-cols-2 gap-2">' +
             '<div><label class="text-[11px] text-muted block mb-1">Refinamento (+0..+13)</label>' +
               '<input data-f="refinement" type="number" min="0" max="13" class="w-full h-10 bg-bg border border-border rounded-md px-2" value="' + (a.refinement ?? "") + '" /></div>' +
@@ -2704,11 +2820,11 @@ function openListingForm(existing) {
             '<input data-f="ancient" maxlength="40" placeholder="ex.: Gaion, Anonymous, Hyon..." class="w-full h-10 bg-bg border border-border rounded-md px-2" value="' + (a.ancient ? escapeHtml(a.ancient) : "") + '" /></div>' +
           '<div><label class="text-[11px] text-muted block mb-1">Bônus extras (texto livre)</label>' +
             '<input data-f="extras" maxlength="240" placeholder="ex.: dmg+15%, refl+5%, dr+5..." class="w-full h-10 bg-bg border border-border rounded-md px-2" value="' + (a.extras ? escapeHtml(a.extras) : "") + '" /></div>' +
-          '<div class="grid grid-cols-2 gap-2">' +
+          '<div data-pricing-block class="grid grid-cols-2 gap-2">' +
             '<div><label class="text-[11px] text-muted block mb-1">Moeda</label>' +
               '<select data-f="currency" class="w-full h-10 bg-bg border border-border rounded-md px-2">' +
                 '<option value="">—</option>' +
-                ['zeny','gold','cash','free'].map((v) => '<option value="' + v + '"' + (isEdit && existing.currency === v ? " selected" : "") + '>' + v + '</option>').join("") +
+                ['zeny','gold','cash'].map((v) => '<option value="' + v + '"' + (isEdit && existing.currency === v ? " selected" : "") + '>' + v + '</option>').join("") +
               '</select></div>' +
             '<div><label class="text-[11px] text-muted block mb-1">Preço</label>' +
               '<input data-f="price" type="number" min="0" placeholder="0" class="w-full h-10 bg-bg border border-border rounded-md px-2" value="' + (isEdit && existing.price != null ? existing.price : "") + '" /></div>' +
@@ -2723,6 +2839,16 @@ function openListingForm(existing) {
         '</div>' +
       '</div>';
     document.body.appendChild(overlay);
+    // Doação implies free — hide moeda/preço when side=doar.
+    const sideSel = overlay.querySelector('[data-f="side"]');
+    const pricingBlock = overlay.querySelector('[data-pricing-block]');
+    const syncPricing = () => {
+      const isDonate = sideSel.value === "donate";
+      pricingBlock.classList.toggle("hidden", isDonate);
+    };
+    sideSel.addEventListener("change", syncPricing);
+    syncPricing();
+    wireItemTypeahead(overlay);
     overlay.querySelector("[data-cancel]").onclick = () => overlay.remove();
     overlay.querySelector("[data-save]").onclick = async () => {
       const get = (k) => overlay.querySelector('[data-f="' + k + '"]');
@@ -2735,16 +2861,20 @@ function openListingForm(existing) {
       if (get("skill").checked) attrs.skill = true;
       const anc = get("ancient").value.trim(); if (anc) attrs.ancient = anc;
       const ext = get("extras").value.trim(); if (ext) attrs.extras = ext;
-      const currencyVal = get("currency").value;
+      const sideVal = get("side").value;
+      const isDonate = sideVal === "donate";
+      const currencyVal = isDonate ? "free" : get("currency").value;
       const priceVal = get("price").value === "" ? null : Number(get("price").value);
       const charIdVal = get("char_id").value === "" ? null : Number(get("char_id").value);
+      const slugVal = (get("item_slug").value || "").trim() || null;
       const payload = {
-        side: get("side").value,
+        side: sideVal,
         char_id: charIdVal,
         item_name,
+        item_slug: slugVal,
         item_attrs: attrs,
         currency: currencyVal || null,
-        price: currencyVal === "free" ? null : priceVal,
+        price: isDonate || currencyVal === "free" ? null : priceVal,
         notes: get("notes").value.trim() || null,
         allow_message: !!get("allow_message").checked,
       };

@@ -23,6 +23,7 @@ import {
   deleteComment,
   deleteListing,
   getListing,
+  listItems,
   listListings,
   pingListing,
   reactListing,
@@ -35,6 +36,7 @@ import {
   adminListChars,
   adminListEvents,
   adminRefreshChar,
+  adminRefreshItems,
   adminRunCron,
   adminSetBlocked,
   adminUpdateEvent,
@@ -124,6 +126,7 @@ export default {
       if (pathname === "/api/me/nickname" && method === "POST") return await setNickname(env, userId, req);
 
       // ---- Market ----
+      if (pathname === "/api/items" && method === "GET") return await listItems(env, url);
       if (pathname === "/api/market/listings" && method === "GET") return await listListings(env, userId, url);
       if (pathname === "/api/market/listings" && method === "POST") return await createListing(env, userId, req);
       const listingMatch = pathname.match(/^\/api\/market\/listings\/(\d+)$/);
@@ -193,6 +196,7 @@ export default {
         const charSnapsClear = pathname.match(/^\/api\/admin\/chars\/(\d+)\/snapshots$/);
         if (charSnapsClear && method === "DELETE") return await adminClearCharSnapshots(env, Number(charSnapsClear[1]));
         if (pathname === "/api/admin/poll" && method === "POST") return await adminRunCron(env);
+        if (pathname === "/api/admin/items/refresh" && method === "POST") return await adminRefreshItems(env);
         if (pathname === "/api/admin/events" && method === "GET") return await adminListEvents(env);
         const evPatch = pathname.match(/^\/api\/admin\/events\/(\d+)$/);
         if (evPatch && method === "PATCH") return await adminUpdateEvent(env, Number(evPatch[1]), req);
