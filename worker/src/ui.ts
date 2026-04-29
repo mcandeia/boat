@@ -2899,7 +2899,11 @@ function renderListingCard(l) {
       (isMine
         ? '<button data-action="edit" class="text-xs px-2 py-0.5 rounded border border-border text-muted hover:text-slate-200 ml-auto">editar</button>' +
           '<button data-action="delete" class="text-xs px-2 py-0.5 rounded border border-border text-danger hover:bg-danger/10">remover</button>'
-        : '<button data-action="ping" class="text-xs px-2 py-0.5 rounded bg-gold text-bg font-semibold ml-auto hover:brightness-110">📣 tenho interesse</button>') +
+        : '<button data-action="ping" class="text-xs px-2 py-0.5 rounded bg-gold text-bg font-semibold ml-auto hover:brightness-110">' + (
+            l.side === "donate" ? "🤝 quero receber"
+            : l.side === "buy"  ? "📣 tenho o item"
+            : "📣 tenho interesse"
+          ) + '</button>') +
       '<button data-action="toggle-detail" class="text-xs px-2 py-0.5 rounded border border-border text-muted hover:text-slate-200">💬 <span data-comment-count>' + (l.comment_count || 0) + '</span></button>' +
     '</div>' +
     '<div data-detail class="hidden mt-3 pt-3 border-t border-border/60"></div>';
