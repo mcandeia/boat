@@ -6,11 +6,29 @@ compatibility_date = "2026-04-01"
 # mupatos.com.br's bot guard, so we no longer need Browser Rendering.
 
 # ---------------------------------------------------------------------------
-# Cron — poll every minute. Plain fetch() is cheap; no quota worries.
+# Cron — every minute, but now ONLY for the global server-events tick.
+# Per-character polling moved to Durable Object alarms (CharWatcher).
 # ---------------------------------------------------------------------------
 
 [triggers]
 crons = ["* * * * *"]
+
+# ---------------------------------------------------------------------------
+# Durable Objects — one CharWatcher instance per character, each with its
+# own 60s alarm. Replaces the single-cron fan-out that kept tipping over
+# the per-tick CPU budget once we had ~25+ chars.
+# ---------------------------------------------------------------------------
+
+[[durable_objects.bindings]]
+name       = "CHAR_WATCHERS"
+class_name = "CharWatcher"
+
+# Free plan requires new_sqlite_classes (DOs must be SQLite-backed).
+# Our DO doesn't actually use storage beyond an alarm + a single key/value
+# (charId), so the SQLite backing is fine — same Storage API either way.
+[[migrations]]
+tag                = "v1-do"
+new_sqlite_classes = ["CharWatcher"]
 
 # ---------------------------------------------------------------------------
 # Observability — surfaces console.log + errors + cron runs in the

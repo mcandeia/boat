@@ -1,6 +1,7 @@
 import type { CharacterRow, Env } from "../types";
 import { bad, json, now } from "../util";
 import { scrapeOne } from "../scraper";
+import { spawnWatcher, stopWatcher } from "../char-watcher";
 
 const VALID_NAME = /^[A-Za-z0-9_-]{1,15}$/;
 const INVALID_NAME = "nome de personagem inválido";
@@ -91,6 +92,14 @@ export async function createCharacter(env: Env, userId: number, req: Request): P
     .bind(userId, id, body.is_gm ? 1 : 0, t)
     .run();
 
+  // Spin up the per-char Durable Object so it starts ticking on its own
+  // alarm. Idempotent: re-init on an existing DO just resets the alarm.
+  // Best-effort — we don't want char creation to fail just because the
+  // DO call is slow.
+  await spawnWatcher(env, id).catch((e) =>
+    console.log("spawnWatcher failed for char " + id + ": " + (e as Error).message),
+  );
+
   return json({ ok: true, id, snapshot });
 }
 
@@ -102,13 +111,16 @@ export async function deleteCharacter(env: Env, userId: number, id: number): Pro
     .run();
   if (r.meta.changes === 0) return bad(404, "não encontrado");
 
-  // Optional cleanup: if no more users link this character, delete it.
+  // Optional cleanup: if no more users link this character, delete it
+  // AND tell its Durable Object to stop ticking. The DO instance becomes
+  // idle and CF auto-evicts it.
   const stillLinked = await env.DB
     .prepare("SELECT 1 AS ok FROM user_characters WHERE character_id = ? LIMIT 1")
     .bind(id)
     .first<{ ok: number }>();
   if (!stillLinked) {
     await env.DB.prepare("DELETE FROM characters WHERE id = ?").bind(id).run();
+    await stopWatcher(env, id);
   }
 
   return json({ ok: true });

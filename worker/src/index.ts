@@ -44,6 +44,7 @@ import {
   adminListCharSubs,
   adminListChars,
   adminListEvents,
+  adminPokeWatcher,
   adminRefreshChar,
   adminRefreshItems,
   adminWipeCatalog,
@@ -54,12 +55,28 @@ import {
   adminBackfillItemRulesFromSources,
   adminRunCron,
   adminSetBlocked,
+  adminSpawnAllWatchers,
   adminUpdateEvent,
 } from "./routes/admin";
 import { telegramWebhook } from "./routes/telegram-webhook";
-import { pollOnce, pollServerEvents } from "./poll";
+import {
+  adminCreateCustomEvent,
+  adminDeleteCustomEvent,
+  adminUpdateCustomEvent,
+  listCustomEvents,
+  listMyGiftSubs,
+  subscribeCustomEvent,
+  subscribeGiftKind,
+  unsubscribeCustomEvent,
+  unsubscribeGiftKind,
+} from "./routes/custom-events";
+import { pollCustomEvents, pollServerEvents } from "./poll";
 import { setTelegramWebhook } from "./telegram";
 import { INDEX_HTML } from "./ui";
+
+// Re-exported so wrangler can register the DO class. The class itself
+// lives in char-watcher.ts; this is just the public binding.
+export { CharWatcher } from "./char-watcher";
 
 export default {
   async fetch(req: Request, env: Env): Promise<Response> {
@@ -69,7 +86,10 @@ export default {
     const cookie = req.headers.get("cookie");
 
     try {
-      if (pathname === "/" || pathname === "/index.html") {
+      if (pathname === "/" || pathname === "/index.html" || /^\/m\/\d+$/.test(pathname)) {
+        // Single-page worker. The home, the listing PDP (/m/:id), and
+        // the index alias all serve the same HTML; the JS picks up the
+        // path and renders the right view (feed vs PDP).
         return new Response(INDEX_HTML, {
           headers: {
             "content-type": "text/html; charset=utf-8",
@@ -105,6 +125,23 @@ export default {
           .prepare("SELECT category, name, room, schedule, meta, updated_at FROM server_events ORDER BY category, name, room")
           .all<{ category: string; name: string; room: string; schedule: string; meta: string | null; updated_at: number }>();
         return json({ events: rs.results ?? [] });
+      }
+
+      // ---- Public Mercado (read-only) ----
+      // Anyone can browse the feed and the catalog without logging in.
+      // Writes (post/react/comment/ping) still require auth — those routes
+      // live behind the gate further down. We try to read the session
+      // best-effort so logged-in users still see "mine" reaction highlights
+      // when hitting these public endpoints.
+      if (pathname === "/api/items" && method === "GET") return await listItems(env, url);
+      if (pathname === "/api/market/listings" && method === "GET") {
+        const sess = await readSession(env, cookie).catch(() => null);
+        return await listListings(env, sess?.userId ?? null, url);
+      }
+      const publicListingMatch = pathname.match(/^\/api\/market\/listings\/(\d+)$/);
+      if (publicListingMatch && method === "GET") {
+        const sess = await readSession(env, cookie).catch(() => null);
+        return await getListing(env, sess?.userId ?? null, Number(publicListingMatch[1]));
       }
 
       // ---- Local-only admin login helper (dev) ----
@@ -190,15 +227,23 @@ export default {
       if (pathname === "/api/me" && method === "GET") return await me(env, userId);
       if (pathname === "/api/me/nickname" && method === "POST") return await setNickname(env, userId, req);
 
-      // ---- Market ----
-      if (pathname === "/api/items" && method === "GET") return await listItems(env, url);
+      // ---- Custom events (admin-managed GM events) ----
+      if (pathname === "/api/custom-events" && method === "GET") return await listCustomEvents(env, userId);
+      const customEvSub = pathname.match(/^\/api\/custom-events\/(\d+)\/subscribe$/);
+      if (customEvSub && method === "POST") return await subscribeCustomEvent(env, userId, Number(customEvSub[1]), req);
+      if (customEvSub && method === "DELETE") return await unsubscribeCustomEvent(env, userId, Number(customEvSub[1]));
+      if (pathname === "/api/me/gift-subs" && method === "GET") return await listMyGiftSubs(env, userId);
+      if (pathname === "/api/me/gift-subs" && method === "POST") return await subscribeGiftKind(env, userId, req);
+      const giftUnsub = pathname.match(/^\/api\/me\/gift-subs\/([a-z]+)$/);
+      if (giftUnsub && method === "DELETE") return await unsubscribeGiftKind(env, userId, giftUnsub[1]);
+
+      // ---- Market (writes — public GETs are above the auth gate) ----
       if (pathname === "/api/items/warmup" && method === "POST") return await warmupCatalog(env);
       if (pathname === "/api/items/fanz" && method === "GET") return await getItemInfoFanz(env, url);
       if (pathname === "/api/items/rules" && method === "GET") return await getItemRules(env, url);
       if (pathname === "/api/market/listings" && method === "GET") return await listListings(env, userId, url);
       if (pathname === "/api/market/listings" && method === "POST") return await createListing(env, userId, req);
       const listingMatch = pathname.match(/^\/api\/market\/listings\/(\d+)$/);
-      if (listingMatch && method === "GET") return await getListing(env, userId, Number(listingMatch[1]));
       if (listingMatch && method === "PATCH") return await updateListing(env, userId, Number(listingMatch[1]), req);
       if (listingMatch && method === "DELETE") return await deleteListing(env, userId, Number(listingMatch[1]));
       const reactMatch = pathname.match(/^\/api\/market\/listings\/(\d+)\/react$/);
@@ -216,7 +261,7 @@ export default {
       if (pingMatch && method === "POST") {
         return await pingListing(env, userId, Number(pingMatch[1]), req, {
           origin: url.origin,
-          buildAppUrl: (origin, id) => origin + "/?market=" + id,
+          buildAppUrl: (origin, id) => origin + "/m/" + id,
         });
       }
 
@@ -277,6 +322,13 @@ export default {
         if (pathname === "/api/admin/ancients/fanz-sync" && method === "POST") return await adminSyncAncientSetsFromFanz(env);
         if (pathname === "/api/admin/item-rules/scrape-shop" && method === "POST") return await adminScrapeShopItemRule(env, req);
         if (pathname === "/api/admin/item-rules/backfill" && method === "POST") return await adminBackfillItemRulesFromSources(env, req);
+        if (pathname === "/api/admin/watchers/spawn-all" && method === "POST") return await adminSpawnAllWatchers(env);
+        if (pathname === "/api/admin/custom-events" && method === "POST") return await adminCreateCustomEvent(env, userId, req);
+        const customEvAdminMatch = pathname.match(/^\/api\/admin\/custom-events\/(\d+)$/);
+        if (customEvAdminMatch && method === "PATCH") return await adminUpdateCustomEvent(env, Number(customEvAdminMatch[1]), req);
+        if (customEvAdminMatch && method === "DELETE") return await adminDeleteCustomEvent(env, Number(customEvAdminMatch[1]));
+        const charPoke = pathname.match(/^\/api\/admin\/chars\/(\d+)\/poke$/);
+        if (charPoke && method === "POST") return await adminPokeWatcher(env, Number(charPoke[1]));
         if (pathname === "/api/admin/events" && method === "GET") return await adminListEvents(env);
         const evPatch = pathname.match(/^\/api\/admin\/events\/(\d+)$/);
         if (evPatch && method === "PATCH") return await adminUpdateEvent(env, Number(evPatch[1]), req);
@@ -303,24 +355,22 @@ export default {
   },
 
   async scheduled(event: ScheduledController, env: Env, ctx: ExecutionContext): Promise<void> {
-    ctx.waitUntil(
-      pollOnce(env)
-        .then((r) => console.log(`poll: scraped=${r.scraped} fired=${r.fired}`))
-        .catch((e) => console.error("poll failed", e)),
-    );
+    // Per-char polling is now handled by per-character CharWatcher DOs
+    // (each owns its own 60s alarm). The cron's only remaining job is
+    // the global server-events tick (Chaos Castle / Blood Castle / etc.) —
+    // light, single-pass, no fan-out. That keeps us comfortably inside
+    // the per-tick CPU budget.
     ctx.waitUntil(
       pollServerEvents(env)
         .then((r) => console.log(`server-events: refreshed=${r.refreshed} fired=${r.fired}`))
         .catch((e) => console.error("server-events poll failed", e)),
     );
-    // Warm the items catalog if empty — runs lazily, only does work on
-    // first cron after a fresh DB. Once seeded, it's a single COUNT.
+    // Admin-managed GM events (Find the GM, daily/weekly raids, etc.).
+    // Light query — cap is the total number of subs across all events.
     ctx.waitUntil(
-      (async () => {
-        const { ensureCatalog } = await import("./items-scrape");
-        try { const r = await ensureCatalog(env); if (r.seeded) console.log("catalog seeded: " + r.count + " items"); }
-        catch (e) { console.log("catalog seed failed: " + (e as Error).message); }
-      })(),
+      pollCustomEvents(env)
+        .then((r) => { if (r.fired > 0) console.log(`custom-events: fired=${r.fired}`); })
+        .catch((e) => console.error("custom-events poll failed", e)),
     );
     ctx.waitUntil(
       expireListingOffers(env)

@@ -8,7 +8,9 @@
     "tail": "wrangler tail",
     "db:apply:local": "wrangler d1 migrations apply mu-watcher --local",
     "db:apply:remote": "wrangler d1 migrations apply mu-watcher --remote",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "check:ui": "node scripts/check-ui.mjs",
+    "check": "npm run typecheck && npm run check:ui"
   },
   "dependencies": {},
   "devDependencies": {

@@ -1,8 +1,8 @@
-import type { CharacterRow, Env, ProfileSnapshot, SubscriptionRow } from "./types";
-import { parseMap, scrapeMany } from "./scraper";
+import type { CharacterRow, CustomEventRow, Env, ProfileSnapshot, SubscriptionRow } from "./types";
+import { parseMap, scrapeOne } from "./scraper";
 import { now } from "./util";
 import { sendTelegram } from "./telegram";
-import { formatAlert, formatServerEventAlert } from "./messages";
+import { formatAlert, formatCustomEventAlert, formatServerEventAlert } from "./messages";
 import { classCodeFor, fetchRankings, findRank, type RankingMap } from "./rankings";
 import {
   brNowParts,
@@ -12,46 +12,26 @@ import {
   shouldRefreshServerEvents,
 } from "./server-events";
 
-// One pass (10-minute cron):
-//   1. Pick every distinct character name that has at least one active sub.
-//   2. Scrape them all in one Browser Rendering session.
-//   3. For each character row, evaluate every active subscription against the
-//      previous snapshot vs the new one, fire Telegram alerts, set cooldowns.
-//   4. Persist the new snapshot.
-//
-// Flat 10-minute cadence regardless of online/offline. Simpler than the old
-// adaptive logic and predictable for users ("every char checked every 10 min").
-export async function pollOnce(env: Env): Promise<{ scraped: number; fired: number }> {
-  const distinctNames = await env.DB
-    .prepare(
-      `SELECT DISTINCT c.name
-         FROM characters c
-         JOIN subscriptions s
-           ON s.character_id = c.id AND s.active = 1
-        WHERE c.blocked = 0`,
-    )
-    .all<{ name: string }>();
+// Per-character poll. The CharWatcher Durable Object calls this from its
+// alarm handler — one call per character per minute, spread across
+// independent DO instances so a slow scrape on one char doesn't drop
+// the rest.
+export async function pollSingleChar(
+  env: Env,
+  charId: number,
+): Promise<{ scraped: boolean; fired: number }> {
+  const char = await env.DB
+    .prepare("SELECT * FROM characters WHERE id = ?")
+    .bind(charId)
+    .first<CharacterRow>();
+  if (!char || char.blocked) return { scraped: false, fired: 0 };
 
-  const names = (distinctNames.results ?? []).map((r) => r.name);
-  if (names.length === 0) return { scraped: 0, fired: 0 };
+  // Skip if there are no active subs for this char AND nothing is watching it.
+  // Still useful to keep snapshots for the dashboard, so we don't actually
+  // skip — only abort early on truly dead chars (none registered, fully blocked).
 
-  // Fetch character snapshots and rankings in parallel — they're
-  // independent HTTP calls. Rankings get reused across all chars.
-  const [snapshots, rankings] = await Promise.all([
-    scrapeMany(env, names),
-    fetchRankings(),
-  ]);
-
-  // Pull all character rows for those names, plus their owners' Telegram chat_id.
-  const placeholders = names.map(() => "?").join(",");
-  const charsRes = await env.DB
-    .prepare(
-      `SELECT c.*
-         FROM characters c
-        WHERE c.name IN (${placeholders})`,
-    )
-    .bind(...names)
-    .all<CharacterRow>();
+  const snap = await scrapeOne(env, char.name, { totalTimeoutMs: 25_000 });
+  if (!snap.exists) return { scraped: snap.scraped, fired: 0 };
 
   type SubRow = SubscriptionRow & { owner_chat_id: number; is_gm: number };
   const subsRes = await env.DB
@@ -64,131 +44,156 @@ export async function pollOnce(env: Env): Promise<{ scraped: number; fired: numb
        JOIN users u ON u.id = s.user_id
        LEFT JOIN user_characters uc
          ON uc.user_id = s.user_id AND uc.character_id = s.character_id
-      WHERE s.active = 1
-        AND s.character_id IN (SELECT id FROM characters WHERE name IN (${placeholders}))`,
+      WHERE s.active = 1 AND s.character_id = ?`,
     )
-    .bind(...names)
+    .bind(charId)
     .all<SubRow>();
-
-  const charsById = new Map<number, CharacterRow>();
-  for (const c of charsRes.results ?? []) charsById.set(c.id, c);
-
-  const subsByChar = new Map<number, SubRow[]>();
-  for (const s of subsRes.results ?? []) {
-    if (s.character_id == null) continue;
-    const arr = subsByChar.get(s.character_id) ?? [];
-    arr.push(s);
-    subsByChar.set(s.character_id, arr);
-  }
+  const subs = subsRes.results ?? [];
 
   const t = now();
   const cooldown = Number(env.COOLDOWN_SECONDS || "3600");
   let fired = 0;
 
-  for (const char of charsById.values()) {
-    const snap = snapshots.get(char.name);
-    if (!snap || !snap.exists) continue;
+  const prevMap = parseMap(char.last_map);
+  const prev: ProfileSnapshot = {
+    name: char.name,
+    class: char.class,
+    resets: char.resets,
+    level: char.last_level,
+    map: char.last_map,
+    mapName: prevMap.name,
+    mapX: prevMap.x,
+    mapY: prevMap.y,
+    status: char.last_status as "Online" | "Offline" | null,
+    exists: true,
+    scraped: true,
+  };
 
-    const prevMap = parseMap(char.last_map);
-    const prev: ProfileSnapshot = {
-      name: char.name,
-      class: char.class,
-      resets: char.resets,
-      level: char.last_level,
-      map: char.last_map,
-      mapName: prevMap.name,
-      mapX: prevMap.x,
-      mapY: prevMap.y,
-      status: char.last_status as "Online" | "Offline" | null,
-      exists: true,
-      scraped: true,
-    };
+  for (const sub of subs) {
+    if (sub.cooldown_until > t) continue;
+    const trigger = evaluate(sub, prev, snap, !!sub.is_gm, {
+      last_level_change_at: char.last_level_change_at,
+      now: t,
+    });
+    if (!trigger) continue;
 
-    for (const sub of subsByChar.get(char.id) ?? []) {
-      if (sub.cooldown_until > t) continue;
-      const trigger = evaluate(sub, prev, snap, !!sub.is_gm, {
-        last_level_change_at: char.last_level_change_at,
-        now: t,
-      });
-      if (!trigger) continue;
-
-      const msg = formatAlert(char.name, sub, snap);
-      console.log(`fire sub=${sub.id} type=${sub.event_type} char=${char.name} chat=${sub.owner_chat_id} prevLevel=${prev.level} nextLevel=${snap.level} prevStatus=${prev.status} nextStatus=${snap.status}`);
-      const sendRes = await sendTelegram(env, sub.owner_chat_id, msg);
-      if (!sendRes.ok) {
-        console.log(`telegram send FAILED sub=${sub.id} status=${sendRes.status} body=${sendRes.body}`);
-        continue;
-      }
-      console.log(`telegram send OK sub=${sub.id}`);
-      await env.DB
-        .prepare(
-          "UPDATE subscriptions SET cooldown_until = ?, last_fired_at = ? WHERE id = ?",
-        )
-        .bind(t + cooldown, t, sub.id)
-        .run();
-      fired++;
+    const msg = formatAlert(char.name, sub, snap);
+    console.log(`fire sub=${sub.id} type=${sub.event_type} char=${char.name} chat=${sub.owner_chat_id} prevLevel=${prev.level} nextLevel=${snap.level} prevStatus=${prev.status} nextStatus=${snap.status}`);
+    const sendRes = await sendTelegram(env, sub.owner_chat_id, msg);
+    if (!sendRes.ok) {
+      console.log(`telegram send FAILED sub=${sub.id} status=${sendRes.status} body=${sendRes.body}`);
+      continue;
     }
-
-    const ranks = enrichRanks(snap, rankings);
-    // Track when level last changed so the level_stale alert can fire after
-    // N minutes of no progress. Only bump it if the level actually moved.
-    const levelChangedAt = snap.level !== prev.level && snap.level != null ? t : null;
     await env.DB
-      .prepare(
-        `UPDATE characters
-            SET class = COALESCE(?, class),
-                resets = COALESCE(?, resets),
-                last_level = COALESCE(?, last_level),
-                last_map = COALESCE(?, last_map),
-                last_status = COALESCE(?, last_status),
-                last_checked_at = ?,
-                last_level_change_at = COALESCE(?, last_level_change_at),
-                class_code = ?,
-                rank_overall = ?,
-                rank_class = ?,
-                next_target_name = ?,
-                next_target_resets = ?
-          WHERE name = ?`,
-      )
-      .bind(
-        snap.class, snap.resets, snap.level, snap.map, snap.status, t,
-        levelChangedAt,
-        ranks.classCode, ranks.rankOverall, ranks.rankClass,
-        ranks.nextTargetName, ranks.nextTargetResets,
-        char.name,
-      )
+      .prepare("UPDATE subscriptions SET cooldown_until = ?, last_fired_at = ? WHERE id = ?")
+      .bind(t + cooldown, t, sub.id)
       .run();
+    fired++;
+  }
 
-    // History: insert a snapshot when anything visible changed, OR every
-    // ~5 min as a heartbeat so the chart has data even for chars whose
-    // level/map happens to be stable (or whose scraped level appears stuck
-    // because of upstream caching).
-    const changed =
-      snap.level !== prev.level ||
-      snap.resets !== prev.resets ||
-      snap.map !== prev.map ||
-      snap.status !== prev.status;
-    let needHeartbeat = false;
-    if (!changed) {
-      const lastSnap = await env.DB
-        .prepare("SELECT MAX(ts) AS last_ts FROM char_snapshots WHERE char_id = ?")
-        .bind(char.id)
-        .first<{ last_ts: number | null }>();
-      const lastTs = lastSnap?.last_ts ?? 0;
-      needHeartbeat = (t - lastTs) >= 300;
-    }
-    if (changed || needHeartbeat) {
-      await env.DB
-        .prepare(
-          `INSERT INTO char_snapshots (char_id, ts, level, resets, map, status)
-           VALUES (?, ?, ?, ?, ?, ?)`,
-        )
-        .bind(char.id, t, snap.level, snap.resets, snap.map, snap.status)
-        .run();
+  // Fetch rankings only when this char's level/resets actually changed —
+  // ranks are reset+name based, so unchanged scrapes don't need a refetch.
+  let ranks = {
+    classCode: char.class_code,
+    rankOverall: char.rank_overall,
+    rankClass: char.rank_class,
+    nextTargetName: char.next_target_name,
+    nextTargetResets: char.next_target_resets,
+  };
+  if (snap.level !== prev.level || snap.resets !== prev.resets || snap.class !== prev.class) {
+    try {
+      const rankings = await fetchRankings();
+      ranks = enrichRanks(snap, rankings);
+    } catch (e) {
+      // Rankings page is best-effort — keep prior values on failure.
+      console.log(`rankings fetch failed for ${char.name}: ${(e as Error).message}`);
     }
   }
 
-  return { scraped: snapshots.size, fired };
+  const levelChangedAt = snap.level !== prev.level && snap.level != null ? t : null;
+  await env.DB
+    .prepare(
+      `UPDATE characters
+          SET class = COALESCE(?, class),
+              resets = COALESCE(?, resets),
+              last_level = COALESCE(?, last_level),
+              last_map = COALESCE(?, last_map),
+              last_status = COALESCE(?, last_status),
+              last_checked_at = ?,
+              last_level_change_at = COALESCE(?, last_level_change_at),
+              class_code = ?,
+              rank_overall = ?,
+              rank_class = ?,
+              next_target_name = ?,
+              next_target_resets = ?
+        WHERE id = ?`,
+    )
+    .bind(
+      snap.class, snap.resets, snap.level, snap.map, snap.status, t,
+      levelChangedAt,
+      ranks.classCode, ranks.rankOverall, ranks.rankClass,
+      ranks.nextTargetName, ranks.nextTargetResets,
+      charId,
+    )
+    .run();
+
+  // Snapshot row when something visible changed, OR every ~5 min as a
+  // heartbeat so the chart isn't empty for stable chars.
+  const changed =
+    snap.level !== prev.level ||
+    snap.resets !== prev.resets ||
+    snap.map !== prev.map ||
+    snap.status !== prev.status;
+  let needHeartbeat = false;
+  if (!changed) {
+    const lastSnap = await env.DB
+      .prepare("SELECT MAX(ts) AS last_ts FROM char_snapshots WHERE char_id = ?")
+      .bind(charId)
+      .first<{ last_ts: number | null }>();
+    needHeartbeat = (t - (lastSnap?.last_ts ?? 0)) >= 300;
+  }
+  if (changed || needHeartbeat) {
+    await env.DB
+      .prepare(
+        `INSERT INTO char_snapshots (char_id, ts, level, resets, map, status)
+         VALUES (?, ?, ?, ?, ?, ?)`,
+      )
+      .bind(charId, t, snap.level, snap.resets, snap.map, snap.status)
+      .run();
+  }
+
+  return { scraped: true, fired };
+}
+
+// Loop over every active char and run pollSingleChar. Used by the admin
+// "Rodar cron agora" button as a backstop / debug tool. The production
+// path is per-char DOs with alarms, not this loop.
+export async function pollOnce(env: Env): Promise<{ scraped: number; fired: number }> {
+  const rs = await env.DB
+    .prepare(
+      `SELECT DISTINCT c.id
+         FROM characters c
+         JOIN subscriptions s ON s.character_id = c.id AND s.active = 1
+        WHERE c.blocked = 0`,
+    )
+    .all<{ id: number }>();
+  const ids = (rs.results ?? []).map((r) => r.id);
+  if (ids.length === 0) return { scraped: 0, fired: 0 };
+
+  let scraped = 0;
+  let fired = 0;
+  // Modest concurrency — this is admin-triggered and CPU is per-tick now,
+  // not per-char, so keep it tame to stay under the budget.
+  const CONC = 5;
+  for (let i = 0; i < ids.length; i += CONC) {
+    const batch = ids.slice(i, i + CONC);
+    const out = await Promise.all(batch.map((id) => pollSingleChar(env, id).catch(() => ({ scraped: false, fired: 0 }))));
+    for (const r of out) {
+      if (r.scraped) scraped++;
+      fired += r.fired;
+    }
+  }
+  return { scraped, fired };
 }
 
 // Server-event scheduling pass. Two responsibilities:
@@ -217,19 +222,23 @@ export async function pollServerEvents(env: Env): Promise<{ refreshed: boolean; 
   const subs = subsRes.results ?? [];
   if (subs.length === 0) return { refreshed, fired: 0 };
 
-  // Precompute user's max char level to tailor entry requirements in messages.
-  // Post-migration to global characters: user_id no longer lives on `characters`,
-  // so we go through user_characters → characters.
-  const maxLevelRes = await env.DB
+  // Per-user char list (name + level) so formatServerEventAlert can
+  // pick the BEST char for each event's tier instead of just suggesting
+  // a generic ticket bracket from the user's max-level char.
+  const charsRes = await env.DB
     .prepare(
-      `SELECT uc.user_id AS user_id, MAX(c.last_level) AS max_level
+      `SELECT uc.user_id AS user_id, c.name AS name, c.last_level AS level
          FROM user_characters uc
          JOIN characters c ON c.id = uc.character_id
-        GROUP BY uc.user_id`,
+        WHERE c.blocked = 0`,
     )
-    .all<{ user_id: number; max_level: number | null }>();
-  const maxLevelByUser = new Map<number, number | null>();
-  for (const r of maxLevelRes.results ?? []) maxLevelByUser.set(r.user_id, r.max_level);
+    .all<{ user_id: number; name: string; level: number | null }>();
+  const charsByUser = new Map<number, Array<{ name: string; level: number | null }>>();
+  for (const r of charsRes.results ?? []) {
+    const list = charsByUser.get(r.user_id) ?? [];
+    list.push({ name: r.name, level: r.level });
+    charsByUser.set(r.user_id, list);
+  }
 
   const cooldown = Number(env.COOLDOWN_SECONDS || "3600");
   const br = brNowParts(t);
@@ -253,7 +262,7 @@ export async function pollServerEvents(env: Env): Promise<{ refreshed: boolean; 
       name: parsed.name,
       room: parsed.room,
       leadMinutes: parsed.lead,
-      userMaxLevel: maxLevelByUser.get(sub.user_id) ?? null,
+      userChars: charsByUser.get(sub.user_id) ?? [],
       customMessage: sub.custom_message ?? null,
     });
     const send = await sendTelegram(env, sub.owner_chat_id, msg);
@@ -269,6 +278,210 @@ export async function pollServerEvents(env: Env): Promise<{ refreshed: boolean; 
   }
 
   return { refreshed, fired };
+}
+
+// ---- Custom (admin-managed) events ----------------------------------
+//
+// These are first-class rows in `custom_events` (e.g. "Find the GM"
+// daily 20:00) that users opt into via custom_event_subs with a
+// per-sub lead_minutes. The cron tick walks every active event and
+// fires Telegram for each sub whose (event_time - lead) hits the
+// current minute.
+
+type CustomEventSubAndOwner = {
+  sub_id: number;
+  user_id: number;
+  lead_minutes: number;
+  cooldown_until: number;
+  last_fired_at: number | null;
+  owner_chat_id: number;
+  // event fields
+  id: number;
+  name: string;
+  gm_name: string | null;
+  description: string | null;
+  gifts: string | null;
+  schedule_type: string;
+  schedule_at: number | null;
+  schedule_time: string | null;
+  schedule_dow: number | null;
+};
+
+// Returns true iff `(eventFireMin - leadMinutes)` matches the current
+// BR-local minute (using the event's schedule_type rules). Mirrors
+// shouldFireServerAlert — minute-resolution since cron runs every minute.
+function shouldFireCustomEvent(
+  ev: CustomEventRow,
+  leadMin: number,
+  nowSecs: number,
+): boolean {
+  if (ev.schedule_type === "once") {
+    if (ev.schedule_at == null) return false;
+    const target = ev.schedule_at - leadMin * 60;
+    return Math.abs(target - nowSecs) < 30;  // within the current minute
+  }
+  if (!ev.schedule_time) return false;
+  const m = ev.schedule_time.match(/^(\d{1,2}):(\d{2})$/);
+  if (!m) return false;
+  const h = Number(m[1]); const mm = Number(m[2]);
+  if (!Number.isFinite(h) || !Number.isFinite(mm)) return false;
+  const br = brNowParts(nowSecs);
+  if (ev.schedule_type === "weekly") {
+    if (ev.schedule_dow == null || br.weekday !== ev.schedule_dow) return false;
+  }
+  let alertMin = h * 60 + mm - leadMin;
+  if (alertMin < 0) alertMin += 1440;
+  alertMin %= 1440;
+  return alertMin === br.hour * 60 + br.minute;
+}
+
+function humanSchedule(ev: CustomEventRow): string {
+  if (ev.schedule_type === "once" && ev.schedule_at != null) {
+    const d = new Date((ev.schedule_at - 3 * 3600) * 1000);  // BR-local view
+    const pad = (n: number) => String(n).padStart(2, "0");
+    return `${pad(d.getUTCDate())}/${pad(d.getUTCMonth() + 1)} ${pad(d.getUTCHours())}:${pad(d.getUTCMinutes())}`;
+  }
+  if (ev.schedule_type === "daily" && ev.schedule_time) {
+    return `diário ${ev.schedule_time}`;
+  }
+  if (ev.schedule_type === "weekly" && ev.schedule_time && ev.schedule_dow != null) {
+    const days = ["dom", "seg", "ter", "qua", "qui", "sex", "sáb"];
+    return `${days[ev.schedule_dow]} ${ev.schedule_time}`;
+  }
+  return "";
+}
+
+// Extract the distinct gift kinds (e.g. ['rarius','kundun']) from an
+// event's gifts JSON. Used to match against gift-kind subscriptions.
+function eventGiftKinds(giftsJson: string | null): Set<string> {
+  const out = new Set<string>();
+  if (!giftsJson) return out;
+  try {
+    const arr = JSON.parse(giftsJson) as Array<{ kind?: string }>;
+    for (const g of arr) {
+      if (g && typeof g.kind === "string") out.add(g.kind);
+    }
+  } catch { /* ignore */ }
+  return out;
+}
+
+export async function pollCustomEvents(env: Env): Promise<{ fired: number }> {
+  const t = now();
+
+  // Active events first — most ticks have nothing to fire, this is a
+  // single fast read before we touch the much chattier sub tables.
+  const evRs = await env.DB
+    .prepare(`SELECT * FROM custom_events WHERE active = 1`)
+    .all<CustomEventRow>();
+  const events = evRs.results ?? [];
+  if (events.length === 0) return { fired: 0 };
+
+  // Per-user-per-event opt-ins. We pre-load all of them once and look
+  // them up in memory per (event_id, user_id) — cheaper than N D1 calls.
+  type SubRow = { id: number; custom_event_id: number; user_id: number; lead_minutes: number; cooldown_until: number };
+  const subRs = await env.DB
+    .prepare(`SELECT id, custom_event_id, user_id, lead_minutes, cooldown_until FROM custom_event_subs`)
+    .all<SubRow>();
+  const subsByEvent = new Map<number, SubRow[]>();
+  for (const s of subRs.results ?? []) {
+    const arr = subsByEvent.get(s.custom_event_id) ?? [];
+    arr.push(s);
+    subsByEvent.set(s.custom_event_id, arr);
+  }
+
+  // Gift-kind opt-ins ("ping me on ANY event that drops rarius").
+  type GiftSubRow = { id: number; user_id: number; gift_kind: string; lead_minutes: number };
+  const giftRs = await env.DB
+    .prepare(`SELECT id, user_id, gift_kind, lead_minutes FROM custom_event_gift_subs`)
+    .all<GiftSubRow>();
+  const giftSubs = giftRs.results ?? [];
+
+  // User chat-id lookup for the Telegram send.
+  const userIds = new Set<number>();
+  for (const s of subRs.results ?? []) userIds.add(s.user_id);
+  for (const g of giftSubs) userIds.add(g.user_id);
+  if (userIds.size === 0) return { fired: 0 };
+  const placeholders = [...userIds].map(() => "?").join(",");
+  const userRs = await env.DB
+    .prepare(`SELECT id, telegram_chat_id FROM users WHERE id IN (${placeholders})`)
+    .bind(...[...userIds])
+    .all<{ id: number; telegram_chat_id: number }>();
+  const chatIdByUser = new Map<number, number>();
+  for (const u of userRs.results ?? []) chatIdByUser.set(u.id, u.telegram_chat_id);
+
+  // De-dup window — a single user shouldn't get two pings for the same
+  // event in the same fire (per-event sub + gift-kind sub overlap).
+  // Also prevents daily/weekly events from re-firing within their
+  // cooldown if the cron runs more than once in a minute.
+  const cooldown = Number(env.COOLDOWN_SECONDS || "3600");
+  const recentlyFiredRs = await env.DB
+    .prepare(`SELECT custom_event_id, user_id, ts FROM custom_event_fired WHERE ts > ?`)
+    .bind(t - cooldown)
+    .all<{ custom_event_id: number; user_id: number; ts: number }>();
+  const firedKey = (eid: number, uid: number) => eid + ":" + uid;
+  const recentlyFired = new Set<string>();
+  for (const r of recentlyFiredRs.results ?? []) recentlyFired.add(firedKey(r.custom_event_id, r.user_id));
+
+  let fired = 0;
+  for (const ev of events) {
+    const kinds = eventGiftKinds(ev.gifts);
+    // Build a per-user list of (lead_minutes, source) for this event:
+    // start with explicit per-event subs, then add any gift-kind subs
+    // that match. Per-event lead wins on collision (more specific).
+    type Target = { user_id: number; lead_minutes: number };
+    const targets = new Map<number, Target>();
+    for (const s of subsByEvent.get(ev.id) ?? []) {
+      if (s.cooldown_until > t) continue;
+      targets.set(s.user_id, { user_id: s.user_id, lead_minutes: s.lead_minutes });
+    }
+    for (const g of giftSubs) {
+      if (targets.has(g.user_id)) continue;  // explicit sub wins
+      if (g.gift_kind === "any" || kinds.has(g.gift_kind)) {
+        targets.set(g.user_id, { user_id: g.user_id, lead_minutes: g.lead_minutes });
+      }
+    }
+
+    for (const target of targets.values()) {
+      if (recentlyFired.has(firedKey(ev.id, target.user_id))) continue;
+      if (!shouldFireCustomEvent(ev, target.lead_minutes, t)) continue;
+      const chatId = chatIdByUser.get(target.user_id);
+      if (chatId == null) continue;
+
+      const msg = formatCustomEventAlert({
+        name: ev.name,
+        gmName: ev.gm_name,
+        description: ev.description,
+        gifts: ev.gifts,
+        leadMinutes: target.lead_minutes,
+        scheduleHuman: humanSchedule(ev),
+      });
+      const send = await sendTelegram(env, chatId, msg);
+      if (!send.ok) {
+        console.log(`telegram send FAILED custom-event ev=${ev.id} user=${target.user_id} status=${send.status}`);
+        continue;
+      }
+
+      // Record the fire so the next tick (or any other matching sub)
+      // doesn't double-ping. custom_event_subs.cooldown_until still gets
+      // bumped for explicit subs so they get the standard cooldown.
+      await env.DB.batch([
+        env.DB.prepare("INSERT OR IGNORE INTO custom_event_fired (custom_event_id, user_id, ts) VALUES (?, ?, ?)").bind(ev.id, target.user_id, t),
+        env.DB.prepare("UPDATE custom_event_subs SET cooldown_until = ?, last_fired_at = ? WHERE custom_event_id = ? AND user_id = ?").bind(t + cooldown, t, ev.id, target.user_id),
+      ]);
+      recentlyFired.add(firedKey(ev.id, target.user_id));
+      fired++;
+    }
+
+    // One-shot events: deactivate after first successful fire window.
+    if (ev.schedule_type === "once" && targets.size > 0) {
+      await env.DB.prepare("UPDATE custom_events SET active = 0 WHERE id = ?").bind(ev.id).run();
+    }
+  }
+
+  // Best-effort prune of fired-log rows older than 24h.
+  await env.DB.prepare(`DELETE FROM custom_event_fired WHERE ts < ?`).bind(t - 86400).run().catch(() => {});
+
+  return { fired };
 }
 
 // Threshold format: "<EventName>|<room>|<leadMinutes>", e.g.
@@ -287,8 +500,6 @@ export function parseServerEventThreshold(threshold: string | null):
 }
 
 // True iff the subscription should fire given old vs new snapshot.
-// All checks are "edge-triggered" — we only alert on the transition into the
-// matching state, not while it remains in that state, so cooldown is a backup.
 function evaluate(
   sub: SubscriptionRow,
   prev: ProfileSnapshot,
@@ -326,14 +537,8 @@ function evaluate(
       return next.status === "Online" && prev.status !== "Online";
     }
     case "server_event":
-      // Not yet wired to a data source. Skipped silently for now.
       return false;
     case "level_stale": {
-      // Fire when the char has been idle for the configured number of
-      // minutes. Edge-trigger: don't re-fire if last_level_change_at
-      // hasn't advanced past the previous fire — i.e., we already
-      // alerted for THIS idle run; only the next idle run (after a
-      // level-up) should trigger again.
       const minutes = Number(sub.threshold);
       if (!Number.isFinite(minutes) || minutes < 1) return false;
       if (ctx.last_level_change_at == null) return false;
@@ -344,7 +549,6 @@ function evaluate(
   }
 }
 
-// "Stadium:60-90:80-100" -> {map, x1, x2, y1, y2}
 export function parseCoordsBox(
   threshold: string | null,
 ): { map: string; x1: number; x2: number; y1: number; y2: number } | null {
@@ -368,9 +572,6 @@ function inBox(
   return snap.mapX >= box.x1 && snap.mapX <= box.x2 && snap.mapY >= box.y1 && snap.mapY <= box.y2;
 }
 
-// Resolve a char's overall + class ranking (and the char one slot above
-// in the class list — i.e. the immediate "next target" to surpass) using
-// the freshly-fetched rankings map.
 function enrichRanks(snap: ProfileSnapshot, rankings: RankingMap): {
   classCode: string | null;
   rankOverall: number | null;

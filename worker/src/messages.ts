@@ -114,20 +114,34 @@ type EntryReq = {
   npc?: { name: string; map: string; coords?: string };
 };
 
+// Classic MU ticket ranges (cloak +N / armor of guardsman +N / invitation
+// +N). mupatos doesn't publish a level table in /eventos so we use the
+// canonical Korean MU ranges; close enough for "which ticket should I
+// bring" guidance and easy to override later if a player corrects us.
+const TIER_RANGES = [
+  { tier: 1, min: 15,  max: 80 },
+  { tier: 2, min: 81,  max: 130 },
+  { tier: 3, min: 131, max: 180 },
+  { tier: 4, min: 181, max: 230 },
+  { tier: 5, min: 231, max: 280 },
+  { tier: 6, min: 281, max: 330 },
+  { tier: 7, min: 331, max: 9999 },
+];
+
 function tierForLevel(level: number | null): { tier: number; min: number; max: number } | null {
   if (level == null || !Number.isFinite(level)) return null;
-  // Classic MU ticket ranges. Conservative defaults.
-  const ranges = [
-    { tier: 1, min: 15, max: 49 },
-    { tier: 2, min: 50, max: 119 },
-    { tier: 3, min: 120, max: 179 },
-    { tier: 4, min: 180, max: 239 },
-    { tier: 5, min: 240, max: 299 },
-    { tier: 6, min: 300, max: 349 },
-    { tier: 7, min: 350, max: 9999 },
-  ];
-  for (const r of ranges) if (level >= r.min && level <= r.max) return r;
+  for (const r of TIER_RANGES) if (level >= r.min && level <= r.max) return r;
   return null;
+}
+
+// mupatos labels Blood Castle events as "Blood Castle 1..7". The trailing
+// digit is the cloak tier the player needs to bring. Same convention for
+// other tiered events.
+function fixedTierFromName(eventNameRaw: string): number | null {
+  const m = (eventNameRaw || "").trim().match(/(\d)$/);
+  if (!m) return null;
+  const t = Number(m[1]);
+  return t >= 1 && t <= 7 ? t : null;
 }
 
 function serverEventEntryReq(eventNameRaw: string): EntryReq | null {
@@ -145,11 +159,47 @@ function serverEventEntryReq(eventNameRaw: string): EntryReq | null {
   return null;
 }
 
+// Pick the best char from a user's roster for a given target tier. If
+// the event has a fixed tier (e.g. "Blood Castle 5"), prefer chars whose
+// level qualifies for THAT tier; fall back to the next-lowest qualifying
+// tier. If no fixed tier, pick the highest-tier char (= biggest reward).
+function pickBestCharForTier(
+  chars: Array<{ name: string; level: number | null }>,
+  fixedTier: number | null,
+): { name: string; level: number; tier: number } | null {
+  const ranked = chars
+    .filter((c): c is { name: string; level: number } => c.level != null && Number.isFinite(c.level))
+    .map((c) => {
+      const r = tierForLevel(c.level);
+      return { name: c.name, level: c.level, tier: r?.tier ?? 0 };
+    })
+    .filter((c) => c.tier > 0);
+  if (ranked.length === 0) return null;
+  if (fixedTier != null) {
+    // Char must be tier >= fixedTier (lower-tier chars can't enter higher
+    // BC). Prefer the smallest qualifying tier so they bring the right
+    // cloak; tie-break by highest level inside that tier.
+    const eligible = ranked.filter((c) => c.tier >= fixedTier);
+    if (eligible.length === 0) return null;
+    eligible.sort((a, b) => a.tier - b.tier || b.level - a.level);
+    return eligible[0];
+  }
+  // No fixed tier — recommend the highest-tier char.
+  ranked.sort((a, b) => b.tier - a.tier || b.level - a.level);
+  return ranked[0];
+}
+
 export function formatServerEventAlert(opts: {
   name: string;
   room: string;
   leadMinutes: number;
-  // Best-effort: user's highest character level (so we can suggest the right ticket).
+  // The user's chars (name + level) — used to suggest THE specific char
+  // best suited for this event's tier. Replaces the previous single
+  // userMaxLevel hint so a user with several chars at different levels
+  // gets a tailored "use char X with cloak +N" line.
+  userChars?: Array<{ name: string; level: number | null }>;
+  // Back-compat shim: if only userMaxLevel is supplied (old callers),
+  // we wrap it as a one-element char list with name="?".
   userMaxLevel?: number | null;
   customMessage?: string | null;
 }): string {
@@ -158,17 +208,42 @@ export function formatServerEventAlert(opts: {
   const lead = Number(opts.leadMinutes) || 0;
 
   const req = serverEventEntryReq(opts.name);
-  const tier = tierForLevel(opts.userMaxLevel ?? null);
+  const fixedTier = fixedTierFromName(opts.name);
+
+  // Normalise input: prefer userChars; fall back to userMaxLevel.
+  const chars: Array<{ name: string; level: number | null }> =
+    opts.userChars && opts.userChars.length > 0
+      ? opts.userChars
+      : opts.userMaxLevel != null
+      ? [{ name: "?", level: opts.userMaxLevel }]
+      : [];
+  const best = req?.itemTiered ? pickBestCharForTier(chars, fixedTier) : null;
 
   let extra = "";
   let itemLine = "";
   let npcLine = "";
+  let recLine = "";
   if (req) {
     if (req.itemTiered) {
-      if (tier) {
-        itemLine = `🎟️ Entrada: <b>${escHtml(req.itemLabel)} +${tier.tier}</b> (lvl ${tier.min}–${tier.max}).`;
+      // Display tier: fixed by event name when present, else inferred
+      // from the recommended char's level, else generic placeholder.
+      const displayTier = fixedTier ?? best?.tier ?? null;
+      if (displayTier != null) {
+        const range = TIER_RANGES.find((r) => r.tier === displayTier);
+        const levelRange = range ? ` (lvl ${range.min}–${range.max})` : "";
+        itemLine = `🎟️ Entrada: <b>${escHtml(req.itemLabel)} +${displayTier}</b>${levelRange}.`;
       } else {
         itemLine = `🎟️ Entrada: <b>${escHtml(req.itemLabel)} +N</b> (depende do level; +1…+7).`;
+      }
+      if (best) {
+        // Mention the picked char unless the placeholder ("?") came from
+        // the back-compat path — no point recommending an unnamed char.
+        if (best.name !== "?") {
+          recLine = `🎮 Sugestão: <b>${escHtml(best.name)}</b> (lvl ${best.level}).`;
+        }
+      } else if (chars.length > 0) {
+        // The user has chars but none qualify for the required tier.
+        recLine = `⚠️ Nenhum dos seus chars atinge o tier necessário.`;
       }
     } else {
       itemLine = `🎟️ Entrada: <b>${escHtml(req.itemLabel)}</b>.`;
@@ -179,6 +254,7 @@ export function formatServerEventAlert(opts: {
     }
   }
   if (itemLine) extra += "\n" + itemLine;
+  if (recLine) extra += "\n" + recLine;
   if (npcLine) extra += "\n" + npcLine;
 
   if (opts.customMessage) {
@@ -192,10 +268,47 @@ export function formatServerEventAlert(opts: {
       npc: req?.npc?.name ? escHtml(req.npc.name) : "",
       npc_map: req?.npc?.map ? escHtml(req.npc.map) : "",
       npc_coords: req?.npc?.coords ? escHtml(req.npc.coords) : "",
+      char: best && best.name !== "?" ? escHtml(best.name) : "",
+      char_level: best ? String(best.level) : "",
+      tier: best ? String(best.tier) : "",
     };
     return applyTemplate(opts.customMessage, dict);
   }
 
   return `📣 <b>${name}</b> (${room}) começa em <b>${lead} min</b>.${extra}`;
+}
+
+// Format an admin-managed custom event (GM event etc) for Telegram.
+// Schedule is already evaluated by the cron — this is just rendering.
+export function formatCustomEventAlert(opts: {
+  name: string;
+  gmName?: string | null;
+  description?: string | null;
+  gifts?: string | null;     // JSON array
+  leadMinutes: number;
+  scheduleHuman?: string | null;  // e.g. "diário 20:00", "sáb 21:00", "30/04 19:00"
+}): string {
+  const name = escHtml(opts.name);
+  const lead = Number(opts.leadMinutes) || 0;
+
+  let giftsLine = "";
+  if (opts.gifts) {
+    try {
+      const arr = JSON.parse(opts.gifts) as Array<{ kind?: string; qty?: number; tier?: number; name?: string }>;
+      const parts: string[] = [];
+      for (const g of arr) {
+        if (g.kind === "rarius" && g.qty != null) parts.push(`🪙 <b>${g.qty}</b> rarius`);
+        else if (g.kind === "kundun" && g.tier != null) parts.push(`📦 Box of Kundun +<b>${g.tier}</b>`);
+        else if (g.kind === "custom" && g.name) parts.push(`⚔️ ${escHtml(g.name)}`);
+      }
+      if (parts.length > 0) giftsLine = "\n🎁 Prêmios: " + parts.join(" · ");
+    } catch { /* ignore */ }
+  }
+
+  const gmLine = opts.gmName ? `\n👤 GM: <b>${escHtml(opts.gmName)}</b>` : "";
+  const descLine = opts.description ? `\n📝 ${escHtml(opts.description)}` : "";
+  const whenLine = opts.scheduleHuman ? `\n⏰ Quando: <b>${escHtml(opts.scheduleHuman)}</b>` : "";
+
+  return `🎉 <b>Evento GM: ${name}</b> começa em <b>${lead} min</b>.${gmLine}${giftsLine}${descLine}${whenLine}`;
 }
 

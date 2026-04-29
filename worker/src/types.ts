@@ -1,5 +1,6 @@
 export interface Env {
   DB: D1Database;
+  CHAR_WATCHERS: DurableObjectNamespace;  // one DO per character (timer + per-char tick)
 
   PROFILE_BASE_URL: string;
   LOGIN_TOKEN_TTL_SECONDS: string;  // pending_logins TTL (deep-link auth)
@@ -7,15 +8,15 @@ export interface Env {
   COOLDOWN_SECONDS: string;
   COOKIE_NAME: string;
   TELEGRAM_BOT_USERNAME: string;    // e.g. "mu_patos_bot" — public, no @
+  DO_ALARM_INTERVAL_SECS?: string;  // optional override for the DO alarm cadence (default 60)
 
   // Set with `wrangler secret put`
   SESSION_SECRET?: string;          // HMAC key for the session cookie
   TELEGRAM_BOT_TOKEN?: string;      // BotFather token; stub mode if missing
   TELEGRAM_WEBHOOK_SECRET?: string; // checked against X-Telegram-Bot-Api-Secret-Token
-
   // Optional shop scraper credentials (MuPatos webshop).
   // Prefer setting as secrets (wrangler secret put ...).
-  SHOP_SCRAPER_USERNAME?: string;
+  SHOP_SCRAPER_USERNAME?: string;   // mupatos shop login (for options-page scraping)
   SHOP_SCRAPER_PASSWORD?: string;
 }
 
@@ -65,6 +66,44 @@ export interface ListingCommentRow {
   listing_id: number;
   user_id: number;
   body: string;
+  created_at: number;
+}
+
+export type CustomEventScheduleType = "once" | "daily" | "weekly";
+
+export interface CustomEventRow {
+  id: number;
+  name: string;
+  gm_name: string | null;
+  description: string | null;
+  gifts: string | null;          // JSON array
+  schedule_type: CustomEventScheduleType;
+  schedule_at: number | null;    // unix seconds (UTC) for 'once'
+  schedule_time: string | null;  // "HH:MM" BR-local for 'daily' and 'weekly'
+  schedule_dow: number | null;   // 0..6 (Sun..Sat) for 'weekly'
+  active: number;
+  created_by: number | null;
+  created_at: number;
+  updated_at: number;
+}
+
+export interface CustomEventSubRow {
+  id: number;
+  custom_event_id: number;
+  user_id: number;
+  lead_minutes: number;
+  last_fired_at: number | null;
+  cooldown_until: number;
+  created_at: number;
+}
+
+export type GiftKind = "rarius" | "kundun" | "custom" | "any";
+
+export interface CustomEventGiftSubRow {
+  id: number;
+  user_id: number;
+  gift_kind: GiftKind;
+  lead_minutes: number;
   created_at: number;
 }
 

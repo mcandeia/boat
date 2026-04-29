@@ -394,7 +394,7 @@ interface ListingDTO extends ListingRow {
 
 async function loadListings(
   env: Env,
-  userId: number,
+  userId: number | null,
   where: string,
   binds: (string | number)[],
   orderClause: string,
@@ -442,11 +442,15 @@ async function loadListings(
     .prepare("SELECT listing_id, kind, COUNT(*) AS cnt FROM listing_reactions WHERE listing_id IN (" + placeholders + ") GROUP BY listing_id, kind")
     .bind(...ids)
     .all<{ listing_id: number; kind: string; cnt: number }>();
-  const mineRs = await env.DB
-    .prepare("SELECT listing_id, kind FROM listing_reactions WHERE user_id = ? AND listing_id IN (" + placeholders + ")")
-    .bind(userId, ...ids)
-    .all<{ listing_id: number; kind: string }>();
-  const mineSet = new Set((mineRs.results ?? []).map((r) => r.listing_id + ":" + r.kind));
+  // Anonymous viewers see no "mine" highlights — skip the lookup entirely.
+  const mineSet = new Set<string>();
+  if (userId != null) {
+    const mineRs = await env.DB
+      .prepare("SELECT listing_id, kind FROM listing_reactions WHERE user_id = ? AND listing_id IN (" + placeholders + ")")
+      .bind(userId, ...ids)
+      .all<{ listing_id: number; kind: string }>();
+    for (const r of mineRs.results ?? []) mineSet.add(r.listing_id + ":" + r.kind);
+  }
 
   const reactsByListing = new Map<number, Map<string, number>>();
   for (const r of reactRs.results ?? []) {
@@ -465,7 +469,7 @@ async function loadListings(
   }));
 }
 
-export async function listListings(env: Env, userId: number, url: URL): Promise<Response> {
+export async function listListings(env: Env, userId: number | null, url: URL): Promise<Response> {
   const t = now();
   const sort = url.searchParams.get("sort") === "hot" ? "hot" : "new";
   const side = url.searchParams.get("side");
@@ -507,7 +511,7 @@ export async function listListings(env: Env, userId: number, url: URL): Promise<
   return json({ listings });
 }
 
-export async function getListing(env: Env, userId: number, listingId: number): Promise<Response> {
+export async function getListing(env: Env, userId: number | null, listingId: number): Promise<Response> {
   const list = await loadListings(env, userId, "WHERE l.id = ?", [listingId], "", [], 1);
   if (list.length === 0) return bad(404, "anúncio não encontrado");
   const listing = list[0];
@@ -896,6 +900,8 @@ export async function pingListing(
   const priceLine = listing.currency
     ? "\n💰 " + (listing.currency === "free"
         ? "grátis"
+        : listing.currency === "cash"
+        ? "R$ " + (listing.price != null ? listing.price.toLocaleString("pt-BR") : "?")
         : (listing.price != null ? listing.price.toLocaleString("pt-BR") + " " : "") + listing.currency)
     : "";
   const customMsg = messageRaw ? "\n💬 “" + escHtml(messageRaw) + "”" : "";
