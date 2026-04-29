@@ -341,6 +341,16 @@ export const INDEX_HTML = /* html */ `<!doctype html>
             </div>
           </div>
           <div id="admin-comparison-chart" class="hidden mb-6 bg-bg/50 p-4 rounded-xl border border-border"></div>
+          <div id="admin-health" class="mb-4 rounded-xl border border-border bg-bg/40 p-3">
+            <div class="flex items-center justify-between gap-3 mb-2">
+              <h3 class="text-xs uppercase tracking-widest text-gold">Saúde do Worker</h3>
+              <button id="admin-health-refresh" class="px-2 py-1 rounded border border-border text-[11px] hover:bg-bg">↻ atualizar</button>
+            </div>
+            <div id="admin-health-grid" class="grid sm:grid-cols-2 lg:grid-cols-4 gap-2 text-xs">
+              <div class="text-muted">carregando…</div>
+            </div>
+            <div id="admin-health-meta" class="text-[11px] text-muted mt-2"></div>
+          </div>
           <div class="overflow-x-auto">
             <table class="w-full text-xs">
               <thead class="text-muted text-left border-b border-border">
@@ -675,6 +685,7 @@ function renderDash() {
   if (u.is_admin) {
     $("nav-admin").classList.remove("hidden");
     $("nav-hint").classList.remove("hidden");
+    loadAdminHealth();
     loadAdminChars();
     loadAdminEvents();
   }
@@ -1634,6 +1645,55 @@ async function loadAdminChars() {
     tbody.innerHTML = '<tr><td colspan="9" class="py-2 text-danger">' + escapeHtml(e.message) + '</td></tr>';
   }
 }
+function healthBadge(ok, good, warn) {
+  if (ok == null) return '<span class="px-1.5 py-0.5 rounded bg-slate-600/30 text-slate-300 text-[10px] uppercase">n/a</span>';
+  return ok
+    ? ('<span class="px-1.5 py-0.5 rounded bg-ok/20 text-ok text-[10px] uppercase">' + good + "</span>")
+    : ('<span class="px-1.5 py-0.5 rounded bg-gold/20 text-goldsoft text-[10px] uppercase">' + warn + "</span>");
+}
+function statTile(label, value, extra) {
+  return '<div class="rounded-md border border-border bg-bg/50 p-2">' +
+    '<div class="text-[10px] uppercase tracking-widest text-muted mb-1">' + escapeHtml(label) + "</div>" +
+    '<div class="text-sm text-slate-200 font-semibold">' + value + "</div>" +
+    (extra ? ('<div class="mt-1">' + extra + "</div>") : "") +
+  "</div>";
+}
+async function loadAdminHealth() {
+  const grid = $("admin-health-grid");
+  const meta = $("admin-health-meta");
+  if (!grid || !meta) return;
+  grid.innerHTML = '<div class="text-muted">carregando…</div>';
+  meta.textContent = "";
+  try {
+    const data = await fetchJSON("/api/admin/health");
+    const c = data.counts || {};
+    const f = data.freshness || {};
+    const cov = data.coverage || {};
+    const nowTs = Number(data.now || 0);
+    const snapAge = f.latest_snapshot_ts ? (nowTs - Number(f.latest_snapshot_ts)) : null;
+    const eventAge = f.latest_event_sync_ts ? (nowTs - Number(f.latest_event_sync_ts)) : null;
+    const cronOk = snapAge != null ? (snapAge <= 15 * 60) : null;
+    const eventsOk = eventAge != null ? (eventAge <= 2 * 3600) : null;
+    const checked = Number(cov.checked_chars || 0);
+    const total = Number(cov.total_chars || 0);
+    const covPct = total > 0 ? Math.round((checked * 100) / total) : 0;
+
+    grid.innerHTML =
+      statTile("Cron/snapshots", f.latest_snapshot_ts ? relativeTime(f.latest_snapshot_ts) : "—", healthBadge(cronOk, "ok", "atrasado")) +
+      statTile("Eventos sync", f.latest_event_sync_ts ? relativeTime(f.latest_event_sync_ts) : "—", healthBadge(eventsOk, "ok", "atrasado")) +
+      statTile("Cobertura chars", checked + " / " + total + " (" + covPct + "%)", "") +
+      statTile("Subs ativas", String(c.active_subs_count ?? 0), '<span class="text-muted">server_event: ' + String(c.server_event_subs_count ?? 0) + "</span>") +
+      statTile("Chars bloqueados", String(c.blocked_count ?? 0), "") +
+      statTile("Eventos manuais", String(c.manual_events_count ?? 0), "") +
+      statTile("Usuários", String(c.users_count ?? 0), "") +
+      statTile("Vínculos user-char", String(c.links_count ?? 0), "");
+
+    const checkedAt = f.latest_char_check_ts ? relativeTime(f.latest_char_check_ts) : "—";
+    meta.textContent = "Último check de personagem: " + checkedAt;
+  } catch (e) {
+    grid.innerHTML = '<div class="text-danger">falha ao carregar saúde: ' + escapeHtml(e.message) + "</div>";
+  }
+}
 function adminCharRowHtml(c) {
   const ownerId = (c.owner_user_id != null) ? c.owner_user_id : (c.user_id != null ? c.user_id : null);
   const owner = c.owner_first_name || (c.owner_username ? "@" + c.owner_username : (ownerId != null ? ("user " + ownerId) : "—"));
@@ -1683,6 +1743,7 @@ function wireAdminCharActions(c) {
         body: JSON.stringify({ blocked: !c.blocked }),
       });
       toast(c.blocked ? "desbloqueado" : "bloqueado", "ok");
+      loadAdminHealth();
       loadAdminChars();
     } catch (e) { toast(e.message, "err"); }
   };
@@ -1690,6 +1751,7 @@ function wireAdminCharActions(c) {
     try {
       await fetchJSON("/api/admin/chars/" + c.id + "/refresh", { method: "POST" });
       toast("dados atualizados", "ok");
+      loadAdminHealth();
       loadAdminChars();
     } catch (e) { toast(e.message, "err"); }
   };
@@ -2379,6 +2441,7 @@ $("admin-poll").onclick = async (e) => {
   try {
     const r = await withSpinner(btn, () => fetchJSON("/api/admin/poll", { method: "POST" }));
     toast("cron rodado: scraped=" + r.scraped + " fired=" + r.fired, "ok");
+    loadAdminHealth();
     loadAdminChars();
   } catch (err) { toast(err.message, "err"); }
 };
@@ -2390,6 +2453,7 @@ if ($("admin-scrape-items")) $("admin-scrape-items").onclick = async (e) => {
     toast("catálogo: " + r.scraped + " itens em " + r.categories + " categorias", "ok");
   } catch (err) { toast(err.message, "err"); }
 };
+if ($("admin-health-refresh")) $("admin-health-refresh").onclick = () => loadAdminHealth();
 
 async function loadAdminEvents() {
   const tbody = $("admin-events");
