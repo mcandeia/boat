@@ -243,14 +243,9 @@ export default {
         .then((r) => console.log(`server-events: refreshed=${r.refreshed} fired=${r.fired}`))
         .catch((e) => console.error("server-events poll failed", e)),
     );
-    // Warm the items catalog if empty — runs lazily, only does work on
-    // first cron after a fresh DB. Once seeded, it's a single COUNT.
-    ctx.waitUntil(
-      (async () => {
-        const { ensureCatalog } = await import("./items-scrape");
-        try { const r = await ensureCatalog(env); if (r.seeded) console.log("catalog seeded: " + r.count + " items"); }
-        catch (e) { console.log("catalog seed failed: " + (e as Error).message); }
-      })(),
-    );
+    // Catalog warmup intentionally NOT here — running ensureCatalog every
+    // tick, even idempotent, kept tipping the cron over its CPU budget
+    // (exceededCpu) when paired with pollOnce's parallel scrapes. The
+    // user-triggered POST /api/items/warmup covers fresh-DB seeding.
   },
 };
