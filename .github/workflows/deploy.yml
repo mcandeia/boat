@@ -30,6 +30,14 @@ jobs:
       - name: Typecheck
         run: cd worker && npx tsc --noEmit
 
+      # Catches the silent template-literal-strips-backslashes class of
+      # bugs that tsc can't see — INDEX_HTML is just a string at type-
+      # check time, but the browser parses its inline JS and crashes if
+      # any of it is invalid. check-ui runs the served scripts through
+      # `new Function(...)` to fail the build the same way.
+      - name: Check served UI scripts parse
+        run: cd worker && node scripts/check-ui.mjs
+
       # D1 migrations are idempotent and safe to re-run on every deploy.
       - name: Apply D1 migrations
         uses: cloudflare/wrangler-action@v3
