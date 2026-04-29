@@ -101,6 +101,23 @@ export default {
         return json({ events: rs.results ?? [] });
       }
 
+      // ---- Public Mercado (read-only) ----
+      // Anyone can browse the feed and the catalog without logging in.
+      // Writes (post/react/comment/ping) still require auth — those routes
+      // live behind the gate further down. We try to read the session
+      // best-effort so logged-in users still see "mine" reaction highlights
+      // when hitting these public endpoints.
+      if (pathname === "/api/items" && method === "GET") return await listItems(env, url);
+      if (pathname === "/api/market/listings" && method === "GET") {
+        const sess = await readSession(env, cookie).catch(() => null);
+        return await listListings(env, sess?.userId ?? null, url);
+      }
+      const publicListingMatch = pathname.match(/^\/api\/market\/listings\/(\d+)$/);
+      if (publicListingMatch && method === "GET") {
+        const sess = await readSession(env, cookie).catch(() => null);
+        return await getListing(env, sess?.userId ?? null, Number(publicListingMatch[1]));
+      }
+
       // ---- Local-only admin login helper (dev) ----
       // Creates/promotes a local admin user and mints a session cookie.
       // Guarded by hostname so it only works on `wrangler dev`.
@@ -139,13 +156,10 @@ export default {
       if (pathname === "/api/me" && method === "GET") return await me(env, userId);
       if (pathname === "/api/me/nickname" && method === "POST") return await setNickname(env, userId, req);
 
-      // ---- Market ----
-      if (pathname === "/api/items" && method === "GET") return await listItems(env, url);
+      // ---- Market (writes — public GETs are above the auth gate) ----
       if (pathname === "/api/items/warmup" && method === "POST") return await warmupCatalog(env);
-      if (pathname === "/api/market/listings" && method === "GET") return await listListings(env, userId, url);
       if (pathname === "/api/market/listings" && method === "POST") return await createListing(env, userId, req);
       const listingMatch = pathname.match(/^\/api\/market\/listings\/(\d+)$/);
-      if (listingMatch && method === "GET") return await getListing(env, userId, Number(listingMatch[1]));
       if (listingMatch && method === "PATCH") return await updateListing(env, userId, Number(listingMatch[1]), req);
       if (listingMatch && method === "DELETE") return await deleteListing(env, userId, Number(listingMatch[1]));
       const reactMatch = pathname.match(/^\/api\/market\/listings\/(\d+)\/react$/);

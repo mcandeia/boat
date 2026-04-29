@@ -501,10 +501,25 @@ async function refresh() {
     state = data;
     renderDash();
   } catch {
-    $("login").classList.remove("hidden");
-    $("dash").classList.add("hidden");
-    setAppAdminLayout(false);
+    state = { user: null, characters: [], subscriptions: [] };
+    showPublicMode();
   }
+}
+
+// Logged-out shell: login banner on top + the Mercado feed below in
+// read-only mode. Write actions trigger the login flow.
+function showPublicMode() {
+  $("login").classList.remove("hidden");
+  $("dash").classList.remove("hidden");
+  setAppAdminLayout(false);
+  // Hide everything except the Mercado card.
+  const main = $("dash-main"); if (main) main.classList.add("hidden");
+  const admin = $("admin-card"); if (admin) admin.classList.add("hidden");
+  const market = $("market-card"); if (market) market.classList.remove("hidden");
+  // Hide the side menu — there's nothing to switch between.
+  const nav = document.querySelector("#dash nav");
+  if (nav) nav.style.display = "none";
+  loadMarket();
 }
 
 function setAppAdminLayout(isAdmin) {
@@ -3256,8 +3271,22 @@ function confirmModal(message, opts = {}) {
   });
 }
 
+// Logged-out gate. If there's no session, scroll the login section into
+// view and surface a toast — write actions can't proceed without auth.
+function ensureLoggedIn() {
+  if (state.user) return true;
+  const el = $("login");
+  if (el) {
+    el.classList.remove("hidden");
+    el.scrollIntoView({ behavior: "smooth", block: "start" });
+  }
+  toast("faça login com Telegram para interagir", "info");
+  return false;
+}
+
 // Returns true if user already has nickname OR set one successfully.
 async function ensureNickname() {
+  if (!ensureLoggedIn()) return false;
   if (state.user?.nickname) return true;
   return await new Promise((resolve) => {
     const overlay = document.createElement("div");
