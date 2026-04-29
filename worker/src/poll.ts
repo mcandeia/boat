@@ -222,21 +222,22 @@ export async function pollServerEvents(env: Env): Promise<{ refreshed: boolean; 
   const subs = subsRes.results ?? [];
   if (subs.length === 0) return { refreshed, fired: 0 };
 
-  // Per-user char list (name + level) so formatServerEventAlert can
-  // pick the BEST char for each event's tier instead of just suggesting
-  // a generic ticket bracket from the user's max-level char.
+  // Per-user char list (name + level + class) so formatServerEventAlert
+  // can pick the BEST char for each event's tier — class is needed so
+  // MG/DL gets the shifted (lower) bracket table instead of being
+  // recommended an off-by-one tier.
   const charsRes = await env.DB
     .prepare(
-      `SELECT uc.user_id AS user_id, c.name AS name, c.last_level AS level
+      `SELECT uc.user_id AS user_id, c.name AS name, c.last_level AS level, c.class AS charClass
          FROM user_characters uc
          JOIN characters c ON c.id = uc.character_id
         WHERE c.blocked = 0`,
     )
-    .all<{ user_id: number; name: string; level: number | null }>();
-  const charsByUser = new Map<number, Array<{ name: string; level: number | null }>>();
+    .all<{ user_id: number; name: string; level: number | null; charClass: string | null }>();
+  const charsByUser = new Map<number, Array<{ name: string; level: number | null; charClass: string | null }>>();
   for (const r of charsRes.results ?? []) {
     const list = charsByUser.get(r.user_id) ?? [];
-    list.push({ name: r.name, level: r.level });
+    list.push({ name: r.name, level: r.level, charClass: r.charClass });
     charsByUser.set(r.user_id, list);
   }
 

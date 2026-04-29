@@ -128,9 +128,36 @@ const TIER_RANGES = [
   { tier: 7, min: 331, max: 9999 },
 ];
 
-function tierForLevel(level: number | null): { tier: number; min: number; max: number } | null {
+// MG / DL get a shifted (lower) table — they're created already at high
+// level and the in-game event balancing lets them queue for higher
+// tiers earlier. Approximate community standard, easy to tune later.
+const TIER_RANGES_MG_DL = [
+  { tier: 1, min: 15,  max: 50 },
+  { tier: 2, min: 51,  max: 100 },
+  { tier: 3, min: 101, max: 150 },
+  { tier: 4, min: 151, max: 200 },
+  { tier: 5, min: 201, max: 250 },
+  { tier: 6, min: 251, max: 300 },
+  { tier: 7, min: 301, max: 9999 },
+];
+
+function isMgOrDl(charClass: string | null | undefined): boolean {
+  if (!charClass) return false;
+  const c = charClass.toLowerCase();
+  // Cover the base names + the known evolutions across MU versions.
+  return c.includes("magic gladiator")
+      || c.includes("duel master")
+      || c.includes("dark lord")
+      || c.includes("lord emperor");
+}
+
+function tierTableFor(charClass: string | null | undefined) {
+  return isMgOrDl(charClass) ? TIER_RANGES_MG_DL : TIER_RANGES;
+}
+
+function tierForLevel(level: number | null, charClass?: string | null): { tier: number; min: number; max: number } | null {
   if (level == null || !Number.isFinite(level)) return null;
-  for (const r of TIER_RANGES) if (level >= r.min && level <= r.max) return r;
+  for (const r of tierTableFor(charClass)) if (level >= r.min && level <= r.max) return r;
   return null;
 }
 
@@ -164,14 +191,15 @@ function serverEventEntryReq(eventNameRaw: string): EntryReq | null {
 // level qualifies for THAT tier; fall back to the next-lowest qualifying
 // tier. If no fixed tier, pick the highest-tier char (= biggest reward).
 function pickBestCharForTier(
-  chars: Array<{ name: string; level: number | null }>,
+  chars: Array<{ name: string; level: number | null; charClass?: string | null }>,
   fixedTier: number | null,
-): { name: string; level: number; tier: number } | null {
+): { name: string; level: number; tier: number; charClass: string | null } | null {
   const ranked = chars
-    .filter((c): c is { name: string; level: number } => c.level != null && Number.isFinite(c.level))
+    .filter((c): c is { name: string; level: number; charClass?: string | null } => c.level != null && Number.isFinite(c.level))
     .map((c) => {
-      const r = tierForLevel(c.level);
-      return { name: c.name, level: c.level, tier: r?.tier ?? 0 };
+      const cls = c.charClass ?? null;
+      const r = tierForLevel(c.level, cls);
+      return { name: c.name, level: c.level, tier: r?.tier ?? 0, charClass: cls };
     })
     .filter((c) => c.tier > 0);
   if (ranked.length === 0) return null;
@@ -193,11 +221,11 @@ export function formatServerEventAlert(opts: {
   name: string;
   room: string;
   leadMinutes: number;
-  // The user's chars (name + level) — used to suggest THE specific char
-  // best suited for this event's tier. Replaces the previous single
-  // userMaxLevel hint so a user with several chars at different levels
-  // gets a tailored "use char X with cloak +N" line.
-  userChars?: Array<{ name: string; level: number | null }>;
+  // The user's chars (name + level + class) — used to suggest THE
+  // specific char best suited for this event's tier. Class lets us
+  // apply the MG/DL shifted brackets so a 250 MG isn't told they need
+  // BC5 when the server actually qualifies them for BC6.
+  userChars?: Array<{ name: string; level: number | null; charClass?: string | null }>;
   // Back-compat shim: if only userMaxLevel is supplied (old callers),
   // we wrap it as a one-element char list with name="?".
   userMaxLevel?: number | null;
@@ -211,11 +239,11 @@ export function formatServerEventAlert(opts: {
   const fixedTier = fixedTierFromName(opts.name);
 
   // Normalise input: prefer userChars; fall back to userMaxLevel.
-  const chars: Array<{ name: string; level: number | null }> =
+  const chars: Array<{ name: string; level: number | null; charClass?: string | null }> =
     opts.userChars && opts.userChars.length > 0
       ? opts.userChars
       : opts.userMaxLevel != null
-      ? [{ name: "?", level: opts.userMaxLevel }]
+      ? [{ name: "?", level: opts.userMaxLevel, charClass: null }]
       : [];
   const best = req?.itemTiered ? pickBestCharForTier(chars, fixedTier) : null;
 
@@ -229,8 +257,11 @@ export function formatServerEventAlert(opts: {
       // from the recommended char's level, else generic placeholder.
       const displayTier = fixedTier ?? best?.tier ?? null;
       if (displayTier != null) {
-        const range = TIER_RANGES.find((r) => r.tier === displayTier);
-        const levelRange = range ? ` (lvl ${range.min}–${range.max})` : "";
+        // If we have a recommended char, show the level range that
+        // applies to THEIR class — MG/DL gets the shifted table.
+        const table = tierTableFor(best?.charClass);
+        const range = table.find((r) => r.tier === displayTier);
+        const levelRange = range ? ` (lvl ${range.min}–${range.max}${isMgOrDl(best?.charClass) ? ", MG/DL" : ""})` : "";
         itemLine = `🎟️ Entrada: <b>${escHtml(req.itemLabel)} +${displayTier}</b>${levelRange}.`;
       } else {
         itemLine = `🎟️ Entrada: <b>${escHtml(req.itemLabel)} +N</b> (depende do level; +1…+7).`;
