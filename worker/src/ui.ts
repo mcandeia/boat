@@ -2662,7 +2662,10 @@ function fmtPriceCurrency(listing) {
   if (!listing.currency && listing.price == null) return "";
   if (listing.currency === "free") return "🎁 grátis";
   const price = listing.price != null ? Number(listing.price).toLocaleString("pt-BR") : "?";
-  const ico = listing.currency === "zeny" ? "🟡" : listing.currency === "gold" ? "💠" : listing.currency === "cash" ? "💵" : "💰";
+  // "cash" means real money (BRL) — render as R$ instead of the literal
+  // word "cash" so it reads naturally for Brazilian players.
+  if (listing.currency === "cash") return "💵 R$ " + price;
+  const ico = listing.currency === "zeny" ? "🟡" : listing.currency === "gold" ? "💠" : "💰";
   return ico + " " + price + (listing.currency ? " " + listing.currency : "");
 }
 
@@ -3128,7 +3131,7 @@ function openListingForm(existing) {
               '<select data-f="currency" class="w-full h-10 bg-bg border border-border rounded-md px-2">' +
                 // Default zeny for new listings — most trades are zeny.
                 // For edits, keep whatever's stored.
-                ['zeny','gold','cash'].map((v) => '<option value="' + v + '"' + ((isEdit ? existing.currency === v : v === "zeny") ? " selected" : "") + '>' + v + '</option>').join("") +
+                [{v:'zeny',l:'zeny'},{v:'gold',l:'gold'},{v:'cash',l:'reais (R$)'}].map((o) => '<option value="' + o.v + '"' + ((isEdit ? existing.currency === o.v : o.v === "zeny") ? " selected" : "") + '>' + o.l + '</option>').join("") +
               '</select></div>' +
             '<div><label class="text-[11px] text-muted block mb-1">Preço</label>' +
               '<input data-f="price" type="number" min="0" placeholder="0" class="w-full h-10 bg-bg border border-border rounded-md px-2" value="' + (isEdit && existing.price != null ? existing.price : "") + '" /></div>' +

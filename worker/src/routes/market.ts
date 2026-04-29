@@ -633,6 +633,8 @@ export async function pingListing(
   const priceLine = listing.currency
     ? "\n💰 " + (listing.currency === "free"
         ? "grátis"
+        : listing.currency === "cash"
+        ? "R$ " + (listing.price != null ? listing.price.toLocaleString("pt-BR") : "?")
         : (listing.price != null ? listing.price.toLocaleString("pt-BR") + " " : "") + listing.currency)
     : "";
   const customMsg = messageRaw ? "\n💬 “" + escHtml(messageRaw) + "”" : "";
