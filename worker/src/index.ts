@@ -19,17 +19,23 @@ import {
 import { me, setNickname } from "./routes/me";
 import {
   commentListing,
+  createOffer,
   createListing,
+  decideOffer,
   deleteComment,
   deleteListing,
+  expireListingOffers,
   getListing,
+  getItemInfoFanz,
   imgProxy,
   listItems,
   listListings,
+  listReceivedOffers,
   pingListing,
   reactListing,
   updateListing,
   warmupCatalog,
+  getItemRules,
 } from "./routes/market";
 import {
   adminHealth,
@@ -41,6 +47,12 @@ import {
   adminPokeWatcher,
   adminRefreshChar,
   adminRefreshItems,
+  adminWipeCatalog,
+  adminImportItemRules,
+  adminImportAncientSets,
+  adminSyncAncientSetsFromFanz,
+  adminScrapeShopItemRule,
+  adminBackfillItemRulesFromSources,
   adminRunCron,
   adminSetBlocked,
   adminSpawnAllWatchers,
@@ -162,6 +174,51 @@ export default {
         return bad(500, "falha ao criar usuário local");
       }
 
+      // ---- Local-only regular-user impersonation helper (dev) ----
+      // Usage:
+      //  - /local-user-login                 -> create/login a local non-admin user
+      //  - /local-user-login?user_id=123     -> impersonate existing user id (forces admin=0)
+      if (pathname === "/local-user-login" && method === "GET" && (url.hostname === "localhost" || url.hostname === "127.0.0.1")) {
+        const requestedUserId = Number(url.searchParams.get("user_id") ?? "");
+
+        let userId: number | null = null;
+        if (Number.isFinite(requestedUserId) && requestedUserId > 0) {
+          const existing = await env.DB
+            .prepare("SELECT id FROM users WHERE id = ?")
+            .bind(requestedUserId)
+            .first<{ id: number }>();
+          if (!existing) return bad(404, "usuário não encontrado");
+          userId = existing.id;
+          // Keep this route strictly for common users.
+          await env.DB.prepare("UPDATE users SET admin = 0 WHERE id = ?").bind(userId).run();
+        } else {
+          const DEV_CHAT_ID = 123456790;
+          await env.DB.prepare(`
+            INSERT INTO users (telegram_chat_id, telegram_username, first_name, created_at, admin)
+            VALUES (?, 'local_user', 'Local User', 0, 0)
+            ON CONFLICT(telegram_chat_id) DO UPDATE SET admin = 0
+          `).bind(DEV_CHAT_ID).run();
+          const localUser = await env.DB
+            .prepare("SELECT id FROM users WHERE telegram_chat_id = ?")
+            .bind(DEV_CHAT_ID)
+            .first<{ id: number }>();
+          userId = localUser?.id ?? null;
+        }
+
+        if (userId) {
+          const { createSession, setCookieHeader } = await import("./session");
+          const token = await createSession(env, userId);
+          return new Response("Redirecionando...", {
+            status: 302,
+            headers: {
+              Location: "/",
+              "Set-Cookie": setCookieHeader(env, token),
+            },
+          });
+        }
+        return bad(500, "falha ao impersonar usuário local");
+      }
+
       // ---- everything below requires a session ----
       const sess = await readSession(env, cookie);
       if (!sess) return bad(401, "você não está autenticado");
@@ -182,6 +239,9 @@ export default {
 
       // ---- Market (writes — public GETs are above the auth gate) ----
       if (pathname === "/api/items/warmup" && method === "POST") return await warmupCatalog(env);
+      if (pathname === "/api/items/fanz" && method === "GET") return await getItemInfoFanz(env, url);
+      if (pathname === "/api/items/rules" && method === "GET") return await getItemRules(env, url);
+      if (pathname === "/api/market/listings" && method === "GET") return await listListings(env, userId, url);
       if (pathname === "/api/market/listings" && method === "POST") return await createListing(env, userId, req);
       const listingMatch = pathname.match(/^\/api\/market\/listings\/(\d+)$/);
       if (listingMatch && method === "PATCH") return await updateListing(env, userId, Number(listingMatch[1]), req);
@@ -190,6 +250,11 @@ export default {
       if (reactMatch && method === "POST") return await reactListing(env, userId, Number(reactMatch[1]), req);
       const commentMatch = pathname.match(/^\/api\/market\/listings\/(\d+)\/comment$/);
       if (commentMatch && method === "POST") return await commentListing(env, userId, Number(commentMatch[1]), req);
+      const offerCreateMatch = pathname.match(/^\/api\/market\/listings\/(\d+)\/offers$/);
+      if (offerCreateMatch && method === "POST") return await createOffer(env, userId, Number(offerCreateMatch[1]), req);
+      if (pathname === "/api/market/offers/received" && method === "GET") return await listReceivedOffers(env, userId);
+      const offerDecideMatch = pathname.match(/^\/api\/market\/offers\/(\d+)$/);
+      if (offerDecideMatch && method === "PATCH") return await decideOffer(env, userId, Number(offerDecideMatch[1]), req);
       const commentDelMatch = pathname.match(/^\/api\/market\/comments\/(\d+)$/);
       if (commentDelMatch && method === "DELETE") return await deleteComment(env, userId, Number(commentDelMatch[1]));
       const pingMatch = pathname.match(/^\/api\/market\/listings\/(\d+)\/ping$/);
@@ -251,6 +316,12 @@ export default {
         if (charSnapsClear && method === "DELETE") return await adminClearCharSnapshots(env, Number(charSnapsClear[1]));
         if (pathname === "/api/admin/poll" && method === "POST") return await adminRunCron(env);
         if (pathname === "/api/admin/items/refresh" && method === "POST") return await adminRefreshItems(env);
+        if (pathname === "/api/admin/items/wipe" && method === "POST") return await adminWipeCatalog(env);
+        if (pathname === "/api/admin/item-rules/import" && method === "POST") return await adminImportItemRules(env, req);
+        if (pathname === "/api/admin/ancients/import" && method === "POST") return await adminImportAncientSets(env, req);
+        if (pathname === "/api/admin/ancients/fanz-sync" && method === "POST") return await adminSyncAncientSetsFromFanz(env);
+        if (pathname === "/api/admin/item-rules/scrape-shop" && method === "POST") return await adminScrapeShopItemRule(env, req);
+        if (pathname === "/api/admin/item-rules/backfill" && method === "POST") return await adminBackfillItemRulesFromSources(env, req);
         if (pathname === "/api/admin/watchers/spawn-all" && method === "POST") return await adminSpawnAllWatchers(env);
         if (pathname === "/api/admin/custom-events" && method === "POST") return await adminCreateCustomEvent(env, userId, req);
         const customEvAdminMatch = pathname.match(/^\/api\/admin\/custom-events\/(\d+)$/);
@@ -300,6 +371,11 @@ export default {
       pollCustomEvents(env)
         .then((r) => { if (r.fired > 0) console.log(`custom-events: fired=${r.fired}`); })
         .catch((e) => console.error("custom-events poll failed", e)),
+    );
+    ctx.waitUntil(
+      expireListingOffers(env)
+        .then((r) => { if (r.expired > 0) console.log("market offers expired=" + r.expired); })
+        .catch((e) => console.error("market offer expiration failed", e)),
     );
   },
 };

@@ -14,6 +14,8 @@ export interface Env {
   SESSION_SECRET?: string;          // HMAC key for the session cookie
   TELEGRAM_BOT_TOKEN?: string;      // BotFather token; stub mode if missing
   TELEGRAM_WEBHOOK_SECRET?: string; // checked against X-Telegram-Bot-Api-Secret-Token
+  // Optional shop scraper credentials (MuPatos webshop).
+  // Prefer setting as secrets (wrangler secret put ...).
   SHOP_SCRAPER_USERNAME?: string;   // mupatos shop login (for options-page scraping)
   SHOP_SCRAPER_PASSWORD?: string;
 }

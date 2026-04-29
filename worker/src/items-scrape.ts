@@ -154,6 +154,8 @@ interface ScrapedItem {
   name: string;
   category: string;
   image_url: string | null;
+  detail_url: string;
+  shop: string;
 }
 
 function parseCategorySlugs(html: string, shop: string): string[] {
@@ -196,12 +198,14 @@ function parseItemsForCategory(html: string, category: string, shop: string): Sc
       name,
       category,
       image_url: imgRel ? (imgRel.startsWith("http") ? imgRel : SHOP_BASE + imgRel) : null,
+      detail_url: SHOP_BASE + "/site/shop/" + shop + "/" + category + "/" + slug,
+      shop,
     });
   }
   return items;
 }
 
-export async function refreshCatalog(env: Env): Promise<{ scraped: number; categories: number; shops: number }> {
+export async function refreshCatalog(env: Env): Promise<{ scraped: number; categories: number; shops: number; rules_upserted: number }> {
   // Fetch each shop's index in parallel, collect (shop, category) pairs.
   const shopIndices = await Promise.all(SHOPS.map(async (shop) => {
     try {
@@ -237,6 +241,17 @@ export async function refreshCatalog(env: Env): Promise<{ scraped: number; categ
   const scrapedBatch = all.map((it) => stmt.bind(it.slug, it.name, it.category, it.image_url, t));
   if (scrapedBatch.length > 0) await env.DB.batch(scrapedBatch);
 
+  // Persist detail links so we can scrape logged per-item option pages later.
+  const srcStmt = env.DB.prepare(
+    "INSERT INTO item_sources (item_slug, shop, category, detail_url, updated_at) VALUES (?, ?, ?, ?, ?) " +
+    "ON CONFLICT(item_slug, shop) DO UPDATE SET " +
+    "  category = excluded.category, " +
+    "  detail_url = excluded.detail_url, " +
+    "  updated_at = excluded.updated_at",
+  );
+  const srcBatch = all.map((it) => srcStmt.bind(it.slug, it.shop, it.category, it.detail_url, t));
+  if (srcBatch.length > 0) await env.DB.batch(srcBatch);
+
   // Seed the static fallback. Always overwrite image_url with whatever
   // the array currently says — no COALESCE — because we've shipped at
   // least one bad version of this seed (SHOP_BASE was in the TDZ at
@@ -251,7 +266,39 @@ export async function refreshCatalog(env: Env): Promise<{ scraped: number; categ
   );
   await env.DB.batch(STATIC_ITEMS.map((it) => seedStmt.bind(it.slug, it.name, it.category, it.image_url, t)));
 
-  return { scraped: all.length + STATIC_ITEMS.length, categories: pairs.length, shops: SHOPS.length };
+  // Seed/update item_rules from the catalog so the Mercado can enforce a
+  // deterministic baseline even before server-specific rules are imported.
+  // We keep it conservative: Harmony defaults to false; everything else true.
+  // Any later imports (server rules / shop scrape) overwrite these rows.
+  let rulesUpserted = 0;
+  try {
+    const lifeJson = JSON.stringify([4, 8, 12, 16, 20, 24, 28]);
+    const emptyJson = JSON.stringify([]);
+    // 1) Update existing rules matched by slug (name) to attach item_slug.
+    await env.DB.prepare(
+      "UPDATE item_rules " +
+      "   SET item_slug = (SELECT slug FROM items i WHERE lower(trim(i.name)) = item_rules.slug LIMIT 1), " +
+      "       kind = (SELECT category FROM items i WHERE lower(trim(i.name)) = item_rules.slug LIMIT 1), " +
+      "       name = (SELECT name FROM items i WHERE lower(trim(i.name)) = item_rules.slug LIMIT 1), " +
+      "       updated_at = ? " +
+      " WHERE item_slug IS NULL " +
+      "   AND EXISTS (SELECT 1 FROM items i WHERE lower(trim(i.name)) = item_rules.slug)",
+    ).bind(t).run();
+
+    // 2) Insert new baseline rules for items that don't have a rule yet.
+    const rr = await env.DB.prepare(
+      "INSERT INTO item_rules " +
+      "(slug, item_slug, name, kind, allow_excellent, allow_luck, allow_skill, allow_life, allow_harmony, life_values, harmony_values, excellent_values, updated_at) " +
+      "SELECT lower(trim(name)) AS slug, items.slug AS item_slug, name, category AS kind, 1, 1, 1, 1, 0, ?, ?, ?, ? " +
+      "  FROM items " +
+      " WHERE NOT EXISTS (SELECT 1 FROM item_rules r WHERE r.item_slug = items.slug OR r.slug = lower(trim(items.name)))",
+    ).bind(lifeJson, emptyJson, emptyJson, t).run();
+    rulesUpserted = rr.meta.changes ?? 0;
+  } catch (e) {
+    console.log("item_rules seed skipped: " + (e as Error).message);
+  }
+
+  return { scraped: all.length + STATIC_ITEMS.length, categories: pairs.length, shops: SHOPS.length, rules_upserted: rulesUpserted };
 }
 
 // Lazy-seed the catalog. Triggers refreshCatalog when:
