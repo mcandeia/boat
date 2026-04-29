@@ -739,7 +739,7 @@ function renderDash() {
     del.className = "px-3 py-1.5 rounded-md border border-border text-danger text-sm hover:bg-bg transition";
     del.textContent = "Remover";
     del.onclick = async () => {
-      if (!confirm("Remover " + c.name + "? Os alertas dele também serão excluídos.")) return;
+      if (!await confirmModal("Remover " + c.name + "? Os alertas dele também serão excluídos.", { okLabel: "Remover", danger: true })) return;
       await fetchJSON("/api/characters/" + c.id, { method: "DELETE" });
       refresh();
     };
@@ -1778,7 +1778,7 @@ async function toggleAdminHistory(charId, charName) {
 
     const clearBtn = cell.querySelector('[data-action="clear-hist"]');
     if (clearBtn) clearBtn.onclick = async () => {
-      if (!confirm("Apagar todos os snapshots de " + charName + "? Heartbeats vão repopular em ~5min.")) return;
+      if (!await confirmModal("Apagar todos os snapshots de " + charName + "? Heartbeats vão repopular em ~5min.", { okLabel: "Apagar", danger: true })) return;
       try {
         const r = await fetchJSON("/api/admin/chars/" + charId + "/snapshots", { method: "DELETE" });
         toast("apagados " + r.deleted + " snapshots", "ok");
@@ -2654,11 +2654,14 @@ function renderListingCard(l) {
   const attrs = fmtAttrs(l.item_attrs);
   const price = fmtPriceCurrency(l);
   const charLine = l.char_name ? "🎮 " + escapeHtml(l.char_name) + (l.char_level != null ? " (" + l.char_level + "/" + (l.char_resets ?? "?") + "rr)" : "") : "";
-  const charStatusBadge = l.char_status === "Online"
-    ? '<span class="px-1.5 py-0.5 rounded bg-emerald-500/15 text-emerald-300 border border-emerald-500/30 text-[10px]">🟢 online' + (l.char_map ? ' · ' + escapeHtml(l.char_map) : '') + '</span>'
-    : l.char_status === "Offline"
-    ? '<span class="px-1.5 py-0.5 rounded bg-zinc-500/15 text-zinc-400 border border-zinc-500/30 text-[10px]">offline</span>'
-    : "";
+  // Owner presence: any of the listing owner's chars currently online.
+  // Falls back to "offline" only when we have a recent check (otherwise
+  // we don't know — show nothing).
+  const charStatusBadge = l.owner_online_char
+    ? '<span class="px-1.5 py-0.5 rounded bg-emerald-500/15 text-emerald-300 border border-emerald-500/30 text-[10px]">🟢 online · ' + escapeHtml(l.owner_online_char) + (l.owner_online_map ? ' · ' + escapeHtml(l.owner_online_map) : '') + '</span>'
+    : (l.owner_last_seen && (Math.floor(Date.now()/1000) - l.owner_last_seen) < 600
+        ? '<span class="px-1.5 py-0.5 rounded bg-zinc-500/15 text-zinc-400 border border-zinc-500/30 text-[10px]">offline</span>'
+        : "");
   const isMine = state.user && l.user_id === state.user.id;
   const date = new Date(l.created_at * 1000);
   const ago = fmtAgo(state.now ? state.now - l.created_at : Math.floor(Date.now() / 1000) - l.created_at);
@@ -2747,7 +2750,7 @@ async function handleListingAction(action, l, card, e) {
     return;
   }
   if (action === "delete") {
-    if (!confirm("Remover este anúncio?")) return;
+    if (!await confirmModal("Remover este anúncio?", { okLabel: "Remover", danger: true })) return;
     try {
       await fetchJSON("/api/market/listings/" + l.id, { method: "DELETE" });
       toast("removido", "ok");
@@ -2797,7 +2800,7 @@ async function toggleListingDetail(l, card) {
       '</div>';
     det.querySelectorAll("[data-comment-del]").forEach((b) => {
       b.onclick = async () => {
-        if (!confirm("apagar comentário?")) return;
+        if (!await confirmModal("Apagar comentário?", { okLabel: "Apagar", danger: true })) return;
         try {
           await fetchJSON("/api/market/comments/" + b.getAttribute("data-comment-del"), { method: "DELETE" });
           toggleListingDetail(l, card); toggleListingDetail(l, card);
@@ -2907,12 +2910,14 @@ function openListingForm(existing) {
               '</div>' +
               '<div><label class="text-[11px] text-muted block mb-1">Classe</label>' +
                 '<select data-f="char_class" class="w-full h-10 bg-bg border border-border rounded-md px-2">' +
-                  ['','Dark Knight','Blade Knight','Blade Master','Magic Gladiator','Duel Master','Dark Lord','Lord Emperor','Dark Wizard','Soul Master','Grand Master','Fairy Elf','Muse Elf','High Elf','Summoner','Bloody Summoner','Dimension Master','Rage Fighter','Fist Master']
+                  // 99z classic only — 5 starter classes, with the 2nd/3rd
+                  // evolutions for DW/DK/Elf. MG and DL stay as-is.
+                  ['','Dark Wizard','Soul Master','Grand Master','Dark Knight','Blade Knight','Blade Master','Fairy Elf','Muse Elf','High Elf','Magic Gladiator','Dark Lord']
                     .map((cls) => '<option value="' + escapeHtml(cls) + '"' + (isCharListing && a.charClass === cls ? " selected" : "") + '>' + (cls || "—") + '</option>').join("") +
                 '</select>' +
               '</div>' +
             '</div>' +
-            '<div class="text-[11px] text-muted">★ resets é o que mais importa — preenche bem!</div>' +
+            '<div class="text-[11px] text-muted">★ resets é o destaque. Se escolher um char vinculado acima, preenchemos resets/level/classe direto do site.</div>' +
           '</div>' +
           '<div data-pricing-block class="grid grid-cols-2 gap-2">' +
             '<div><label class="text-[11px] text-muted block mb-1">Moeda</label>' +
@@ -2953,15 +2958,47 @@ function openListingForm(existing) {
     };
     overlay.querySelectorAll('input[name="kind"]').forEach((r) => r.addEventListener("change", syncKind));
     syncKind();
+    // When a char is linked AND we're in char-listing mode, auto-fill
+    // name/resets/level/class from the registered character — saves the
+    // user retyping and keeps the listing in sync with the live profile.
+    const charLink = overlay.querySelector('[data-f="char_id"]');
+    const charNameField = overlay.querySelector('[data-f="char_name"]');
+    const charResetsField = overlay.querySelector('[data-f="char_resets"]');
+    const charLevelField = overlay.querySelector('[data-f="char_level"]');
+    const charClassField = overlay.querySelector('[data-f="char_class"]');
+    const fillFromLinkedChar = () => {
+      const id = charLink.value;
+      if (!id) return;
+      const c = (state.characters || []).find((x) => String(x.id) === id);
+      if (!c) return;
+      // Don't clobber a value the user already typed.
+      if (charNameField && !charNameField.value) charNameField.value = c.name;
+      if (charResetsField && !charResetsField.value && c.resets != null) charResetsField.value = c.resets;
+      if (charLevelField && !charLevelField.value && c.last_level != null) charLevelField.value = c.last_level;
+      if (charClassField && !charClassField.value && c.class) {
+        // Match against the dropdown options (case-insensitive).
+        const opt = [...charClassField.options].find((o) => o.value.toLowerCase() === c.class.toLowerCase());
+        if (opt) charClassField.value = opt.value;
+      }
+    };
+    charLink.addEventListener("change", () => {
+      const isCharMode = (overlay.querySelector('input[name="kind"]:checked') || {}).value === "char";
+      if (isCharMode) fillFromLinkedChar();
+    });
     // "Item Full" — when checked, force-check excellent/luck/skill and
-    // pin option to 28, then disable those fields so the user can't
-    // contradict themselves. Refinement stays editable.
+    // pin option to 28, then disable everything that Full implies (and
+    // ancient/extras too — Full means the canonical fully-optioned item;
+    // ancient/extras are not part of that shorthand). Refinement stays
+    // editable since the user's hint above promises only that.
     const fullChk = overlay.querySelector('[data-f="full"]');
     const exChk = overlay.querySelector('[data-f="excellent"]');
     const luckChk = overlay.querySelector('[data-f="luck"]');
     const skillChk = overlay.querySelector('[data-f="skill"]');
     const optInput = overlay.querySelector('[data-f="option"]');
+    const ancientInput = overlay.querySelector('[data-f="ancient"]');
+    const extrasInput = overlay.querySelector('[data-f="extras"]');
     let savedOption = optInput.value;
+    const lockedFields = [exChk, luckChk, skillChk, optInput, ancientInput, extrasInput];
     const syncFull = () => {
       const on = !!fullChk.checked;
       if (on) {
@@ -2969,7 +3006,7 @@ function openListingForm(existing) {
         exChk.checked = true; luckChk.checked = true; skillChk.checked = true;
         optInput.value = "28";
       }
-      [exChk, luckChk, skillChk, optInput].forEach((el) => {
+      lockedFields.forEach((el) => {
         el.disabled = on;
         el.parentElement.classList.toggle("opacity-50", on);
       });
@@ -3085,6 +3122,40 @@ function openPingModal(l) {
       loadMarket();
     } catch (err) { toast(err.message, "err"); }
   };
+}
+
+// In-app confirmation modal — replaces native window.confirm so we don't
+// surface the browser's ugly origin-prefixed dialog on destructive actions.
+// Returns Promise<boolean>.
+function confirmModal(message, opts = {}) {
+  const { okLabel = "Confirmar", cancelLabel = "Cancelar", danger = false } = opts;
+  return new Promise((resolve) => {
+    const overlay = document.createElement("div");
+    overlay.className = "fixed inset-0 bg-black/70 flex items-center justify-center z-50 p-3";
+    const okClass = danger
+      ? "px-4 py-1.5 rounded-md bg-danger text-white font-semibold hover:brightness-110"
+      : "px-4 py-1.5 rounded-md bg-gold text-bg font-semibold hover:brightness-110";
+    overlay.innerHTML =
+      '<div class="bg-panel border border-border rounded-xl p-5 w-full max-w-sm">' +
+        '<div class="text-sm text-slate-200 whitespace-pre-wrap mb-4" data-msg></div>' +
+        '<div class="flex justify-end gap-2">' +
+          '<button data-cancel class="px-3 py-1.5 rounded-md border border-border text-sm hover:bg-bg">' + escapeHtml(cancelLabel) + '</button>' +
+          '<button data-ok class="' + okClass + '">' + escapeHtml(okLabel) + '</button>' +
+        '</div>' +
+      '</div>';
+    overlay.querySelector("[data-msg]").textContent = message;
+    document.body.appendChild(overlay);
+    const close = (val) => { overlay.remove(); resolve(val); };
+    overlay.querySelector("[data-cancel]").onclick = () => close(false);
+    overlay.querySelector("[data-ok]").onclick = () => close(true);
+    overlay.addEventListener("keydown", (e) => {
+      if (e.key === "Escape") close(false);
+      if (e.key === "Enter") close(true);
+    });
+    // Click outside the dialog to dismiss.
+    overlay.addEventListener("click", (e) => { if (e.target === overlay) close(false); });
+    overlay.querySelector("[data-ok]").focus();
+  });
 }
 
 // Returns true if user already has nickname OR set one successfully.

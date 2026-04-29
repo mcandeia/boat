@@ -7,63 +7,96 @@ import { now } from "./util";
 // sets (Storm Crow et al) that aren't sold in any shop. Image URLs
 // left null — Mercado renders the title without a thumbnail when
 // image_url is missing.
-function setPieces(setName: string, slugBase: string): Array<{ slug: string; name: string; category: string }> {
-  const pieces = ["Helm", "Armor", "Pants", "Gloves", "Boots"];
-  return pieces.map((p) => ({
-    slug: slugBase + "-" + p.toLowerCase(),
-    name: setName + " " + p,
+// MU Online sprite slot types (helm/armor/pants/gloves/boots) — same
+// across servers using s6 spec, including mupatos. The static fallback
+// uses these to point at images mupatos.com.br already hosts.
+const PIECE_SLOTS = [
+  { type: 7,  name: "Helm" },
+  { type: 8,  name: "Armor" },
+  { type: 9,  name: "Pants" },
+  { type: 10, name: "Gloves" },
+  { type: 11, name: "Boots" },
+];
+function spriteUrl(type: number, id: number): string {
+  return SHOP_BASE + "/site/resources/images/items/" + type + "/" + id + ".webp";
+}
+function setPieces(
+  setName: string,
+  slugBase: string,
+  spriteId?: number,
+): Array<{ slug: string; name: string; category: string; image_url: string | null }> {
+  return PIECE_SLOTS.map((s) => ({
+    slug: slugBase + "-" + s.name.toLowerCase(),
+    name: setName + " " + s.name,
     category: "sets-extra",
+    image_url: spriteId != null ? spriteUrl(s.type, spriteId) : null,
   }));
 }
 
-const STATIC_ITEMS: Array<{ slug: string; name: string; category: string }> = [
-  { slug: "jewel-of-soul",     name: "Jewel of Soul",       category: "jewels" },
-  { slug: "jewel-of-life",     name: "Jewel of Life",       category: "jewels" },
-  { slug: "jewel-of-bless",    name: "Jewel of Bless",      category: "jewels" },
-  { slug: "jewel-of-chaos",    name: "Jewel of Chaos",      category: "jewels" },
-  { slug: "jewel-of-creation", name: "Jewel of Creation",   category: "jewels" },
-  { slug: "jewel-of-harmony",  name: "Jewel of Harmony",    category: "jewels" },
-  { slug: "jewel-of-guardian", name: "Jewel of Guardian",   category: "jewels" },
-  { slug: "armor-of-guardsman",name: "Armor of Guardsman",  category: "event-tickets" },
-  { slug: "invisibility-cloak",name: "Invisibility Cloak",  category: "event-tickets" },
-  { slug: "devils-invitation", name: "Devil's Invitation",  category: "event-tickets" },
-  { slug: "scroll-of-blood",   name: "Scroll of Blood",     category: "event-tickets" },
-  { slug: "dark-horse",        name: "Dark Horse",          category: "pets" },
-  { slug: "dark-raven",        name: "Dark Raven",          category: "pets" },
-  { slug: "demon-pet",         name: "Demon (pet)",         category: "pets" },
-  { slug: "spirit-of-guardian",name: "Spirit of Guardian",  category: "pets" },
-  { slug: "dinorant",          name: "Dinorant",            category: "pets" },
-  { slug: "fenrir",            name: "Fenrir",              category: "pets" },
+const STATIC_ITEMS: Array<{ slug: string; name: string; category: string; image_url: string | null }> = [
+  { slug: "jewel-of-soul",     name: "Jewel of Soul",       category: "jewels", image_url: null },
+  { slug: "jewel-of-life",     name: "Jewel of Life",       category: "jewels", image_url: null },
+  { slug: "jewel-of-bless",    name: "Jewel of Bless",      category: "jewels", image_url: null },
+  { slug: "jewel-of-chaos",    name: "Jewel of Chaos",      category: "jewels", image_url: null },
+  { slug: "jewel-of-creation", name: "Jewel of Creation",   category: "jewels", image_url: null },
+  { slug: "jewel-of-harmony",  name: "Jewel of Harmony",    category: "jewels", image_url: null },
+  { slug: "jewel-of-guardian", name: "Jewel of Guardian",   category: "jewels", image_url: null },
+  { slug: "armor-of-guardsman",name: "Armor of Guardsman",  category: "event-tickets", image_url: null },
+  { slug: "invisibility-cloak",name: "Invisibility Cloak",  category: "event-tickets", image_url: null },
+  { slug: "devils-invitation", name: "Devil's Invitation",  category: "event-tickets", image_url: null },
+  { slug: "scroll-of-blood",   name: "Scroll of Blood",     category: "event-tickets", image_url: null },
+  { slug: "dark-horse",        name: "Dark Horse",          category: "pets", image_url: null },
+  { slug: "dark-raven",        name: "Dark Raven",          category: "pets", image_url: null },
+  { slug: "demon-pet",         name: "Demon (pet)",         category: "pets", image_url: null },
+  { slug: "spirit-of-guardian",name: "Spirit of Guardian",  category: "pets", image_url: null },
+  { slug: "dinorant",          name: "Dinorant",            category: "pets", image_url: null },
+  { slug: "fenrir",            name: "Fenrir",              category: "pets", image_url: null },
   // Mid-tier armor sets that aren't in any shop (drop / craft only).
-  ...setPieces("Storm Crow",        "storm-crow"),         // MG
-  ...setPieces("Storm Roar",        "storm-roar"),         // BK 2nd
-  ...setPieces("Storm Reign",       "storm-reign"),        // BK 3rd
-  ...setPieces("Sunlight",          "sunlight"),
-  ...setPieces("Silk",              "silk"),               // Elf
-  ...setPieces("Wind",              "wind"),               // Elf
-  ...setPieces("Adventurer",        "adventurer"),         // Elf low
-  ...setPieces("Vine",              "vine"),               // Elf
-  ...setPieces("Mist",              "mist"),               // DW
-  ...setPieces("Pad of Greatness",  "pad-greatness"),      // DW low
-  ...setPieces("Sphinx",            "sphinx"),             // DW
-  ...setPieces("Robe of Wizardry",  "robe-wizardry"),      // DW
-  ...setPieces("Eclipse",           "eclipse"),            // DW high
-  ...setPieces("Iris",              "iris"),               // RF
-  ...setPieces("Valiant",           "valiant"),            // RF
+  // Sprite IDs follow MU Online s6 standard; mupatos hosts each at
+  // /site/resources/images/items/<slot>/<id>.webp. Only sprite IDs we're
+  // confident about get baked in — the rest fall back to text-only.
+  ...setPieces("Bronze",            "bronze",            0),
+  ...setPieces("Dragon",            "dragon",            1),  // DK
+  ...setPieces("Pad",               "pad",               2),
+  ...setPieces("Legendary",         "legendary",         3),  // DW low
+  ...setPieces("Bone",              "bone",              4),
+  ...setPieces("Leather",           "leather",           5),
+  ...setPieces("Scale",             "scale",             6),  // DK
+  ...setPieces("Sphinx",            "sphinx",            7),  // DW
+  ...setPieces("Brass",             "brass",             8),  // DK
+  ...setPieces("Plate",             "plate",             9),  // DK
+  ...setPieces("Vine",              "vine",              10), // Elf low
+  ...setPieces("Silk",              "silk",              11), // Elf mid
+  ...setPieces("Wind",              "wind",              12), // Elf high
+  ...setPieces("Storm Crow",        "storm-crow",        13), // MG
+  ...setPieces("Adventurer",        "adventurer",        14), // Elf
+  ...setPieces("Light Plate",       "light-plate",       15), // DK
+  ...setPieces("Black Dragon",      "black-dragon",      16),
+  ...setPieces("Dark Phoenix",      "dark-phoenix",      17),
+  ...setPieces("Grand Soul",        "grand-soul",        18), // DW
+  ...setPieces("Divine",            "divine",            19), // Elf
+  ...setPieces("Thunder Hawk",      "thunder-hawk",      20),
+  ...setPieces("Great Dragon",      "great-dragon",      21), // BK
+  ...setPieces("Dark Soul",         "dark-soul",         22), // DW
+  ...setPieces("Hurricane",         "hurricane",         23),
+  ...setPieces("Red Spirit",        "red-spirit",        24),
+  ...setPieces("Iris",              "iris",              25),
+  ...setPieces("Valiant",           "valiant",           26),
+  ...setPieces("Sunlight",          "sunlight",          27),
+  // Sets without a confident sprite mapping — name only.
+  ...setPieces("Mist",              "mist"),
+  ...setPieces("Eclipse",           "eclipse"),
+  ...setPieces("Hyon Dragon",       "hyon-dragon"),
+  ...setPieces("Piercing Grove",    "piercing-grove"),
+  ...setPieces("Phoenix Soul",      "phoenix-soul"),
+  ...setPieces("Storm Roar",        "storm-roar"),
+  ...setPieces("Storm Reign",       "storm-reign"),
+  ...setPieces("Ashcrow",           "ashcrow"),
   ...setPieces("Glorious",          "glorious"),
   ...setPieces("Brave",             "brave"),
-  ...setPieces("Hyon Dragon",       "hyon-dragon"),        // top BK
-  ...setPieces("Piercing Grove",    "piercing-grove"),     // top
-  ...setPieces("Phoenix Soul",      "phoenix-soul"),
-  ...setPieces("Ashcrow",           "ashcrow"),
-  ...setPieces("Bone",              "bone"),
-  ...setPieces("Pad",               "pad"),
-  ...setPieces("Leather",           "leather"),
-  ...setPieces("Bronze",            "bronze"),
-  ...setPieces("Brass",             "brass"),
-  ...setPieces("Plate",             "plate"),
   ...setPieces("Tower",             "tower"),
-  ...setPieces("Light Plate",       "light-plate"),
+  ...setPieces("Pad of Greatness",  "pad-greatness"),
+  ...setPieces("Robe of Wizardry",  "robe-wizardry"),
 ];
 
 // Scrape every mupatos shop (shop-gold, rarius, rings-pendants) to seed
@@ -198,13 +231,18 @@ export async function refreshCatalog(env: Env): Promise<{ scraped: number; categ
   const scrapedBatch = all.map((it) => stmt.bind(it.slug, it.name, it.category, it.image_url, t));
   if (scrapedBatch.length > 0) await env.DB.batch(scrapedBatch);
 
-  // Always seed the static fallback (jewels, tickets, pets) — INSERT OR
-  // IGNORE so we don't clobber an entry that the shop scrape already
-  // returned (with a real image).
+  // Seed the static fallback. Existing rows with NULL image_url get
+  // upgraded to the canonical sprite URL when we have one; rows that
+  // already have an image (real shop scrape, or a previously seeded
+  // sprite) are kept untouched via COALESCE.
   const seedStmt = env.DB.prepare(
-    "INSERT OR IGNORE INTO items (slug, name, category, image_url, updated_at) VALUES (?, ?, ?, NULL, ?)",
+    "INSERT INTO items (slug, name, category, image_url, updated_at) VALUES (?, ?, ?, ?, ?) " +
+    "ON CONFLICT(slug) DO UPDATE SET " +
+    "  name = excluded.name, category = excluded.category, " +
+    "  image_url = COALESCE(items.image_url, excluded.image_url), " +
+    "  updated_at = excluded.updated_at",
   );
-  await env.DB.batch(STATIC_ITEMS.map((it) => seedStmt.bind(it.slug, it.name, it.category, t)));
+  await env.DB.batch(STATIC_ITEMS.map((it) => seedStmt.bind(it.slug, it.name, it.category, it.image_url, t)));
 
   return { scraped: all.length + STATIC_ITEMS.length, categories: pairs.length, shops: SHOPS.length };
 }
@@ -226,7 +264,14 @@ export async function ensureCatalog(env: Env): Promise<{ count: number; seeded: 
   const hasRings = await env.DB
     .prepare("SELECT 1 AS x FROM items WHERE category LIKE 'rings-pendants-%' LIMIT 1")
     .first<{ x: number }>();
-  if (n >= 50 && hasRarius && hasRings) return { count: n, seeded: false };
+  // After a deploy that adds sprite URLs to the static seed, existing
+  // rows still hold image_url=NULL. Use storm-crow-helm as a canary —
+  // if it's missing an image, we owe a re-seed.
+  const canary = await env.DB
+    .prepare("SELECT image_url FROM items WHERE slug = 'storm-crow-helm'")
+    .first<{ image_url: string | null }>();
+  const needsSpriteRefresh = !canary || canary.image_url == null;
+  if (n >= 50 && hasRarius && hasRings && !needsSpriteRefresh) return { count: n, seeded: false };
 
   await refreshCatalog(env);
   const after = await env.DB
