@@ -1700,9 +1700,12 @@ async function toggleAdminHistory(charId, charName) {
   try {
     const data = await fetchJSON("/api/admin/chars/" + charId + "/history?days=14");
     const chart = renderHistoryChart(data, charName);
-    const tabs = '<div class="flex gap-4 mb-3 border-b border-border text-sm">' +
-      '<button class="pb-1 border-b-2 border-goldsoft text-goldsoft hist-tab-btn" data-target="hist-evolucao-' + charId + '">Evolução</button>' +
-      '<button class="pb-1 border-b-2 border-transparent text-muted hover:text-slate-300 hist-tab-btn" data-target="hist-resets-' + charId + '">Resets/Dia</button>' +
+    const tabs = '<div class="flex items-center justify-between gap-3 mb-3 border-b border-border">' +
+      '<div class="flex gap-4 text-sm">' +
+        '<button class="pb-1 border-b-2 border-goldsoft text-goldsoft hist-tab-btn" data-target="hist-evolucao-' + charId + '">Evolução</button>' +
+        '<button class="pb-1 border-b-2 border-transparent text-muted hover:text-slate-300 hist-tab-btn" data-target="hist-resets-' + charId + '">Resets/Dia</button>' +
+      '</div>' +
+      '<button class="text-[11px] text-muted hover:text-danger underline" data-action="clear-hist">limpar histórico</button>' +
       '</div>' +
       '<div id="hist-evolucao-' + charId + '" class="hist-tab-content">' + chart.html + '</div>' +
       '<div id="hist-resets-' + charId + '" class="hist-tab-content hidden">' + renderResetsPerDayChart(data, charName) + '</div>';
@@ -1721,6 +1724,18 @@ async function toggleAdminHistory(charId, charName) {
         document.getElementById(btn.getAttribute("data-target")).classList.remove("hidden");
       };
     });
+
+    const clearBtn = cell.querySelector('[data-action="clear-hist"]');
+    if (clearBtn) clearBtn.onclick = async () => {
+      if (!confirm("Apagar todos os snapshots de " + charName + "? Heartbeats vão repopular em ~5min.")) return;
+      try {
+        const r = await fetchJSON("/api/admin/chars/" + charId + "/snapshots", { method: "DELETE" });
+        toast("apagados " + r.deleted + " snapshots", "ok");
+        // Re-open the panel to refresh chart.
+        expansion.classList.add("hidden");
+        toggleAdminHistory(charId, charName);
+      } catch (e) { toast(e.message, "err"); }
+    };
   } catch (e) {
     cell.innerHTML = '<span class="text-danger text-xs">' + escapeHtml(e.message) + '</span>';
   }

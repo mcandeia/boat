@@ -19,6 +19,7 @@ import {
 import { me } from "./routes/me";
 import {
   adminCharHistory,
+  adminClearCharSnapshots,
   adminListCharSubs,
   adminListChars,
   adminListEvents,
@@ -156,6 +157,8 @@ export default {
         if (charSubs && method === "GET") return await adminListCharSubs(env, Number(charSubs[1]));
         const charHistory = pathname.match(/^\/api\/admin\/chars\/(\d+)\/history$/);
         if (charHistory && method === "GET") return await adminCharHistory(env, Number(charHistory[1]), req);
+        const charSnapsClear = pathname.match(/^\/api\/admin\/chars\/(\d+)\/snapshots$/);
+        if (charSnapsClear && method === "DELETE") return await adminClearCharSnapshots(env, Number(charSnapsClear[1]));
         if (pathname === "/api/admin/poll" && method === "POST") return await adminRunCron(env);
         if (pathname === "/api/admin/events" && method === "GET") return await adminListEvents(env);
         const evPatch = pathname.match(/^\/api\/admin\/events\/(\d+)$/);

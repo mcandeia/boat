@@ -128,6 +128,14 @@ export async function adminCharHistory(env: Env, charId: number, req: Request): 
   return await buildHistoryResponse(env, charId, req);
 }
 
+export async function adminClearCharSnapshots(env: Env, charId: number): Promise<Response> {
+  const r = await env.DB
+    .prepare("DELETE FROM char_snapshots WHERE char_id = ?")
+    .bind(charId)
+    .run();
+  return json({ ok: true, deleted: r.meta.changes });
+}
+
 interface AdminEventRow {
   id: number;
   category: string;

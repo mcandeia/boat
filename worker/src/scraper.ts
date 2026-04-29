@@ -139,13 +139,29 @@ export function parseProfile(html: string, name: string): ProfileSnapshot {
     scraped: true,
   };
 
+  // Scope reads to the first <table class="...table-striped...">. The page
+  // sometimes renders sidebar leaderboards whose <td>Resets</td> header
+  // would otherwise be matched first and pull a top-player's stats into
+  // the profile (we saw a snapshot row with resets=99, level=999 that
+  // came from exactly that bug).
+  const tableMatch = html.match(/<table[^>]*class="[^"]*table-striped[^"]*"[^>]*>([\s\S]*?)<\/table>/i);
+  const scope = tableMatch ? tableMatch[1] : html;
+
   const get = (label: RegExp): string | null => {
     const re = new RegExp(`<td[^>]*>\\s*${label.source}\\s*</td>\\s*<td[^>]*>([\\s\\S]*?)</td>`, "i");
-    const m = html.match(re);
+    const m = scope.match(re);
     if (!m) return null;
     const text = m[1].replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
     return text || null;
   };
+
+  // If the profile table is for a different character (or missing the
+  // name row entirely), treat the page as not-found rather than grafting
+  // values from whatever did match.
+  const personagem = get(/Personagem/);
+  if (!personagem || personagem.toLowerCase() !== name.toLowerCase()) {
+    return snap;
+  }
 
   const cls = get(/Classe/);
   const resets = get(/Resets/);
