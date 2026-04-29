@@ -2657,11 +2657,13 @@ async function renderPdp(id) {
 }
 
 function fmtPriceCurrency(listing) {
-  if (!listing.currency) return "";
+  // Legacy rows can have a price without a currency (the form used to
+  // allow that). Render with neutral icon so the value still shows.
+  if (!listing.currency && listing.price == null) return "";
   if (listing.currency === "free") return "🎁 grátis";
   const price = listing.price != null ? Number(listing.price).toLocaleString("pt-BR") : "?";
   const ico = listing.currency === "zeny" ? "🟡" : listing.currency === "gold" ? "💠" : listing.currency === "cash" ? "💵" : "💰";
-  return ico + " " + price + " " + listing.currency;
+  return ico + " " + price + (listing.currency ? " " + listing.currency : "");
 }
 
 function wireItemTypeahead(scope) {
@@ -3124,8 +3126,9 @@ function openListingForm(existing) {
           '<div data-pricing-block class="grid grid-cols-2 gap-2">' +
             '<div><label class="text-[11px] text-muted block mb-1">Moeda</label>' +
               '<select data-f="currency" class="w-full h-10 bg-bg border border-border rounded-md px-2">' +
-                '<option value="">—</option>' +
-                ['zeny','gold','cash'].map((v) => '<option value="' + v + '"' + (isEdit && existing.currency === v ? " selected" : "") + '>' + v + '</option>').join("") +
+                // Default zeny for new listings — most trades are zeny.
+                // For edits, keep whatever's stored.
+                ['zeny','gold','cash'].map((v) => '<option value="' + v + '"' + ((isEdit ? existing.currency === v : v === "zeny") ? " selected" : "") + '>' + v + '</option>').join("") +
               '</select></div>' +
             '<div><label class="text-[11px] text-muted block mb-1">Preço</label>' +
               '<input data-f="price" type="number" min="0" placeholder="0" class="w-full h-10 bg-bg border border-border rounded-md px-2" value="' + (isEdit && existing.price != null ? existing.price : "") + '" /></div>' +
@@ -3258,8 +3261,11 @@ function openListingForm(existing) {
       }
       const sideVal = get("side").value;
       const isDonate = sideVal === "donate";
-      const currencyVal = isDonate ? "free" : get("currency").value;
       const priceVal = get("price").value === "" ? null : Number(get("price").value);
+      // If a price was filled but no currency picked, fall back to zeny
+      // so the price never silently disappears from the card.
+      let currencyVal = isDonate ? "free" : get("currency").value;
+      if (!isDonate && !currencyVal && priceVal != null) currencyVal = "zeny";
       const charIdVal = get("char_id").value === "" ? null : Number(get("char_id").value);
       const slugVal = kindVal === "char" ? null : ((get("item_slug").value || "").trim() || null);
       const payload = {
@@ -3424,8 +3430,33 @@ async function ensureNickname() {
 if (!localStorage.getItem(CONSENT_KEY)) showConsent();
 // Side-menu wiring (admin tab only shows for admins).
 $("nav-dashboard").onclick = () => setDashView("dashboard");
-if ($("nav-market")) $("nav-market").onclick = () => setDashView("market");
+if ($("nav-market")) $("nav-market").onclick = () => {
+  // Clicking the Mercado tab from inside a PDP should take the user
+  // back to the feed. Clear the PDP state and rewrite the URL so a
+  // refresh / back-button stays on the feed.
+  if (marketState.pdpId) {
+    marketState.pdpId = null;
+    if (location.pathname !== "/" || location.search) {
+      history.pushState({}, "", "/");
+    }
+    // Restore the toolbar that renderPdp hid.
+    document.querySelectorAll(".market-sort, .market-side").forEach((b) => b.parentElement && b.parentElement.classList.remove("hidden"));
+    const search = $("market-search"); if (search) search.classList.remove("hidden");
+    const newBtn = $("market-new-btn"); if (newBtn) newBtn.classList.remove("hidden");
+    const list = $("market-list");
+    if (list) {
+      list.classList.remove("space-y-4");
+      list.classList.add("grid", "grid-cols-1", "md:grid-cols-2", "xl:grid-cols-3", "gap-3");
+    }
+  }
+  setDashView("market");
+};
 if ($("nav-admin")) $("nav-admin").onclick = () => setDashView("admin");
+// Browser back/forward — re-detect PDP state from the URL and reload.
+window.addEventListener("popstate", () => {
+  marketState.pdpId = detectPdpId();
+  if (state.user) renderDash(); else showPublicMode();
+});
 wireMarket();
 // User comparison (own characters)
 if ($("user-compare")) $("user-compare").onclick = async () => {
