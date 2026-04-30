@@ -15,7 +15,8 @@ const BACKFILL_SCRAPE_CONCURRENCY_WITH_COOKIE = 10;
  * Ceiling on concurrent shop fetches across all category threads.
  * Without this, N threads × per-batch concurrency can stampede mupatos (timeouts / 429 → most scrapes fail).
  */
-const BACKFILL_SCRAPE_GLOBAL_MAX = 48;
+/** Keeps `N threads × scrapeConcurrency` shop fetches near this ceiling (helps stay under Worker subrequest limits). */
+const BACKFILL_SCRAPE_GLOBAL_MAX = 36;
 /** Scrape + import this many items per wave (cookie refresh between waves when authed). */
 const BACKFILL_SCRAPE_BATCH_SIZE = 40;
 
@@ -579,7 +580,7 @@ export async function runBackfillItemRulesFromSourcesCore(
   const limit = normalizeBackfillLimit(input.limit);
   const wid = input._workflow_instance_id;
   const cookieIn = (input.cookie ?? "").trim();
-  const { scrapeShopItemRule, createShopSessionCookie } = await import("../shop-scrape");
+  const { scrapeShopItemRule, getShopAuthCookie } = await import("../shop-scrape");
 
   const cookieSource: "provided" | "authed" | "none" = cookieIn
     ? "provided"
@@ -668,27 +669,35 @@ export async function runBackfillItemRulesFromSourcesCore(
     "run start items=" + picked.length + " categories=" + byCategory.size + " limit=" + limit + " cookie_source=" + cookieSource + " scrape_concurrency=" + scrapeConcurrency,
   );
 
-  // One parallel thread per category: each gets its own shop session (cookie) when using env credentials.
+  // One login for the whole run: N× parallel `createShopSessionCookie` blows the Worker subrequest budget (esp. free tier).
+  let sharedAuthedCookie: string | undefined;
+  if (cookieSource === "authed") {
+    const auth = await getShopAuthCookie(env);
+    if (!auth.ok) {
+      await backfillLiveLog(env, wid, "run aborted shop_login_failed " + auth.error);
+      return {
+        ok: true,
+        attempted: picked.length,
+        imported: 0,
+        with_ancient: 0,
+        with_excellent: 0,
+        batches: 0,
+        batch_size: BACKFILL_SCRAPE_BATCH_SIZE,
+        category_threads: byCategory.size,
+        used_cookie: false,
+        cookie_source: cookieSource,
+        errors: ["shop login: " + auth.error],
+      };
+    }
+    sharedAuthedCookie = auth.cookie;
+    await backfillLiveLog(env, wid, "shop session ready (shared across category threads)");
+  }
+
+  // One parallel thread per category; all reuse `sharedAuthedCookie` when authed.
   const settled = await Promise.allSettled(
     [...byCategory.entries()].map(async ([category, catRows]) => {
-      let threadCookie: string | undefined;
-      if (cookieSource === "provided") {
-        threadCookie = cookieIn || undefined;
-      } else if (cookieSource === "authed") {
-        const session = await createShopSessionCookie(env);
-        if (!session.ok) {
-          await backfillLiveLog(env, wid, "[" + category + "] shop_login_failed " + session.error);
-          return {
-            attempted: catRows.length,
-            imported: 0,
-            with_ancient: 0,
-            with_excellent: 0,
-            batches: 0,
-            errors: ["[" + category + "] shop login: " + session.error],
-          };
-        }
-        threadCookie = session.cookie;
-      }
+      const threadCookie =
+        cookieSource === "provided" ? (cookieIn || undefined) : sharedAuthedCookie;
       return runBackfillCategoryThread(
         env,
         category,
