@@ -405,11 +405,19 @@ export default {
   },
 
   async scheduled(event: ScheduledController, env: Env, ctx: ExecutionContext): Promise<void> {
-    // Per-char polling is now handled by per-character CharWatcher DOs
-    // (each owns its own 60s alarm). The cron's only remaining job is
-    // the global server-events tick (Chaos Castle / Blood Castle / etc.) —
-    // light, single-pass, no fan-out. That keeps us comfortably inside
-    // the per-tick CPU budget.
+    // Per-char polling is normally handled by per-character CharWatcher
+    // DOs (each owns its own 60s alarm). Until CF's account-wide DO
+    // throttle clears we also run pollOnce here as a fallback so chars
+    // keep updating. When the DOs come back up the cron pass is mostly
+    // a no-op (cooldown_until on subs prevents re-firing).
+    ctx.waitUntil(
+      (async () => {
+        const { pollOnce } = await import("./poll");
+        return pollOnce(env);
+      })()
+        .then((r) => console.log(`poll(fallback): scraped=${r.scraped} fired=${r.fired}`))
+        .catch((e) => console.error("poll fallback failed", e)),
+    );
     ctx.waitUntil(
       pollServerEvents(env)
         .then((r) => console.log(`server-events: refreshed=${r.refreshed} fired=${r.fired}`))
