@@ -3224,7 +3224,11 @@ if ($("admin-spawn-watchers")) $("admin-spawn-watchers").onclick = async (e) => 
     // Surface the first backend error so the user can see WHY spawns
     // are failing — the response includes errors[] from the worker.
     if (r.errors && r.errors.length > 0) {
-      msg += "\nerro: " + r.errors[0].error;
+      // INDEX_HTML is a template literal — any backslash-n we write
+      // here gets eaten by the outer render and turns into a real
+      // newline mid-string, breaking the served JS. Use a double
+      // backslash so the served source still reads as an escape.
+      msg += "\\nerro: " + r.errors[0].error;
       console.error("spawn-all errors:", r.errors);
     }
     toast(msg, r.failed > 0 ? "err" : "ok", 12000);

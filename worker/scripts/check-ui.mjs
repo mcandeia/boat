@@ -15,6 +15,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import vm from "node:vm";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const SRC = path.resolve(__dirname, "../src/ui.ts");
@@ -68,15 +69,18 @@ if (scripts.length === 0) {
 let failed = 0;
 for (const [i, body] of scripts.entries()) {
   try {
-    // The browser parses inline scripts as classic scripts (not modules),
-    // which is exactly what new Function does.
-    new Function(body);
+    // Use vm.Script — same parser as new Function but the SyntaxError
+    // it throws includes line/column in the stack (new Function omits them
+    // on Node).
+    new vm.Script(body, { filename: `inline-script-${i + 1}.js` });
     console.log(`check-ui: <script>#${i + 1} (${body.length} chars) — OK`);
   } catch (e) {
     failed++;
-    const lineMatch = e.stack && e.stack.match(/<anonymous>:(\d+):/);
-    const lineNum = lineMatch ? Number(lineMatch[1]) : null;
     console.error(`check-ui: <script>#${i + 1} parse error: ${e.message}`);
+    // vm.Script puts the bad line right at the top of the stack.
+    const stackTop = (e.stack ?? "").split("\n").slice(0, 8).join("\n");
+    const lineMatch = stackTop.match(/inline-script-\d+\.js:(\d+)/);
+    const lineNum = lineMatch ? Number(lineMatch[1]) : null;
     if (lineNum) {
       const lines = body.split("\n");
       const start = Math.max(0, lineNum - 3);
@@ -85,6 +89,8 @@ for (const [i, body] of scripts.entries()) {
         const marker = j + 1 === lineNum ? ">> " : "   ";
         console.error(`${marker}${j + 1}: ${lines[j]}`);
       }
+    } else {
+      console.error("(no line info — stack top: " + stackTop.replace(/\n/g, " | ") + ")");
     }
   }
 }
