@@ -117,7 +117,7 @@ export default {
       // OpenGraph image (PNG) for Mercado listing shares.
       const ogMatch = pathname.match(/^\/og\/market\/(\d+)\.png$/);
       if (ogMatch && method === "GET") {
-        return await renderMarketListingOgPng(env, url.origin, Number(ogMatch[1]));
+        return await renderMarketListingOgPng(env, url, Number(ogMatch[1]));
       }
 
       // Public anonymous actions from share pages.
