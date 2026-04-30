@@ -32,6 +32,12 @@ export interface Env {
   SHOP_SCRAPER_PASSWORD?: string;
   /** First shop `fetch()` attempt timeout (ms); retries use ~1.5× and 2×. Plain var, default 30000; clamp 5000–120000. */
   SHOP_FETCH_TIMEOUT_MS?: string;
+  /**
+   * When `item-rules-backfill` runs (has `_workflow_instance_id`), caps how many distinct items the SQL picks per step.
+   * Free-tier Workflows hit ~50 external subrequests per instance; omit this var → default cap in code (~45).
+   * On paid plans, set high (e.g. 20000) or raise Worker `[limits].subrequests`.
+   */
+  BACKFILL_WORKFLOW_ITEM_CAP?: string;
 }
 
 export type EventType =
