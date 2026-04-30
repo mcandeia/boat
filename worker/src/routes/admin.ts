@@ -1,10 +1,118 @@
-import type { Env, UserRow } from "../types";
+import type { Env, ItemRulesBackfillParams, UserRow } from "../types";
 import { bad, json, now } from "../util";
 import { scrapeOne } from "../scraper";
 import { pollOnce } from "../poll";
 import { buildHistoryResponse } from "./characters";
 import { refreshCatalog } from "../items-scrape";
 import { pokeWatcher, spawnWatcher } from "../char-watcher";
+
+/** Max parallel ops for admin import (D1 upserts) and backfill scrape when no cookie. */
+const ADMIN_PARALLEL_CONCURRENCY = 12;
+/** Parallel shop HTML fetches per backfill batch (cookie path — upstream is the bottleneck). */
+const BACKFILL_SCRAPE_CONCURRENCY_WITH_COOKIE = 10;
+/**
+ * Ceiling on concurrent shop fetches across all category threads.
+ * Without this, N threads × per-batch concurrency can stampede mupatos (timeouts / 429 → most scrapes fail).
+ */
+const BACKFILL_SCRAPE_GLOBAL_MAX = 48;
+/** Scrape + import this many items per wave (cookie refresh between waves when authed). */
+const BACKFILL_SCRAPE_BATCH_SIZE = 40;
+
+/** How many distinct items to process when `limit` is omitted (full-catalog backfill). */
+const BACKFILL_DEFAULT_LIMIT = 10_000;
+const BACKFILL_MAX_LIMIT = 50_000;
+
+/** Single place for limit so HTTP + Workflow + core agree (avoids stale UI still sending 40). */
+export function normalizeBackfillLimit(raw: unknown): number {
+  if (raw === undefined || raw === null || raw === "") return BACKFILL_DEFAULT_LIMIT;
+  const n = Math.floor(Number(raw));
+  if (!Number.isFinite(n)) return BACKFILL_DEFAULT_LIMIT;
+  // Older UI defaulted to 40 per run; treat as "use server default" so logs don’t stay stuck at 40.
+  if (n === 40) return BACKFILL_DEFAULT_LIMIT;
+  return Math.min(Math.max(n, 1), BACKFILL_MAX_LIMIT);
+}
+
+/** Workflow `create` / `get` return RPC stubs; must dispose to avoid runtime warnings. */
+function disposeWorkflowHandle(handle: unknown): void {
+  if (handle == null) return;
+  const h = handle as { dispose?: () => void };
+  const symDispose = (Symbol as unknown as { dispose?: symbol }).dispose;
+  try {
+    if (typeof h.dispose === "function") {
+      h.dispose();
+      return;
+    }
+    if (symDispose !== undefined) {
+      const fn = (handle as Record<symbol, unknown>)[symDispose];
+      if (typeof fn === "function") (fn as () => void)();
+    }
+  } catch {
+    /* ignore */
+  }
+}
+
+/** Append one line for admin UI (`GET .../backfill/output?id=`). */
+async function backfillLiveLog(env: Env, instanceId: string | undefined, line: string): Promise<void> {
+  const id = (instanceId ?? "").trim();
+  if (!id) return;
+  const ts = Math.floor(Date.now() / 1000);
+  const text = line.length > 1800 ? line.slice(0, 1800) + "…" : line;
+  try {
+    await env.DB.prepare(
+      `INSERT INTO backfill_workflow_output_line (instance_id, ts, line) VALUES (?, ?, ?)`,
+    ).bind(id, ts, text).run();
+  } catch {
+    /* migration missing or D1 error */
+  }
+}
+
+/**
+ * Pool (not fixed waves): keep up to `concurrency` tasks in flight; as soon as one
+ * finishes, the next item starts. Avoids one slow URL blocking an entire "wave".
+ */
+async function asyncPoolSettled<T, R>(
+  items: readonly T[],
+  concurrency: number,
+  fn: (item: T) => Promise<R>,
+): Promise<PromiseSettledResult<R>[]> {
+  const results: PromiseSettledResult<R>[] = new Array(items.length);
+  let next = 0;
+  const n = Math.max(1, concurrency);
+  async function worker(): Promise<void> {
+    for (;;) {
+      const i = next++;
+      if (i >= items.length) return;
+      try {
+        const value = await fn(items[i]!);
+        results[i] = { status: "fulfilled", value };
+      } catch (reason) {
+        results[i] = { status: "rejected", reason };
+      }
+    }
+  }
+  const pool = Math.min(n, items.length);
+  await Promise.all(Array.from({ length: pool }, () => worker()));
+  return results;
+}
+
+async function asyncPool<T, R>(
+  items: readonly T[],
+  concurrency: number,
+  fn: (item: T) => Promise<R>,
+): Promise<R[]> {
+  const results: R[] = new Array(items.length);
+  let next = 0;
+  const n = Math.max(1, concurrency);
+  async function worker(): Promise<void> {
+    for (;;) {
+      const i = next++;
+      if (i >= items.length) return;
+      results[i] = await fn(items[i]!);
+    }
+  }
+  await Promise.all(Array.from({ length: Math.min(n, items.length) }, () => worker()));
+  return results;
+}
 
 function normalizeItemSlug(name: string): string {
   // Keep this compatible with item `slug` style used across the app (kebab-case).
@@ -112,161 +220,120 @@ async function ensureAncientSetsExist(env: Env, names: string[]): Promise<{ sync
   return { synced: true, upserted: synced.upserted };
 }
 
-export async function adminImportItemRules(env: Env, req: Request): Promise<Response> {
-  const body = (await req.json().catch(() => null)) as { rules?: ItemRuleImport[] } | ItemRuleImport[] | null;
-  const rules = Array.isArray(body) ? body : (body && Array.isArray(body.rules) ? body.rules : null);
-  if (!rules) return bad(400, "envie { rules: [...] }");
-  if (rules.length > 5000) return bad(400, "muitas regras (max 5000)");
+async function upsertOneImportedItemRule(
+  env: Env,
+  r: ItemRuleImport,
+  t: number,
+): Promise<{ upserted: 0 | 1; ancientNames: string[] }> {
+  const name = (r?.name ?? "").trim();
+  if (!name) return { upserted: 0, ancientNames: [] };
 
-  const t = now();
-  let upserted = 0;
-  const ancientNamesToEnsure: string[] = [];
-  for (const r of rules) {
-    const name = (r?.name ?? "").trim();
-    if (!name) continue;
-    const slug = normalizeItemSlug(name);
-    const itemSlug = (r.item_slug ?? null) ? String(r.item_slug).trim() : null;
-    const opts = r.options ?? {};
-    const sug = r.suggested ?? {};
-    const lifeVals = Array.isArray(sug.life_values) ? sug.life_values.filter((n) => Number.isInteger(n) && n >= 0 && n <= 28) : [];
-    const harmonyVals = Array.isArray(sug.harmony_values) ? sug.harmony_values.map((s) => String(s).trim()).filter(Boolean).slice(0, 50) : [];
-    const rawExc = (r as unknown as { excellent_values?: unknown }).excellent_values;
-    const hasExcProp = Object.prototype.hasOwnProperty.call((r as unknown as Record<string, unknown>), "excellent_values");
-    const excVals = Array.isArray(rawExc)
-      ? (rawExc as unknown[])
-        .map((s: unknown) => String(s).trim())
-        .filter(Boolean)
-        .slice(0, 30)
-      : [];
-    const rawAnc = (r as unknown as { ancient_values?: unknown }).ancient_values;
-    const hasAncProp = Object.prototype.hasOwnProperty.call((r as unknown as Record<string, unknown>), "ancient_values");
-    const ancientVals = Array.isArray(rawAnc)
-      ? (rawAnc as unknown[])
-        .map((s: unknown) => normalizeAncientSetName(String(s)))
-        .filter(Boolean)
-        .slice(0, 20)
-      : [];
-    if (ancientVals.length > 0) ancientNamesToEnsure.push(...ancientVals);
+  const slug = normalizeItemSlug(name);
+  const itemSlug = (r.item_slug ?? null) ? String(r.item_slug).trim() : null;
+  const opts = r.options ?? {};
+  const sug = r.suggested ?? {};
+  const lifeVals = Array.isArray(sug.life_values) ? sug.life_values.filter((n) => Number.isInteger(n) && n >= 0 && n <= 28) : [];
+  const harmonyVals = Array.isArray(sug.harmony_values) ? sug.harmony_values.map((s) => String(s).trim()).filter(Boolean).slice(0, 50) : [];
+  const rawExc = (r as unknown as { excellent_values?: unknown }).excellent_values;
+  const hasExcProp = Object.prototype.hasOwnProperty.call((r as unknown as Record<string, unknown>), "excellent_values");
+  const excVals = Array.isArray(rawExc)
+    ? (rawExc as unknown[])
+      .map((s: unknown) => String(s).trim())
+      .filter(Boolean)
+      .slice(0, 30)
+    : [];
+  const rawAnc = (r as unknown as { ancient_values?: unknown }).ancient_values;
+  const hasAncProp = Object.prototype.hasOwnProperty.call((r as unknown as Record<string, unknown>), "ancient_values");
+  const ancientVals = Array.isArray(rawAnc)
+    ? (rawAnc as unknown[])
+      .map((s: unknown) => normalizeAncientSetName(String(s)))
+      .filter(Boolean)
+      .slice(0, 20)
+    : [];
+  const ancientNames = ancientVals.length > 0 ? [...ancientVals] : [];
 
-    // For partial imports/backfills, allow omitting excellent_values/ancient_values
-    // so we don't overwrite existing DB values with [].
-    // Also: if the property exists but the array is empty, treat it as "no update".
-    const excJsonOrNull = (hasExcProp && excVals.length > 0) ? JSON.stringify(excVals) : null;
-    const ancJsonOrNull = (hasAncProp && ancientVals.length > 0) ? JSON.stringify(ancientVals) : null;
-    const baseBinds = [
-      name,
-      r.kind ?? null,
-      opts.excellent === false ? 0 : 1,
-      opts.luck === false ? 0 : 1,
-      opts.skill === false ? 0 : 1,
-      opts.life === false ? 0 : 1,
-      opts.harmony ? 1 : 0,
-      JSON.stringify(lifeVals),
-      JSON.stringify(harmonyVals),
-      excJsonOrNull,
-      ancJsonOrNull,
-      t,
-    ] as const;
+  // For partial imports/backfills, allow omitting excellent_values/ancient_values
+  // so we don't overwrite existing DB values with [].
+  // Also: if the property exists but the array is empty, treat it as "no update".
+  const excJsonOrNull = (hasExcProp && excVals.length > 0) ? JSON.stringify(excVals) : null;
+  const ancJsonOrNull = (hasAncProp && ancientVals.length > 0) ? JSON.stringify(ancientVals) : null;
+  const baseBinds = [
+    name,
+    r.kind ?? null,
+    opts.excellent === false ? 0 : 1,
+    opts.luck === false ? 0 : 1,
+    opts.skill === false ? 0 : 1,
+    opts.life === false ? 0 : 1,
+    opts.harmony ? 1 : 0,
+    JSON.stringify(lifeVals),
+    JSON.stringify(harmonyVals),
+    excJsonOrNull,
+    ancJsonOrNull,
+    t,
+  ] as const;
 
-    if (itemSlug) {
-      const bySlug = await env.DB
-        .prepare("SELECT id, item_slug FROM item_rules WHERE slug = ? LIMIT 1")
-        .bind(slug)
-        .first<{ id: number; item_slug: string | null }>();
-      const byItem = await env.DB
-        .prepare("SELECT id, slug FROM item_rules WHERE item_slug = ? LIMIT 1")
-        .bind(itemSlug)
-        .first<{ id: number; slug: string }>();
+  if (itemSlug) {
+    const bySlug = await env.DB
+      .prepare("SELECT id, item_slug FROM item_rules WHERE slug = ? LIMIT 1")
+      .bind(slug)
+      .first<{ id: number; item_slug: string | null }>();
+    const byItem = await env.DB
+      .prepare("SELECT id, slug FROM item_rules WHERE item_slug = ? LIMIT 1")
+      .bind(itemSlug)
+      .first<{ id: number; slug: string }>();
 
-      // If both exist but point to different rows, merge into the slug row
-      // (slug is the natural unique key by name).
-      if (bySlug && byItem && bySlug.id !== byItem.id) {
-        await env.DB.prepare("DELETE FROM item_rules WHERE id = ?").bind(byItem.id).run();
-      }
+    // If both exist but point to different rows, merge into the slug row
+    // (slug is the natural unique key by name).
+    if (bySlug && byItem && bySlug.id !== byItem.id) {
+      await env.DB.prepare("DELETE FROM item_rules WHERE id = ?").bind(byItem.id).run();
+    }
 
-      if (bySlug) {
-        await env.DB.prepare(
-          `UPDATE item_rules
-              SET item_slug = ?,
-                  name = ?,
-                  kind = ?,
-                  allow_excellent = ?,
-                  allow_luck = ?,
-                  allow_skill = ?,
-                  allow_life = ?,
-                  allow_harmony = ?,
-                  life_values = ?,
-                  harmony_values = ?,
-                  excellent_values = COALESCE(?, excellent_values),
-                  ancient_values = COALESCE(?, ancient_values),
-                  updated_at = ?
-            WHERE id = ?`,
-        ).bind(itemSlug, ...baseBinds, bySlug.id).run();
-      } else if (byItem) {
-        await env.DB.prepare(
-          `UPDATE item_rules
-              SET slug = ?,
-                  name = ?,
-                  kind = ?,
-                  allow_excellent = ?,
-                  allow_luck = ?,
-                  allow_skill = ?,
-                  allow_life = ?,
-                  allow_harmony = ?,
-                  life_values = ?,
-                  harmony_values = ?,
-                  excellent_values = COALESCE(?, excellent_values),
-                  ancient_values = COALESCE(?, ancient_values),
-                  updated_at = ?
-            WHERE id = ?`,
-        ).bind(slug, ...baseBinds, byItem.id).run();
-      } else {
-        const excIns = (hasExcProp && excVals.length > 0) ? JSON.stringify(excVals) : JSON.stringify([]);
-        const ancIns = (hasAncProp && ancientVals.length > 0) ? JSON.stringify(ancientVals) : JSON.stringify([]);
-        await env.DB.prepare(
-          `INSERT INTO item_rules
-             (slug, item_slug, name, kind, allow_excellent, allow_luck, allow_skill, allow_life, allow_harmony, life_values, harmony_values, excellent_values, ancient_values, updated_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-        ).bind(
-          slug,
-          itemSlug,
-          name,
-          r.kind ?? null,
-          opts.excellent === false ? 0 : 1,
-          opts.luck === false ? 0 : 1,
-          opts.skill === false ? 0 : 1,
-          opts.life === false ? 0 : 1,
-          opts.harmony ? 1 : 0,
-          JSON.stringify(lifeVals),
-          JSON.stringify(harmonyVals),
-          excIns,
-          ancIns,
-          t,
-        ).run();
-      }
+    if (bySlug) {
+      await env.DB.prepare(
+        `UPDATE item_rules
+            SET item_slug = ?,
+                name = ?,
+                kind = ?,
+                allow_excellent = ?,
+                allow_luck = ?,
+                allow_skill = ?,
+                allow_life = ?,
+                allow_harmony = ?,
+                life_values = ?,
+                harmony_values = ?,
+                excellent_values = COALESCE(?, excellent_values),
+                ancient_values = COALESCE(?, ancient_values),
+                updated_at = ?
+          WHERE id = ?`,
+      ).bind(itemSlug, ...baseBinds, bySlug.id).run();
+    } else if (byItem) {
+      await env.DB.prepare(
+        `UPDATE item_rules
+            SET slug = ?,
+                name = ?,
+                kind = ?,
+                allow_excellent = ?,
+                allow_luck = ?,
+                allow_skill = ?,
+                allow_life = ?,
+                allow_harmony = ?,
+                life_values = ?,
+                harmony_values = ?,
+                excellent_values = COALESCE(?, excellent_values),
+                ancient_values = COALESCE(?, ancient_values),
+                updated_at = ?
+          WHERE id = ?`,
+      ).bind(slug, ...baseBinds, byItem.id).run();
     } else {
       const excIns = (hasExcProp && excVals.length > 0) ? JSON.stringify(excVals) : JSON.stringify([]);
       const ancIns = (hasAncProp && ancientVals.length > 0) ? JSON.stringify(ancientVals) : JSON.stringify([]);
       await env.DB.prepare(
         `INSERT INTO item_rules
-           (slug, name, kind, allow_excellent, allow_luck, allow_skill, allow_life, allow_harmony, life_values, harmony_values, excellent_values, ancient_values, updated_at)
-         VALUES
-           (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-         ON CONFLICT(slug) DO UPDATE SET
-           name = excluded.name,
-           kind = excluded.kind,
-           allow_excellent = excluded.allow_excellent,
-           allow_luck = excluded.allow_luck,
-           allow_skill = excluded.allow_skill,
-           allow_life = excluded.allow_life,
-           allow_harmony = excluded.allow_harmony,
-           life_values = excluded.life_values,
-           harmony_values = excluded.harmony_values,
-           excellent_values = COALESCE(excluded.excellent_values, item_rules.excellent_values),
-           ancient_values = COALESCE(excluded.ancient_values, item_rules.ancient_values),
-           updated_at = excluded.updated_at`,
+           (slug, item_slug, name, kind, allow_excellent, allow_luck, allow_skill, allow_life, allow_harmony, life_values, harmony_values, excellent_values, ancient_values, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       ).bind(
         slug,
+        itemSlug,
         name,
         r.kind ?? null,
         opts.excellent === false ? 0 : 1,
@@ -276,13 +343,61 @@ export async function adminImportItemRules(env: Env, req: Request): Promise<Resp
         opts.harmony ? 1 : 0,
         JSON.stringify(lifeVals),
         JSON.stringify(harmonyVals),
-        (hasExcProp && excVals.length > 0) ? JSON.stringify(excVals) : null,
-        (hasAncProp && ancientVals.length > 0) ? JSON.stringify(ancientVals) : null,
+        excIns,
+        ancIns,
         t,
       ).run();
     }
-    upserted++;
+  } else {
+    const excIns = (hasExcProp && excVals.length > 0) ? JSON.stringify(excVals) : JSON.stringify([]);
+    const ancIns = (hasAncProp && ancientVals.length > 0) ? JSON.stringify(ancientVals) : JSON.stringify([]);
+    await env.DB.prepare(
+      `INSERT INTO item_rules
+         (slug, name, kind, allow_excellent, allow_luck, allow_skill, allow_life, allow_harmony, life_values, harmony_values, excellent_values, ancient_values, updated_at)
+       VALUES
+         (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+       ON CONFLICT(slug) DO UPDATE SET
+         name = excluded.name,
+         kind = excluded.kind,
+         allow_excellent = excluded.allow_excellent,
+         allow_luck = excluded.allow_luck,
+         allow_skill = excluded.allow_skill,
+         allow_life = excluded.allow_life,
+         allow_harmony = excluded.allow_harmony,
+         life_values = excluded.life_values,
+         harmony_values = excluded.harmony_values,
+         excellent_values = COALESCE(excluded.excellent_values, item_rules.excellent_values),
+         ancient_values = COALESCE(excluded.ancient_values, item_rules.ancient_values),
+         updated_at = excluded.updated_at`,
+    ).bind(
+      slug,
+      name,
+      r.kind ?? null,
+      opts.excellent === false ? 0 : 1,
+      opts.luck === false ? 0 : 1,
+      opts.skill === false ? 0 : 1,
+      opts.life === false ? 0 : 1,
+      opts.harmony ? 1 : 0,
+      JSON.stringify(lifeVals),
+      JSON.stringify(harmonyVals),
+      (hasExcProp && excVals.length > 0) ? JSON.stringify(excVals) : null,
+      (hasAncProp && ancientVals.length > 0) ? JSON.stringify(ancientVals) : null,
+      t,
+    ).run();
   }
+  return { upserted: 1, ancientNames };
+}
+
+export async function adminImportItemRules(env: Env, req: Request): Promise<Response> {
+  const body = (await req.json().catch(() => null)) as { rules?: ItemRuleImport[] } | ItemRuleImport[] | null;
+  const rules = Array.isArray(body) ? body : (body && Array.isArray(body.rules) ? body.rules : null);
+  if (!rules) return bad(400, "envie { rules: [...] }");
+  if (rules.length > 5000) return bad(400, "muitas regras (max 5000)");
+
+  const t = now();
+  const outcomes = await asyncPool(rules, ADMIN_PARALLEL_CONCURRENCY, (r) => upsertOneImportedItemRule(env, r, t));
+  const upserted = outcomes.reduce((acc, o) => acc + o.upserted, 0);
+  const ancientNamesToEnsure = outcomes.flatMap((o) => o.ancientNames);
 
   // If the crawler added Ancient sets for any item, ensure we have the
   // corresponding set attributes in ancient_sets (auto-sync from Fanz).
@@ -314,84 +429,67 @@ export async function adminScrapeShopItemRule(env: Env, req: Request): Promise<R
   return await adminImportItemRules(env, fakeReq);
 }
 
-export async function adminBackfillItemRulesFromSources(env: Env, req: Request): Promise<Response> {
-  const body = (await req.json().catch(() => ({}))) as { limit?: number; concurrency?: number; cookie?: string };
-  const limit = Math.min(Math.max(Number(body.limit ?? 50), 1), 200);
-  const concurrency = Math.min(Math.max(Number(body.concurrency ?? 50), 1), 100);
-  const cookie = (body.cookie ?? "").trim();
-  const { scrapeShopItemRule, getShopAuthCookie } = await import("../shop-scrape");
+/** Serializable result (Workflow step output + HTTP JSON). */
+export type ItemRulesBackfillCoreResult = {
+  ok: true;
+  attempted: number;
+  imported: number;
+  with_ancient: number;
+  with_excellent: number;
+  batches: number;
+  batch_size: number;
+  /** One parallel branch per `item_sources.category` (shop shelf). */
+  category_threads?: number;
+  used_cookie: boolean;
+  cookie_source: "provided" | "authed" | "none";
+  errors: string[];
+};
 
-  // Avoid "Too many subrequests" by logging in once and reusing the cookie across items.
-  let cookieToUse = cookie;
-  let cookieSource: "provided" | "authed" | "none" = cookieToUse ? "provided" : "none";
-  if (!cookieToUse) {
-    const auth = await getShopAuthCookie(env);
-    if (auth.ok) {
-      cookieToUse = auth.cookie;
-      cookieSource = "authed";
-    } else {
-      console.log("backfill auth cookie failed: " + auth.error);
-    }
-  }
+type BackfillPickRow = { item_slug: string; detail_url: string; name: string; category: string };
 
-  console.log(
-    "adminBackfillItemRulesFromSources start limit=" + limit +
-      " concurrency=" + concurrency +
-      " used_cookie=" + (!!cookieToUse) +
-      " cookie_source=" + cookieSource,
-  );
+type ScrapeShopItemRuleFn = typeof import("../shop-scrape").scrapeShopItemRule;
 
-  // Pick items that have at least one source url but don't yet have excellent_values and/or ancient_values populated.
-  // We keep multiple sources per item (one per shop) — try preferred shops first.
-  const rs = await env.DB.prepare(
-    `SELECT s.item_slug, s.shop, s.detail_url, i.name
-       FROM item_sources s
-       JOIN items i ON i.slug = s.item_slug
-       LEFT JOIN item_rules r ON r.item_slug = s.item_slug
-      WHERE r.item_slug IS NULL
-         OR r.excellent_values IS NULL OR r.excellent_values = '[]'
-         OR r.ancient_values IS NULL OR r.ancient_values = '[]'
-      ORDER BY
-        CASE s.shop
-          WHEN 'shop-gold' THEN 0
-          WHEN 'rarius' THEN 1
-          WHEN 'rings-pendants' THEN 2
-          ELSE 9
-        END,
-        s.updated_at DESC
-      LIMIT ?`,
-  ).bind(limit * 5).all<{ item_slug: string; shop: string; detail_url: string; name: string }>();
-
+/** Scrape + import all rows for one category (runs in parallel with other categories). */
+async function runBackfillCategoryThread(
+  env: Env,
+  category: string,
+  catRows: Array<{ item_slug: string; detail_url: string; name: string }>,
+  cookieForFetch: string | undefined,
+  scrapeConcurrency: number,
+  scrapeShopItemRule: ScrapeShopItemRuleFn,
+  liveInstanceId?: string,
+): Promise<{
+  attempted: number;
+  imported: number;
+  with_ancient: number;
+  with_excellent: number;
+  batches: number;
+  errors: string[];
+}> {
+  const errors: string[] = [];
   let attempted = 0;
   let imported = 0;
   let with_ancient = 0;
   let with_excellent = 0;
-  const errors: string[] = [];
-  const rawRows = rs.results ?? [];
-  // De-dup to at most one source per item for this run (preferred shop ordering above).
-  const rows: Array<{ item_slug: string; detail_url: string; name: string }> = [];
-  const seen = new Set<string>();
-  for (const r of rawRows) {
-    if (seen.has(r.item_slug)) continue;
-    seen.add(r.item_slug);
-    rows.push({ item_slug: r.item_slug, detail_url: r.detail_url, name: r.name });
-    if (rows.length >= limit) break;
-  }
+  let batches = 0;
 
-  console.log("adminBackfillItemRulesFromSources picked rows=" + rows.length + " sources_scanned=" + rawRows.length);
+  await backfillLiveLog(env, liveInstanceId, "[" + category + "] start rows=" + catRows.length);
 
-  const worker = async (row: { item_slug: string; detail_url: string; name: string }) => {
-    console.log("backfill scrape item_slug=" + row.item_slug + " url=" + row.detail_url);
-    const r = await scrapeShopItemRule(env, { url: row.detail_url, name: row.name, cookie: cookieToUse } as never);
-    if ("error" in r) return { ok: false as const, err: row.name + ": " + r.error };
-    const ancientVals = ((r.rule as unknown as { ancient_values?: unknown }).ancient_values);
-    const excellentVals = (r.rule.excellent_values ?? null);
+  const parseOnly = async (row: { item_slug: string; detail_url: string; name: string }) => {
+    const scraped = await scrapeShopItemRule(env, {
+      url: row.detail_url,
+      name: row.name,
+      cookie: cookieForFetch,
+    } as never);
+    if ("error" in scraped) throw new Error(row.name + ": " + scraped.error);
+    const ancientVals = ((scraped.rule as unknown as { ancient_values?: unknown }).ancient_values);
+    const excellentVals = (scraped.rule.excellent_values ?? null);
     const one: Record<string, unknown> = {
-      name: r.rule.name,
+      name: scraped.rule.name,
       item_slug: row.item_slug,
-      kind: r.rule.kind ?? null,
-      options: r.rule.options ?? {},
-      suggested: r.rule.suggested ?? {},
+      kind: scraped.rule.kind ?? null,
+      options: scraped.rule.options ?? {},
+      suggested: scraped.rule.suggested ?? {},
     };
     const hasExcellent = Array.isArray(excellentVals) && excellentVals.length > 0;
     const hasAncient = Array.isArray(ancientVals) && ancientVals.length > 0;
@@ -401,57 +499,321 @@ export async function adminBackfillItemRulesFromSources(env: Env, req: Request):
     if (Array.isArray(ancientVals) && ancientVals.length > 0) {
       one.ancient_values = ancientVals;
     }
-    console.log(
-      "backfill parsed item_slug=" + row.item_slug +
-        " excellent=" + (hasExcellent ? String((excellentVals as unknown[]).length) : "0") +
-        " ancient=" + (hasAncient ? String((ancientVals as unknown[]).length) : "0"),
-    );
-    const fakeReq = new Request("http://local/import", { method: "POST", body: JSON.stringify({ rules: [one] }) });
-    const res = await adminImportItemRules(env, fakeReq);
-    if (res.status >= 200 && res.status < 300) {
-      console.log("backfill import ok item_slug=" + row.item_slug);
-      return { ok: true as const, hasAncient, hasExcellent };
-    }
-    console.log("backfill import failed item_slug=" + row.item_slug + " status=" + res.status);
-    return { ok: false as const, err: row.name + ": import HTTP " + res.status };
+    return { rule: one as ItemRuleImport, hasAncient, hasExcellent };
   };
 
-  for (let i = 0; i < rows.length; i += concurrency) {
-    const batch = rows.slice(i, i + concurrency);
+  for (let i = 0; i < catRows.length; i += BACKFILL_SCRAPE_BATCH_SIZE) {
+    batches++;
+    const batch = catRows.slice(i, i + BACKFILL_SCRAPE_BATCH_SIZE);
     attempted += batch.length;
-    console.log("backfill batch from=" + i + " size=" + batch.length);
-    const settled = await Promise.allSettled(batch.map(worker));
-    for (const s of settled) {
-      if (s.status === "fulfilled" && s.value.ok) {
-        imported++;
-        if (s.value.hasAncient) with_ancient++;
-        if (s.value.hasExcellent) with_excellent++;
+    const parsed = await asyncPoolSettled(batch, scrapeConcurrency, parseOnly);
+    const rules: ItemRuleImport[] = [];
+    const flags: Array<{ hasAncient: boolean; hasExcellent: boolean }> = [];
+    let scrapeFail = 0;
+    for (let k = 0; k < parsed.length; k++) {
+      const s = parsed[k]!;
+      const row = batch[k]!;
+      if (s.status === "rejected") {
+        scrapeFail++;
+        const msg = String(s.reason && (s.reason as Error)?.message ? (s.reason as Error).message : s.reason);
+        const line = "[" + category + "] item_slug=" + row.item_slug + " " + msg;
+        errors.push(line);
+        continue;
       }
-      else {
-        const err = s.status === "fulfilled" ? s.value.err : String(s.reason?.message || s.reason || "erro desconhecido");
-        if (err) errors.push(err);
+      rules.push(s.value.rule);
+      flags.push({ hasAncient: s.value.hasAncient, hasExcellent: s.value.hasExcellent });
+    }
+
+    await backfillLiveLog(
+      env,
+      liveInstanceId,
+      "[" + category + "] batch " + batches + " scrape_ok=" + rules.length + " scrape_fail=" + scrapeFail,
+    );
+
+    if (rules.length > 0) {
+      try {
+        const fakeReq = new Request("http://local/import", { method: "POST", body: JSON.stringify({ rules }) });
+        const res = await adminImportItemRules(env, fakeReq);
+        if (res.status >= 200 && res.status < 300) {
+          imported += flags.length;
+          for (const f of flags) {
+            if (f.hasAncient) with_ancient++;
+            if (f.hasExcellent) with_excellent++;
+          }
+          await backfillLiveLog(
+            env,
+            liveInstanceId,
+            "[" + category + "] batch " + batches + " import_ok count=" + rules.length,
+          );
+        } else {
+          const errText = await res.text().catch(() => "");
+          const line =
+            "[" + category + "] import batch " + batches + " HTTP " + res.status +
+              (errText ? ": " + errText.slice(0, 500) : "");
+          errors.push(line.slice(0, 600));
+          await backfillLiveLog(env, liveInstanceId, line.slice(0, 400));
+        }
+      } catch (e) {
+        const line =
+          "[" + category + "] import batch " + batches + ": " + ((e as Error)?.message ?? String(e));
+        errors.push(line);
+        await backfillLiveLog(env, liveInstanceId, line.slice(0, 400));
       }
     }
-    if (errors.length) console.log("backfill batch errors_so_far=" + errors.length + " first=" + errors[0]);
   }
-  console.log(
-    "adminBackfillItemRulesFromSources done attempted=" + attempted +
-      " imported=" + imported +
-      " with_excellent=" + with_excellent +
-      " with_ancient=" + with_ancient +
-      " errors=" + errors.length,
+
+  await backfillLiveLog(
+    env,
+    liveInstanceId,
+    "[" + category + "] done attempted=" + attempted + " imported=" + imported + " errLines=" + errors.length,
   );
-  return json({
+  return { attempted, imported, with_ancient, with_excellent, batches, errors };
+}
+
+/** Shared by HTTP handler and Cloudflare Workflow — does not return a Response. */
+export async function runBackfillItemRulesFromSourcesCore(
+  env: Env,
+  input: ItemRulesBackfillParams,
+): Promise<ItemRulesBackfillCoreResult> {
+  const limit = normalizeBackfillLimit(input.limit);
+  const wid = input._workflow_instance_id;
+  const cookieIn = (input.cookie ?? "").trim();
+  const { scrapeShopItemRule, createShopSessionCookie } = await import("../shop-scrape");
+
+  const cookieSource: "provided" | "authed" | "none" = cookieIn
+    ? "provided"
+    : env.SHOP_SCRAPER_USERNAME && env.SHOP_SCRAPER_PASSWORD
+      ? "authed"
+      : "none";
+
+  // One row per item_slug: ROW_NUMBER sees *all* matching source rows (no LIMIT*25 truncation),
+  // then we cap how many distinct items to scrape this run with outer LIMIT.
+  const rs = await env.DB.prepare(
+    `SELECT picked.item_slug AS item_slug, picked.shop AS shop, picked.category AS category, picked.detail_url AS detail_url, picked.name AS name
+       FROM (
+         SELECT
+           s.item_slug AS item_slug,
+           s.shop AS shop,
+           s.category AS category,
+           s.detail_url AS detail_url,
+           i.name AS name,
+           ROW_NUMBER() OVER (
+             PARTITION BY s.item_slug
+             ORDER BY
+               CASE s.shop
+                 WHEN 'shop-gold' THEN 0
+                 WHEN 'rarius' THEN 1
+                 WHEN 'rings-pendants' THEN 2
+                 ELSE 9
+               END,
+               s.category COLLATE NOCASE,
+               s.item_slug COLLATE NOCASE
+           ) AS rn
+         FROM item_sources s
+         JOIN items i ON i.slug = s.item_slug
+         LEFT JOIN item_rules r ON r.item_slug = s.item_slug
+        WHERE r.item_slug IS NULL
+           OR r.excellent_values IS NULL OR r.excellent_values = '[]'
+           OR r.ancient_values IS NULL OR r.ancient_values = '[]'
+       ) AS picked
+      WHERE picked.rn = 1
+      ORDER BY
+        CASE picked.shop
+          WHEN 'shop-gold' THEN 0
+          WHEN 'rarius' THEN 1
+          WHEN 'rings-pendants' THEN 2
+          ELSE 9
+        END,
+        picked.shop COLLATE NOCASE,
+        picked.item_slug COLLATE NOCASE
+      LIMIT ?`,
+  ).bind(limit).all<{ item_slug: string; shop: string; detail_url: string; name: string }>();
+
+  let attempted = 0;
+  let imported = 0;
+  let with_ancient = 0;
+  let with_excellent = 0;
+  const errors: string[] = [];
+  const picked: BackfillPickRow[] = (rs.results ?? []).map((r) => ({
+    item_slug: r.item_slug,
+    detail_url: r.detail_url,
+    name: r.name,
+    category: (r as { category?: string }).category?.trim() || "unknown",
+  }));
+
+  const byCategory = new Map<string, Array<{ item_slug: string; detail_url: string; name: string }>>();
+  for (const r of picked) {
+    let list = byCategory.get(r.category);
+    if (!list) {
+      list = [];
+      byCategory.set(r.category, list);
+    }
+    list.push({ item_slug: r.item_slug, detail_url: r.detail_url, name: r.name });
+  }
+
+  const scrapeConcDesired =
+    cookieSource === "provided" || cookieSource === "authed"
+      ? BACKFILL_SCRAPE_CONCURRENCY_WITH_COOKIE
+      : ADMIN_PARALLEL_CONCURRENCY;
+  const nCategoryThreads = Math.max(1, byCategory.size);
+  const scrapeConcurrency = Math.max(
+    1,
+    Math.min(scrapeConcDesired, Math.floor(BACKFILL_SCRAPE_GLOBAL_MAX / nCategoryThreads)),
+  );
+
+  await backfillLiveLog(
+    env,
+    wid,
+    "run start items=" + picked.length + " categories=" + byCategory.size + " limit=" + limit + " cookie_source=" + cookieSource + " scrape_concurrency=" + scrapeConcurrency,
+  );
+
+  // One parallel thread per category: each gets its own shop session (cookie) when using env credentials.
+  const settled = await Promise.allSettled(
+    [...byCategory.entries()].map(async ([category, catRows]) => {
+      let threadCookie: string | undefined;
+      if (cookieSource === "provided") {
+        threadCookie = cookieIn || undefined;
+      } else if (cookieSource === "authed") {
+        const session = await createShopSessionCookie(env);
+        if (!session.ok) {
+          await backfillLiveLog(env, wid, "[" + category + "] shop_login_failed " + session.error);
+          return {
+            attempted: catRows.length,
+            imported: 0,
+            with_ancient: 0,
+            with_excellent: 0,
+            batches: 0,
+            errors: ["[" + category + "] shop login: " + session.error],
+          };
+        }
+        threadCookie = session.cookie;
+      }
+      return runBackfillCategoryThread(
+        env,
+        category,
+        catRows,
+        threadCookie,
+        scrapeConcurrency,
+        scrapeShopItemRule,
+        wid,
+      );
+    }),
+  );
+
+  let batches = 0;
+  for (let ti = 0; ti < settled.length; ti++) {
+    const s = settled[ti]!;
+    if (s.status === "rejected") {
+      const cat = [...byCategory.keys()][ti] ?? "?";
+      const line = "[" + cat + "] thread: " + String((s.reason as Error)?.message ?? s.reason);
+      errors.push(line);
+      continue;
+    }
+    const p = s.value;
+    attempted += p.attempted;
+    imported += p.imported;
+    with_ancient += p.with_ancient;
+    with_excellent += p.with_excellent;
+    batches += p.batches;
+    errors.push(...p.errors);
+  }
+
+  await backfillLiveLog(
+    env,
+    wid,
+    "run complete attempted=" + attempted + " imported=" + imported + " with_excellent=" + with_excellent + " errCount=" + errors.length + " batches=" + batches,
+  );
+
+  return {
     ok: true,
     attempted,
     imported,
     with_ancient,
     with_excellent,
-    concurrency,
-    used_cookie: !!cookieToUse,
+    batches,
+    batch_size: BACKFILL_SCRAPE_BATCH_SIZE,
+    category_threads: byCategory.size,
+    used_cookie: cookieSource === "provided" || cookieSource === "authed",
     cookie_source: cookieSource,
     errors: errors.slice(0, 20),
-  });
+  };
+}
+
+export async function adminBackfillItemRulesFromSources(env: Env, req: Request): Promise<Response> {
+  const body = (await req.json().catch(() => ({}))) as {
+    limit?: number;
+    concurrency?: number;
+    cookie?: string;
+    /** If true, run inline in the Worker (legacy). Default: use Workflow when configured. */
+    sync?: boolean;
+  };
+  void body.concurrency;
+  const params: ItemRulesBackfillParams = {
+    limit: normalizeBackfillLimit(body.limit),
+    cookie: (body.cookie ?? "").trim() || undefined,
+  };
+
+  if (body.sync === true || !env.BACKFILL_ITEM_RULES) {
+    const out = await runBackfillItemRulesFromSourcesCore(env, params);
+    return json(out);
+  }
+
+  const instance = await env.BACKFILL_ITEM_RULES.create({ params });
+  const instanceId = instance.id;
+  let status: unknown = null;
+  try {
+    try {
+      const st = await instance.status();
+      disposeWorkflowHandle(st);
+      status = st;
+    } catch {
+      /* ignore */
+    }
+    return json({
+      ok: true,
+      workflow: true as const,
+      instance_id: instanceId,
+      status,
+      message: "Backfill em execução como Workflow. Consulte o status ou o dashboard da Cloudflare.",
+    });
+  } finally {
+    disposeWorkflowHandle(instance);
+  }
+}
+
+/** GET ?id= instance id */
+export async function adminBackfillWorkflowStatus(env: Env, req: Request): Promise<Response> {
+  const id = new URL(req.url).searchParams.get("id");
+  if (!id?.trim()) return bad(400, "query id obrigatória");
+  if (!env.BACKFILL_ITEM_RULES) return bad(503, "workflow não configurado");
+  let instance: unknown;
+  try {
+    instance = await env.BACKFILL_ITEM_RULES.get(id.trim());
+    const st = await (instance as { status: () => Promise<unknown> }).status();
+    disposeWorkflowHandle(st);
+    const wid = (instance as { id: string }).id;
+    return json({ ok: true, instance_id: wid, status: st });
+  } catch (e) {
+    return bad(404, "instância não encontrada: " + (e as Error).message);
+  } finally {
+    disposeWorkflowHandle(instance);
+  }
+}
+
+/** GET ?id= — live lines written during `runBackfillItemRulesFromSourcesCore` (workflow). */
+export async function adminBackfillWorkflowOutput(env: Env, req: Request): Promise<Response> {
+  const id = new URL(req.url).searchParams.get("id");
+  if (!id?.trim()) return bad(400, "query id obrigatória");
+  try {
+    const rs = await env.DB.prepare(
+      `SELECT line FROM backfill_workflow_output_line WHERE instance_id = ? ORDER BY id ASC LIMIT 800`,
+    )
+      .bind(id.trim())
+      .all<{ line: string }>();
+    return json({ ok: true, instance_id: id.trim(), lines: (rs.results ?? []).map((r) => r.line) });
+  } catch {
+    return json({ ok: true, instance_id: id.trim(), lines: [] });
+  }
 }
 
 type AncientSetImport = { name: string; attrs?: string[] };
@@ -462,10 +824,9 @@ export async function adminImportAncientSets(env: Env, req: Request): Promise<Re
   if (sets.length > 2000) return bad(400, "muitos sets (max 2000)");
 
   const t = now();
-  let upserted = 0;
-  for (const s of sets) {
+  const deltas = await asyncPool(sets, ADMIN_PARALLEL_CONCURRENCY, async (s) => {
     const name = String(s?.name ?? "").trim();
-    if (!name) continue;
+    if (!name) return 0;
     const attrs = Array.isArray(s.attrs)
       ? s.attrs.map((x) => String(x).trim()).filter(Boolean).slice(0, 30)
       : [];
@@ -476,8 +837,9 @@ export async function adminImportAncientSets(env: Env, req: Request): Promise<Re
          attrs = excluded.attrs,
          updated_at = excluded.updated_at`,
     ).bind(name, JSON.stringify(attrs), t).run();
-    upserted++;
-  }
+    return 1;
+  });
+  const upserted = deltas.reduce<number>((a, n) => a + n, 0);
   return json({ ok: true, upserted });
 }
 

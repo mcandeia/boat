@@ -53,6 +53,8 @@ import {
   adminSyncAncientSetsFromFanz,
   adminScrapeShopItemRule,
   adminBackfillItemRulesFromSources,
+  adminBackfillWorkflowOutput,
+  adminBackfillWorkflowStatus,
   adminRunCron,
   adminSetBlocked,
   adminSpawnAllWatchers,
@@ -77,6 +79,8 @@ import { INDEX_HTML } from "./ui";
 // Re-exported so wrangler can register the DO class. The class itself
 // lives in char-watcher.ts; this is just the public binding.
 export { CharWatcher } from "./char-watcher";
+
+export { ItemRulesBackfillWorkflow } from "./workflows/item-rules-backfill";
 
 export default {
   async fetch(req: Request, env: Env): Promise<Response> {
@@ -321,7 +325,15 @@ export default {
         if (pathname === "/api/admin/ancients/import" && method === "POST") return await adminImportAncientSets(env, req);
         if (pathname === "/api/admin/ancients/fanz-sync" && method === "POST") return await adminSyncAncientSetsFromFanz(env);
         if (pathname === "/api/admin/item-rules/scrape-shop" && method === "POST") return await adminScrapeShopItemRule(env, req);
-        if (pathname === "/api/admin/item-rules/backfill" && method === "POST") return await adminBackfillItemRulesFromSources(env, req);
+        if (pathname === "/api/admin/item-rules/backfill" && method === "POST") {
+          return await adminBackfillItemRulesFromSources(env, req);
+        }
+        if (pathname === "/api/admin/item-rules/backfill/status" && method === "GET") {
+          return await adminBackfillWorkflowStatus(env, req);
+        }
+        if (pathname === "/api/admin/item-rules/backfill/output" && method === "GET") {
+          return await adminBackfillWorkflowOutput(env, req);
+        }
         if (pathname === "/api/admin/watchers/spawn-all" && method === "POST") return await adminSpawnAllWatchers(env);
         if (pathname === "/api/admin/custom-events" && method === "POST") return await adminCreateCustomEvent(env, userId, req);
         const customEvAdminMatch = pathname.match(/^\/api\/admin\/custom-events\/(\d+)$/);

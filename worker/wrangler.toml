@@ -31,6 +31,15 @@ tag                = "v1-do"
 new_sqlite_classes = ["CharWatcher"]
 
 # ---------------------------------------------------------------------------
+# Workflows — durable backfill for shop → item_rules (heavy scrape + DB).
+# ---------------------------------------------------------------------------
+
+[[workflows]]
+name       = "item-rules-backfill"
+binding    = "BACKFILL_ITEM_RULES"
+class_name = "ItemRulesBackfillWorkflow"
+
+# ---------------------------------------------------------------------------
 # Observability — surfaces console.log + errors + cron runs in the
 # Cloudflare dashboard ("Workers & Pages > mu-patos > Logs"). Replaces
 # the need for `wrangler tail` for after-the-fact diagnosis.
@@ -52,6 +61,9 @@ COOKIE_NAME              = "mlw_sess"
 
 # Telegram. TELEGRAM_BOT_TOKEN + TELEGRAM_WEBHOOK_SECRET are GH Action secrets.
 TELEGRAM_BOT_USERNAME    = "mu_patos_bot"
+
+# MuPatos shop scrape: per-attempt AbortSignal timeout (first try); retries scale ~1.5× then 2×. Clamp 5000–120000 ms.
+SHOP_FETCH_TIMEOUT_MS    = "30000"
 
 # ---------------------------------------------------------------------------
 # Storage. Top-level fields above must come before any [[section]] in TOML.

@@ -47,6 +47,18 @@ export const INDEX_HTML = /* html */ `<!doctype html>
 <!-- Toast host. Stacks notifications top-right; each toast slides in and
      auto-removes after a few seconds. -->
 <div id="toasts" class="fixed top-4 right-4 z-[60] flex flex-col items-end gap-2 pointer-events-none max-w-[calc(100%-2rem)]"></div>
+<!-- Global pending-request banner (shown while fetchJSON is in-flight). -->
+<div id="pending-toast" class="hidden fixed top-3 left-1/2 -translate-x-1/2 z-[65] pointer-events-none">
+  <div class="px-3 py-2 rounded-md border border-gold/40 bg-bg/80 backdrop-blur text-xs text-goldsoft shadow-lg">
+    <span class="inline-flex items-center gap-2">
+      <svg class="animate-spin h-4 w-4" viewBox="0 0 24 24" fill="none">
+        <circle cx="12" cy="12" r="10" stroke="currentColor" stroke-opacity="0.25" stroke-width="4"></circle>
+        <path d="M4 12a8 8 0 018-8" stroke="currentColor" stroke-width="4" stroke-linecap="round"></path>
+      </svg>
+      <span data-pending-text>carregando…</span>
+    </span>
+  </div>
+</div>
 <div id="chart-tip" class="hidden fixed z-[70] pointer-events-none px-2 py-1 rounded bg-bg border border-gold/40 text-xs text-slate-100 shadow-lg whitespace-nowrap"></div>
 <div id="item-tip" class="hidden fixed z-[80] pointer-events-none w-[320px] max-w-[calc(100vw-2rem)]">
   <div class="rounded-md border border-border bg-[#0b0d12]/95 shadow-[0_12px_40px_rgba(0,0,0,0.65)] overflow-hidden">
@@ -395,6 +407,22 @@ export const INDEX_HTML = /* html */ `<!doctype html>
             </div>
             <div id="admin-health-meta" class="text-[11px] text-muted mt-2"></div>
           </div>
+          <div id="admin-backfill-workflow-panel" class="hidden mb-4 rounded-xl border border-gold/25 bg-bg/50 p-3 text-xs">
+            <div class="flex flex-wrap items-center justify-between gap-2 mb-2">
+              <h3 class="text-xs uppercase tracking-widest text-goldsoft">Backfill (Workflow)</h3>
+              <button type="button" id="admin-backfill-workflow-close" class="px-2 py-1 rounded border border-border text-[11px] hover:bg-bg">fechar</button>
+            </div>
+            <p id="admin-backfill-workflow-summary" class="text-[11px] text-muted leading-snug mb-2"></p>
+            <div id="admin-backfill-workflow-progressbar" class="h-1.5 w-full rounded-full bg-border overflow-hidden mb-2 hidden">
+              <div class="h-full w-1/3 rounded-full bg-gold/60 animate-pulse"></div>
+            </div>
+            <div class="mb-2">
+              <div class="text-[10px] uppercase tracking-wide text-muted mb-1">Saída ao vivo</div>
+              <pre id="admin-backfill-workflow-lines" class="max-h-44 overflow-auto rounded border border-border bg-bg p-2 text-[10px] leading-snug whitespace-pre-wrap break-words font-mono text-slate-300"></pre>
+            </div>
+            <div class="text-[10px] uppercase tracking-wide text-muted mb-1">Status (workflow)</div>
+            <pre id="admin-backfill-workflow-raw" class="max-h-40 overflow-auto rounded border border-border bg-bg p-2 text-[10px] leading-tight whitespace-pre-wrap break-words font-mono"></pre>
+          </div>
           <div class="overflow-x-auto">
             <table class="w-full text-xs">
               <thead class="text-muted text-left border-b border-border">
@@ -512,12 +540,147 @@ function toast(message, kind = "info", ttl = 4500) {
 }
 
 // ---- API helper ----
+let pendingRequests = 0;
+function syncPendingToast() {
+  const wrap = $("pending-toast");
+  if (!wrap) return;
+  const txt = wrap.querySelector("[data-pending-text]");
+  if (pendingRequests > 0) {
+    wrap.classList.remove("hidden");
+    if (txt) txt.textContent = pendingRequests > 1 ? ("carregando… (" + pendingRequests + ")") : "carregando…";
+  } else {
+    wrap.classList.add("hidden");
+  }
+}
+
 const fetchJSON = async (url, opts = {}) => {
+  pendingRequests++;
+  syncPendingToast();
+  try {
+    const r = await fetch(url, { credentials: "same-origin", headers: { "content-type": "application/json" }, ...opts });
+    const body = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(body.error || ("HTTP " + r.status));
+    return body;
+  } finally {
+    pendingRequests = Math.max(0, pendingRequests - 1);
+    syncPendingToast();
+  }
+};
+
+/** Same as fetchJSON but without the global pending banner (for periodic polls). */
+const fetchJSONQuiet = async (url, opts = {}) => {
   const r = await fetch(url, { credentials: "same-origin", headers: { "content-type": "application/json" }, ...opts });
   const body = await r.json().catch(() => ({}));
   if (!r.ok) throw new Error(body.error || ("HTTP " + r.status));
   return body;
 };
+
+let adminBackfillWorkflowPollTimer = null;
+
+function adminBackfillWorkflowStateString(statusRoot) {
+  if (!statusRoot || typeof statusRoot !== "object") return "";
+  const s = statusRoot.status;
+  if (typeof s === "string") return s;
+  if (s && typeof s === "object" && typeof s.status === "string") return s.status;
+  return "";
+}
+
+function adminBackfillWorkflowIsTerminal(statusRoot) {
+  if (!statusRoot || typeof statusRoot !== "object") return false;
+  if (statusRoot.output !== undefined && statusRoot.output !== null) return true;
+  if (statusRoot.done === true) return true;
+  const st = adminBackfillWorkflowStateString(statusRoot).toLowerCase();
+  if (!st) return false;
+  return /complete|completed|success|errored|failed|terminated|canceled|cancelled|error/.test(st);
+}
+
+function adminBackfillWorkflowFormatSummary(statusRoot) {
+  const st = adminBackfillWorkflowStateString(statusRoot) || "—";
+  const o = statusRoot.output;
+  if (o && typeof o === "object" && o.ok === true) {
+    const errN = Array.isArray(o.errors) ? o.errors.length : 0;
+    let line =
+      "Estado: " + st +
+      " · imported " + String(o.imported ?? "—") + " / attempted " + String(o.attempted ?? "—") +
+      " · erros: " + errN;
+    if (o.category_threads != null) line += " · threads: " + o.category_threads;
+    return line;
+  }
+  if (statusRoot.error) return "Estado: " + st + " · " + String(statusRoot.error);
+  if (!adminBackfillWorkflowIsTerminal(statusRoot)) return "Estado: " + st + " · em execução…";
+  return "Estado: " + st;
+}
+
+function stopAdminBackfillWorkflowMonitor() {
+  if (adminBackfillWorkflowPollTimer) {
+    clearInterval(adminBackfillWorkflowPollTimer);
+    adminBackfillWorkflowPollTimer = null;
+  }
+  const bar = $("admin-backfill-workflow-progressbar");
+  if (bar) bar.classList.add("hidden");
+}
+
+async function pollAdminBackfillWorkflowOnce(instanceId) {
+  const sum = $("admin-backfill-workflow-summary");
+  const raw = $("admin-backfill-workflow-raw");
+  const linesEl = $("admin-backfill-workflow-lines");
+  const bar = $("admin-backfill-workflow-progressbar");
+  if (!sum || !raw) return;
+  try {
+    const [data, out] = await Promise.all([
+      fetchJSONQuiet("/api/admin/item-rules/backfill/status?id=" + encodeURIComponent(instanceId)),
+      fetchJSONQuiet("/api/admin/item-rules/backfill/output?id=" + encodeURIComponent(instanceId)).catch(() => ({ lines: [] })),
+    ]);
+    const st = data.status;
+    const idLabel = (data.instance_id || instanceId).length > 28
+      ? (data.instance_id || instanceId).slice(0, 14) + "…"
+      : (data.instance_id || instanceId);
+    sum.textContent =
+      "instance " + idLabel + " · " + new Date().toLocaleTimeString() + " · " + adminBackfillWorkflowFormatSummary(st);
+    if (linesEl) {
+      const arr = out && Array.isArray(out.lines) ? out.lines : [];
+      linesEl.textContent = arr.length
+        ? arr.join(String.fromCharCode(10))
+        : "(nenhuma linha ainda — aguarde o worker gravar; confira migration 0023 em D1)";
+    }
+    try {
+      raw.textContent = JSON.stringify(st, null, 2);
+    } catch {
+      raw.textContent = String(st);
+    }
+    if (adminBackfillWorkflowIsTerminal(st)) {
+      stopAdminBackfillWorkflowMonitor();
+      const stateLo = adminBackfillWorkflowStateString(st).toLowerCase();
+      const bad = /error|errored|fail|terminated|cancel/.test(stateLo);
+      if (st && st.output && st.output.ok === true) {
+        toast(
+          "Backfill concluído: " + st.output.imported + "/" + st.output.attempted + " importados",
+          st.output.imported ? "ok" : "info",
+          5200,
+        );
+      } else if (bad) {
+        toast("Workflow terminou com problema — veja o JSON abaixo.", "err", 6500);
+      }
+    } else {
+      if (bar) bar.classList.remove("hidden");
+    }
+  } catch (e) {
+    sum.textContent = "Erro ao consultar status: " + e.message;
+  }
+}
+
+function startAdminBackfillWorkflowMonitor(instanceId) {
+  const panel = $("admin-backfill-workflow-panel");
+  if (!panel || !instanceId) return;
+  stopAdminBackfillWorkflowMonitor();
+  panel.classList.remove("hidden");
+  const bar = $("admin-backfill-workflow-progressbar");
+  if (bar) bar.classList.remove("hidden");
+  void pollAdminBackfillWorkflowOnce(instanceId);
+  adminBackfillWorkflowPollTimer = setInterval(() => {
+    void pollAdminBackfillWorkflowOnce(instanceId);
+  }, 2500);
+}
 
 // Replace the button's label with a spinner while \`fn\` runs. Restores the
 // original markup whether \`fn\` resolves or throws.
@@ -2752,16 +2915,26 @@ if ($("admin-backfill-item-rules")) $("admin-backfill-item-rules").onclick = asy
   const cookie = prompt("Cookie (opcional). Se vazio, usa creds do env.\\n\\nCole o header Cookie do browser logado:", prevCookie) || "";
   localStorage.setItem("admin_backfill_cookie", cookie.trim());
   try {
-    const body = { limit: 40, concurrency: 50 };
+    const body = { limit: 20000 };
     if (cookie && cookie.trim()) body.cookie = cookie.trim();
     const r = await withSpinner(btn, () => fetchJSON("/api/admin/item-rules/backfill", { method: "POST", body: JSON.stringify(body) }));
-    if (r && r.errors && r.errors.length) {
+    if (r && r.workflow && r.instance_id) {
+      toast("Backfill no Workflow — acompanhamento no painel abaixo.", "info", 3800);
+      startAdminBackfillWorkflowMonitor(r.instance_id);
+    } else if (r && r.errors && r.errors.length) {
       toast("backfill: " + r.imported + "/" + r.attempted + " · " + r.errors[0], "err");
     } else {
       toast("backfill: " + r.imported + "/" + r.attempted, r.imported ? "ok" : "info");
     }
   } catch (err) { toast(err.message, "err"); }
 };
+if ($("admin-backfill-workflow-close")) {
+  $("admin-backfill-workflow-close").onclick = () => {
+    stopAdminBackfillWorkflowMonitor();
+    const p = $("admin-backfill-workflow-panel");
+    if (p) p.classList.add("hidden");
+  };
+}
 if ($("admin-spawn-watchers")) $("admin-spawn-watchers").onclick = async (e) => {
   const btn = e.currentTarget;
   try {
