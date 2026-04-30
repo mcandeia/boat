@@ -102,6 +102,25 @@ function tryDecodeAndThumbToPng(bytes: Uint8Array, maxSize = 256): Uint8Array | 
   }
 }
 
+async function fetchBytes(url: string, opts: { timeoutMs: number; headers?: Record<string, string> }): Promise<{ ok: boolean; bytes: Uint8Array; contentType: string }> {
+  const ctrl = new AbortController();
+  const t = setTimeout(() => ctrl.abort(), Math.max(500, opts.timeoutMs));
+  try {
+    const res = await fetch(url, {
+      headers: opts.headers,
+      signal: ctrl.signal,
+      cf: { cacheTtl: 86400, cacheEverything: true } as RequestInitCfProperties,
+    });
+    const ct = res.headers.get("content-type") || "";
+    const buf = await res.arrayBuffer().catch(() => new ArrayBuffer(0));
+    return { ok: res.ok, bytes: new Uint8Array(buf), contentType: ct };
+  } catch {
+    return { ok: false, bytes: new Uint8Array(), contentType: "" };
+  } finally {
+    clearTimeout(t);
+  }
+}
+
 export async function renderMarketListingOgPng(env: Env, origin: string, listingId: number): Promise<Response> {
   const row = await env.DB.prepare(
     `SELECT
@@ -153,29 +172,32 @@ export async function renderMarketListingOgPng(env: Env, origin: string, listing
   let imgDataUri = "";
   const rawImg = (row.item_image_url ?? "").trim();
   if (rawImg) {
-    const src = /^https:\/\/mupatos\.com\.br\/site\/resources\/images\//i.test(rawImg)
-      ? (origin + "/img-proxy?u=" + encodeURIComponent(rawImg))
-      : rawImg;
     try {
-      const res = await fetch(src, {
+      const isMupatosSprite = /^https:\/\/mupatos\.com\.br\/site\/resources\/images\//i.test(rawImg);
+      // In prod, fetching our own /img-proxy can be flaky (self-fetch / loops / edge routing).
+      // Prefer fetching the upstream sprite directly with browser-like headers.
+      const src = rawImg;
+      const upstream = await fetchBytes(src, {
+        timeoutMs: 8000,
         headers: {
           "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
           "accept": "image/avif,image/webp,image/*,*/*;q=0.8",
+          ...(isMupatosSprite ? { "referer": "https://mupatos.com.br/" } : {}),
         },
-        cf: { cacheTtl: 86400, cacheEverything: true } as RequestInitCfProperties,
       });
-      if (res.ok) {
-        const buf = await res.arrayBuffer();
-        const ct = res.headers.get("content-type") || "";
-        const mime = guessMime(ct || src);
+      if (upstream.ok && upstream.bytes.length > 0) {
+        const mime = guessMime(upstream.contentType || src);
 
         // WebP sprites are common (mupatos). resvg-wasm can fail to render WebP
         // when embedded as a data URI; convert to PNG to be safe.
-        const rawBytes = new Uint8Array(buf);
+        const rawBytes = upstream.bytes;
         if (mime === "image/webp") {
           const pngBytes = tryDecodeAndThumbToPng(rawBytes, 256);
           if (pngBytes) {
             imgDataUri = "data:image/png;base64," + bytesToBase64(pngBytes);
+          } else {
+            // Fallback: try embedding webp as-is (may work depending on decoder build).
+            imgDataUri = "data:image/webp;base64," + bytesToBase64(rawBytes);
           }
         } else {
           imgDataUri = "data:" + mime + ";base64," + bytesToBase64(rawBytes);
