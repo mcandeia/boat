@@ -69,27 +69,26 @@ export class CharWatcher {
     return new Response("not found", { status: 404 });
   }
 
-  // CF Workers calls this when the alarm time arrives. We always
-  // reschedule the next alarm, even on failure — otherwise a bad scrape
-  // would silently disable the watcher forever.
+  // CF Workers calls this when the alarm time arrives.
+  //
+  // RETIRED: per-char polling moved to the cron pollOnce loop after CF's
+  // DO throttle issue (the DOs were still ticking AND we were billed for
+  // both). This handler now drains itself: cancel the stored alarm and
+  // return. Within ~1 min every existing DO has fired once, deleted its
+  // alarm, and gone idle for good. The class stays registered so we can
+  // repurpose it to a bucketed-watcher design later without needing a
+  // class-deletion migration.
   async alarm(): Promise<void> {
     try {
-      await this.runOne();
+      await this.state.storage.deleteAlarm();
     } catch (e) {
-      console.error("CharWatcher alarm failed:", (e as Error).message);
-    } finally {
-      // Add a small jitter (<= 5s) so chars don't all fire on the same second.
-      const jitter = Math.floor(Math.random() * 5_000);
-      await this.state.storage.setAlarm(Date.now() + this.intervalMs + jitter);
+      console.error("CharWatcher.alarm drain failed:", (e as Error).message);
     }
   }
 
   private async runOne(): Promise<void> {
     const charId = await this.state.storage.get<number>("charId");
-    if (!charId) {
-      console.log("CharWatcher.runOne: no charId, skipping");
-      return;
-    }
+    if (!charId) return;
     const r = await pollSingleChar(this.env, charId);
     if (r.fired > 0) console.log(`CharWatcher[${charId}]: fired=${r.fired}`);
   }

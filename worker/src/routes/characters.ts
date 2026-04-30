@@ -1,7 +1,7 @@
 import type { CharacterRow, Env } from "../types";
 import { bad, json, now } from "../util";
 import { scrapeOne } from "../scraper";
-import { spawnWatcher, stopWatcher } from "../char-watcher";
+import { stopWatcher } from "../char-watcher";
 
 const VALID_NAME = /^[A-Za-z0-9_-]{1,15}$/;
 const INVALID_NAME = "nome de personagem inválido";
@@ -92,13 +92,9 @@ export async function createCharacter(env: Env, userId: number, req: Request): P
     .bind(userId, id, body.is_gm ? 1 : 0, t)
     .run();
 
-  // Spin up the per-char Durable Object so it starts ticking on its own
-  // alarm. Idempotent: re-init on an existing DO just resets the alarm.
-  // Best-effort — we don't want char creation to fail just because the
-  // DO call is slow.
-  await spawnWatcher(env, id).catch((e) =>
-    console.log("spawnWatcher failed for char " + id + ": " + (e as Error).message),
-  );
+  // (Per-char Durable Object spawn was here; retired in favour of the
+  // cron pollOnce loop. Calling spawnWatcher today would create a DO
+  // whose alarm immediately drains itself, so it's just dead weight.)
 
   return json({ ok: true, id, snapshot });
 }
