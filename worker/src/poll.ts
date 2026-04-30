@@ -99,6 +99,8 @@ export async function pollSingleChar(
     rankClass: char.rank_class,
     nextTargetName: char.next_target_name,
     nextTargetResets: char.next_target_resets,
+    globalNextTargetName: char.global_next_target_name,
+    globalNextTargetResets: char.global_next_target_resets,
   };
   if (snap.level !== prev.level || snap.resets !== prev.resets || snap.class !== prev.class) {
     try {
@@ -125,7 +127,9 @@ export async function pollSingleChar(
               rank_overall = ?,
               rank_class = ?,
               next_target_name = ?,
-              next_target_resets = ?
+              next_target_resets = ?,
+              global_next_target_name = ?,
+              global_next_target_resets = ?
         WHERE id = ?`,
     )
     .bind(
@@ -133,6 +137,7 @@ export async function pollSingleChar(
       levelChangedAt,
       ranks.classCode, ranks.rankOverall, ranks.rankClass,
       ranks.nextTargetName, ranks.nextTargetResets,
+      ranks.globalNextTargetName, ranks.globalNextTargetResets,
       charId,
     )
     .run();
@@ -579,6 +584,8 @@ function enrichRanks(snap: ProfileSnapshot, rankings: RankingMap): {
   rankClass: number | null;
   nextTargetName: string | null;
   nextTargetResets: number | null;
+  globalNextTargetName: string | null;
+  globalNextTargetResets: number | null;
 } {
   const code = classCodeFor(snap.class);
   const overall = findRank(rankings.overall, snap.name);
@@ -589,5 +596,7 @@ function enrichRanks(snap: ProfileSnapshot, rankings: RankingMap): {
     rankClass: inClass?.rank ?? null,
     nextTargetName: inClass?.nextTarget?.name ?? null,
     nextTargetResets: inClass?.nextTarget?.resets ?? null,
+    globalNextTargetName: overall?.nextTarget?.name ?? null,
+    globalNextTargetResets: overall?.nextTarget?.resets ?? null,
   };
 }

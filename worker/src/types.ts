@@ -156,6 +156,8 @@ export interface CharacterRow {
   class_code: string | null;
   next_target_name: string | null;
   next_target_resets: number | null;
+  global_next_target_name: string | null;
+  global_next_target_resets: number | null;
   blocked: number;
   avg_reset_time?: number | null;
   last_level_change_at: number | null;

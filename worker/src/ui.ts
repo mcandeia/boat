@@ -1259,16 +1259,19 @@ function statRowIcon(icon, label, value) {
     '<span class="text-slate-100 text-right">' + value + '</span>' +
     '</div>';
 }
-function statCard(icon, label, value) {
+function statCard(icon, label, value, titleText) {
   // Label is allowed to wrap to a second line; the value still truncates so
-  // a long map/character name doesn't blow up the card.
+  // a long map/character name doesn't blow up the card. titleText, if given,
+  // becomes the value's hover tooltip — caller passes the raw text so the
+  // user can read it in full when truncated.
+  const titleAttr = titleText ? ' title="' + escapeHtml(titleText) + '"' : '';
   return (
     '<div class="rounded-lg border border-border bg-bg/40 px-3 py-2.5 min-w-0">' +
       '<div class="flex items-start gap-1.5 text-[10px] text-muted uppercase tracking-wide leading-tight">' +
         '<span class="text-slate-300 leading-none" aria-hidden="true">' + icon + '</span>' +
         '<span>' + escapeHtml(label) + '</span>' +
       '</div>' +
-      '<div class="mt-1 text-sm text-slate-100 font-semibold truncate">' + value + '</div>' +
+      '<div class="mt-1 text-sm text-slate-100 font-semibold truncate"' + titleAttr + '>' + value + '</div>' +
     '</div>'
   );
 }
@@ -1291,11 +1294,11 @@ function renderCharLeft(container, c) {
 
   const dash = '<span class="text-muted">—</span>';
   const cards = [];
-  cards.push(statCard("🎭", "Classe", c.class ? (classBadgeHtml(c.class) + escapeHtml(c.class)) : dash));
+  cards.push(statCard("🎭", "Classe", c.class ? (classBadgeHtml(c.class) + escapeHtml(c.class)) : dash, c.class || ""));
   cards.push(statCard("♻️", "Resets", typeof c.resets === "number" ? '<span class="text-goldsoft">' + String(c.resets) + '</span>' : dash));
   cards.push(statCard("⏱️", "Média/reset", c.avg_reset_time ? formatDuration(c.avg_reset_time) : dash));
   cards.push(statCard("📈", "Level", c.last_level != null ? '<span class="text-goldsoft">' + c.last_level + '</span>' : dash));
-  cards.push(statCard("🗺️", "Mapa", c.last_map ? escapeHtml(c.last_map) : dash));
+  cards.push(statCard("🗺️", "Mapa", c.last_map ? escapeHtml(c.last_map) : dash, c.last_map || ""));
   cards.push(statCard("🟢", "Situação", statusBadge));
 
   // Rankings (rank in the resets ladder + next target one slot above).
@@ -1308,7 +1311,12 @@ function renderCharLeft(container, c) {
   if (c.next_target_name && c.next_target_resets != null) {
     const gap = (c.next_target_resets - (c.resets ?? 0));
     const gapTxt = gap > 0 ? ' <span class="text-muted">(+' + gap + ' resets)</span>' : '';
-    cards.push(statCard("🎯", "Próximo alvo", '<span class="text-goldsoft">' + escapeHtml(c.next_target_name) + '</span>' + gapTxt));
+    cards.push(statCard("🎯", "Próximo alvo (classe)", '<span class="text-goldsoft">' + escapeHtml(c.next_target_name) + '</span>' + gapTxt, c.next_target_name));
+  }
+  if (c.global_next_target_name && c.global_next_target_resets != null) {
+    const gap = (c.global_next_target_resets - (c.resets ?? 0));
+    const gapTxt = gap > 0 ? ' <span class="text-muted">(+' + gap + ' resets)</span>' : '';
+    cards.push(statCard("🌐", "Próximo alvo (geral)", '<span class="text-goldsoft">' + escapeHtml(c.global_next_target_name) + '</span>' + gapTxt, c.global_next_target_name));
   }
 
   const checked = relativeTime(c.last_checked_at);
