@@ -213,7 +213,9 @@ export async function renderMarketListingSharePage(env: Env, origin: string, lis
   ].filter(Boolean);
   const description = (descParts.join(" · ") || "Anúncio no Mercado do Mu Patos") + (statusLabel ? (" · " + statusLabel) : "");
 
-  const ogPng = origin + "/og/market/" + String(row.id) + ".png";
+  // Add a cache-buster so crawlers (Discord) don't get stuck with a stale/bad fetch.
+  // created_at is stable; if we ever add listing.updated_at, switch to that.
+  const ogPng = origin + "/og/market/" + String(row.id) + ".png?v=" + String(row.created_at || "");
 
   // Inline thumbnail used by the share page itself (not the OG image).
   const rawImg = (row.item_image_url ?? "").trim();
@@ -273,6 +275,7 @@ export async function renderMarketListingSharePage(env: Env, origin: string, lis
     '<meta property="og:description" content="' + esc(description).slice(0, 300) + '" />' +
     '<meta property="og:url" content="' + esc(shareUrl) + '" />' +
     '<meta property="og:image" content="' + esc(ogPng) + '" />' +
+    '<meta property="og:image:secure_url" content="' + esc(ogPng) + '" />' +
     '<meta property="og:image:type" content="image/png" />' +
     '<meta property="og:image:width" content="1200" />' +
     '<meta property="og:image:height" content="630" />' +

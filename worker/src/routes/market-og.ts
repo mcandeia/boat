@@ -121,7 +121,17 @@ async function fetchBytes(url: string, opts: { timeoutMs: number; headers?: Reco
   }
 }
 
-export async function renderMarketListingOgPng(env: Env, origin: string, listingId: number): Promise<Response> {
+export async function renderMarketListingOgPng(env: Env, url: URL, listingId: number): Promise<Response> {
+  // Cache the final PNG aggressively at the edge. Discord in particular may
+  // bail out if the OG image takes too long on first fetch.
+  const cache = (globalThis as unknown as { caches?: CacheStorage }).caches?.default;
+  const cacheKey = new Request(url.toString(), { method: "GET" });
+  if (cache) {
+    const hit = await cache.match(cacheKey);
+    if (hit) return hit;
+  }
+
+  const origin = url.origin;
   const row = await env.DB.prepare(
     `SELECT
        l.id,
@@ -306,13 +316,19 @@ export async function renderMarketListingOgPng(env: Env, origin: string, listing
   });
   const png = r.render().asPng();
 
-  return new Response(png, {
+  const res = new Response(png, {
     headers: {
       "content-type": "image/png",
       // Cache at edge; this is immutable for a given listingId unless user edits.
       // Keep it short so updates show up quickly.
-      "cache-control": "public, max-age=600",
+      // If the share page includes ?v=..., this can be safely longer.
+      "cache-control": url.searchParams.get("v") ? "public, max-age=86400" : "public, max-age=600",
     },
   });
+  if (cache) {
+    // Best-effort cache populate.
+    try { await cache.put(cacheKey, res.clone()); } catch {}
+  }
+  return res;
 }
 
