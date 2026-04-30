@@ -111,14 +111,21 @@ function applyTemplate(tpl: string, dict: Record<string, string>): string {
 type EntryReq = {
   itemLabel: string;         // e.g. "Armor of Guardsman"
   itemTiered: boolean;       // +1..+7 by level range
+  tierTable: TierTableKey;   // 'bc' for BC/CC, 'ds' for Devil Square
   npc?: { name: string; map: string; coords?: string };
 };
 
-// Classic MU ticket ranges (cloak +N / armor of guardsman +N / invitation
-// +N). mupatos doesn't publish a level table in /eventos so we use the
-// canonical Korean MU ranges; close enough for "which ticket should I
-// bring" guidance and easy to override later if a player corrects us.
-const TIER_RANGES = [
+// Per-event tier brackets. mupatos doesn't publish exact tables in
+// /eventos so we use the canonical community ranges. BC + CC share the
+// same brackets; DS is wider (every tier covers ~50 more levels). MG/DL
+// get a shifted (lower) version of each table because those classes are
+// created at higher level and the server balancing lets them queue for
+// bigger tiers earlier. Easy to tune if a player corrects us.
+
+type TierRange = { tier: number; min: number; max: number };
+type TierTableKey = "bc" | "ds";
+
+const TIER_RANGES_BC: TierRange[] = [
   { tier: 1, min: 15,  max: 80 },
   { tier: 2, min: 81,  max: 130 },
   { tier: 3, min: 131, max: 180 },
@@ -127,11 +134,7 @@ const TIER_RANGES = [
   { tier: 6, min: 281, max: 330 },
   { tier: 7, min: 331, max: 9999 },
 ];
-
-// MG / DL get a shifted (lower) table — they're created already at high
-// level and the in-game event balancing lets them queue for higher
-// tiers earlier. Approximate community standard, easy to tune later.
-const TIER_RANGES_MG_DL = [
+const TIER_RANGES_BC_MG_DL: TierRange[] = [
   { tier: 1, min: 15,  max: 50 },
   { tier: 2, min: 51,  max: 100 },
   { tier: 3, min: 101, max: 150 },
@@ -139,6 +142,24 @@ const TIER_RANGES_MG_DL = [
   { tier: 5, min: 201, max: 250 },
   { tier: 6, min: 251, max: 300 },
   { tier: 7, min: 301, max: 9999 },
+];
+const TIER_RANGES_DS: TierRange[] = [
+  { tier: 1, min: 15,  max: 130 },
+  { tier: 2, min: 131, max: 180 },
+  { tier: 3, min: 181, max: 230 },
+  { tier: 4, min: 231, max: 280 },
+  { tier: 5, min: 281, max: 330 },
+  { tier: 6, min: 331, max: 400 },
+  { tier: 7, min: 401, max: 9999 },
+];
+const TIER_RANGES_DS_MG_DL: TierRange[] = [
+  { tier: 1, min: 15,  max: 100 },
+  { tier: 2, min: 101, max: 150 },
+  { tier: 3, min: 151, max: 200 },
+  { tier: 4, min: 201, max: 250 },
+  { tier: 5, min: 251, max: 300 },
+  { tier: 6, min: 301, max: 370 },
+  { tier: 7, min: 371, max: 9999 },
 ];
 
 function isMgOrDl(charClass: string | null | undefined): boolean {
@@ -151,13 +172,15 @@ function isMgOrDl(charClass: string | null | undefined): boolean {
       || c.includes("lord emperor");
 }
 
-function tierTableFor(charClass: string | null | undefined) {
-  return isMgOrDl(charClass) ? TIER_RANGES_MG_DL : TIER_RANGES;
+function tierTableFor(tableKey: TierTableKey, charClass: string | null | undefined): TierRange[] {
+  const mg = isMgOrDl(charClass);
+  if (tableKey === "ds") return mg ? TIER_RANGES_DS_MG_DL : TIER_RANGES_DS;
+  return mg ? TIER_RANGES_BC_MG_DL : TIER_RANGES_BC;
 }
 
-function tierForLevel(level: number | null, charClass?: string | null): { tier: number; min: number; max: number } | null {
+function tierForLevel(level: number | null, tableKey: TierTableKey, charClass?: string | null): TierRange | null {
   if (level == null || !Number.isFinite(level)) return null;
-  for (const r of tierTableFor(charClass)) if (level >= r.min && level <= r.max) return r;
+  for (const r of tierTableFor(tableKey, charClass)) if (level >= r.min && level <= r.max) return r;
   return null;
 }
 
@@ -175,13 +198,13 @@ function serverEventEntryReq(eventNameRaw: string): EntryReq | null {
   const n = (eventNameRaw || "").toLowerCase();
   if (!n) return null;
   if (n.includes("chaos castle")) {
-    return { itemLabel: "Armor of Guardsman", itemTiered: true, npc: { name: "Chaos Goblin", map: "Noria", coords: "168,96" } };
+    return { itemLabel: "Armor of Guardsman", itemTiered: true, tierTable: "bc", npc: { name: "Chaos Goblin", map: "Noria", coords: "168,96" } };
   }
   if (n.includes("blood castle")) {
-    return { itemLabel: "Invisibility Cloak", itemTiered: true, npc: { name: "Archangel Messenger", map: "Devias", coords: "198,47" } };
+    return { itemLabel: "Invisibility Cloak", itemTiered: true, tierTable: "bc", npc: { name: "Archangel Messenger", map: "Devias", coords: "198,47" } };
   }
   if (n.includes("devil square")) {
-    return { itemLabel: "Devil's Invitation", itemTiered: true, npc: { name: "Charon", map: "Noria", coords: "167,90" } };
+    return { itemLabel: "Devil's Invitation", itemTiered: true, tierTable: "ds", npc: { name: "Charon", map: "Noria", coords: "167,90" } };
   }
   return null;
 }
@@ -193,12 +216,13 @@ function serverEventEntryReq(eventNameRaw: string): EntryReq | null {
 function pickBestCharForTier(
   chars: Array<{ name: string; level: number | null; charClass?: string | null }>,
   fixedTier: number | null,
+  tableKey: TierTableKey,
 ): { name: string; level: number; tier: number; charClass: string | null } | null {
   const ranked = chars
     .filter((c): c is { name: string; level: number; charClass?: string | null } => c.level != null && Number.isFinite(c.level))
     .map((c) => {
       const cls = c.charClass ?? null;
-      const r = tierForLevel(c.level, cls);
+      const r = tierForLevel(c.level, tableKey, cls);
       return { name: c.name, level: c.level, tier: r?.tier ?? 0, charClass: cls };
     })
     .filter((c) => c.tier > 0);
@@ -245,7 +269,7 @@ export function formatServerEventAlert(opts: {
       : opts.userMaxLevel != null
       ? [{ name: "?", level: opts.userMaxLevel, charClass: null }]
       : [];
-  const best = req?.itemTiered ? pickBestCharForTier(chars, fixedTier) : null;
+  const best = req?.itemTiered ? pickBestCharForTier(chars, fixedTier, req.tierTable) : null;
 
   let extra = "";
   let itemLine = "";
@@ -257,9 +281,9 @@ export function formatServerEventAlert(opts: {
       // from the recommended char's level, else generic placeholder.
       const displayTier = fixedTier ?? best?.tier ?? null;
       if (displayTier != null) {
-        // If we have a recommended char, show the level range that
-        // applies to THEIR class — MG/DL gets the shifted table.
-        const table = tierTableFor(best?.charClass);
+        // Show the level range for THIS event type (BC vs DS) and the
+        // recommended char's class (MG/DL shifted, else standard).
+        const table = tierTableFor(req.tierTable, best?.charClass);
         const range = table.find((r) => r.tier === displayTier);
         const levelRange = range ? ` (lvl ${range.min}–${range.max}${isMgOrDl(best?.charClass) ? ", MG/DL" : ""})` : "";
         itemLine = `🎟️ Entrada: <b>${escHtml(req.itemLabel)} +${displayTier}</b>${levelRange}.`;
