@@ -5,6 +5,8 @@ export type ItemRulesBackfillParams = {
   cookie?: string;
   /** Set only by `ItemRulesBackfillWorkflow` for live log lines in D1; never send from clients. */
   _workflow_instance_id?: string;
+  /** Set only by the workflow runner: process one `item_sources.category` per step (internal). */
+  _category?: string;
 };
 
 export interface Env {

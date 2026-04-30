@@ -17,7 +17,7 @@ const BACKFILL_SCRAPE_CONCURRENCY_WITH_COOKIE = 10;
 /** Keeps `N threads × scrapeConcurrency` shop fetches near this ceiling (helps stay under Worker subrequest limits). */
 const BACKFILL_SCRAPE_GLOBAL_MAX = 36;
 /** Scrape + import this many items per wave (cookie refresh between waves when authed). */
-const BACKFILL_SCRAPE_BATCH_SIZE = 40;
+export const BACKFILL_SCRAPE_BATCH_SIZE = 40;
 
 /** How many distinct items to process when `limit` is omitted (full-catalog backfill). */
 const BACKFILL_DEFAULT_LIMIT = 10_000;
@@ -35,6 +35,8 @@ export function normalizeBackfillLimit(raw: unknown): number {
 
 /** Free-tier Workflow instances: ~50 external `fetch` subrequests per instance (login + shop pages). */
 const WORKFLOW_BACKFILL_DEFAULT_SQL_LIMIT = 45;
+/** Cap how many category-scoped workflow steps we enqueue in one instance (safety). */
+const BACKFILL_WORKFLOW_MAX_CATEGORY_STEPS = 200;
 
 function resolveWorkflowBackfillSqlLimit(env: Env, wid: string | undefined, requested: number): number {
   if (!wid?.trim()) return requested;
@@ -488,6 +490,46 @@ type BackfillPickRow = { item_slug: string; detail_url: string; name: string; ca
 
 type ScrapeShopItemRuleFn = typeof import("../shop-scrape").scrapeShopItemRule;
 
+/** Distinct `item_sources.category` values that still have backfill work (for workflow step fan-out). */
+export async function listPendingBackfillCategories(
+  env: Env,
+  liveInstanceId?: string,
+): Promise<string[]> {
+  const rs = await env.DB.prepare(
+    `SELECT DISTINCT TRIM(s.category) AS category
+       FROM item_sources s
+       JOIN items i ON i.slug = s.item_slug
+       LEFT JOIN item_rules r ON r.item_slug = s.item_slug
+      WHERE r.item_slug IS NULL
+         OR r.excellent_values IS NULL
+         OR r.ancient_values IS NULL
+      ORDER BY category COLLATE NOCASE
+      LIMIT ?`,
+  )
+    .bind(BACKFILL_WORKFLOW_MAX_CATEGORY_STEPS)
+    .all<{ category: string }>();
+  const out = (rs.results ?? [])
+    .map((row) => (row.category ?? "").trim())
+    .filter(Boolean);
+  await backfillLiveLog(
+    env,
+    liveInstanceId,
+    "workflow discover categories=" + out.length + " (max_steps=" + BACKFILL_WORKFLOW_MAX_CATEGORY_STEPS + ")",
+  );
+  return out;
+}
+
+/** Stable, URL-safe fragment for Cloudflare Workflow `step.do` names. */
+export function backfillWorkflowStepNameForCategory(category: string, index: number): string {
+  const raw = (category || "cat").normalize("NFKD").replace(/[\u0300-\u036f]/g, "");
+  const slug = raw
+    .replace(/[^a-zA-Z0-9_-]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .replace(/-+/g, "-")
+    .slice(0, 72);
+  return ("backfill-" + (slug || "cat") + "-" + index).slice(0, 120);
+}
+
 /** Scrape + import all rows for one category (runs in parallel with other categories). */
 async function runBackfillCategoryThread(
   env: Env,
@@ -625,10 +667,9 @@ export async function runBackfillItemRulesFromSourcesCore(
       ? "authed"
       : "none";
 
-  // One row per item_slug: ROW_NUMBER sees *all* matching source rows (no LIMIT*25 truncation),
-  // then we cap how many distinct items to scrape this run with outer LIMIT.
-  // Queue = no rule yet, or shop lists never persisted (NULL). JSON [] means "scraped / confirmed empty" — skip.
-  const rs = await env.DB.prepare(
+  const categoryScope = (input._category ?? "").trim();
+
+  const backfillPickSql = (categoryClause: string) =>
     `SELECT picked.item_slug AS item_slug, picked.shop AS shop, picked.category AS category, picked.detail_url AS detail_url, picked.name AS name
        FROM (
          SELECT
@@ -652,9 +693,10 @@ export async function runBackfillItemRulesFromSourcesCore(
          FROM item_sources s
          JOIN items i ON i.slug = s.item_slug
          LEFT JOIN item_rules r ON r.item_slug = s.item_slug
-        WHERE r.item_slug IS NULL
+        WHERE (r.item_slug IS NULL
            OR r.excellent_values IS NULL
-           OR r.ancient_values IS NULL
+           OR r.ancient_values IS NULL)
+           ${categoryClause}
        ) AS picked
       WHERE picked.rn = 1
       ORDER BY
@@ -666,8 +708,17 @@ export async function runBackfillItemRulesFromSourcesCore(
         END,
         picked.shop COLLATE NOCASE,
         picked.item_slug COLLATE NOCASE
-      LIMIT ?`,
-  ).bind(sqlLimit).all<{ item_slug: string; shop: string; detail_url: string; name: string }>();
+      LIMIT ?`;
+
+  // One row per item_slug: ROW_NUMBER sees *all* matching source rows (no LIMIT*25 truncation),
+  // then we cap how many distinct items to scrape this run with outer LIMIT.
+  // Queue = no rule yet, or shop lists never persisted (NULL). JSON [] means "scraped / confirmed empty" — skip.
+  const rs = categoryScope
+    ? await env.DB
+        .prepare(backfillPickSql(`AND LOWER(TRIM(COALESCE(s.category, ''))) = LOWER(TRIM(?))`))
+        .bind(categoryScope, sqlLimit)
+        .all<{ item_slug: string; shop: string; detail_url: string; name: string }>()
+    : await env.DB.prepare(backfillPickSql("")).bind(sqlLimit).all<{ item_slug: string; shop: string; detail_url: string; name: string }>();
 
   let attempted = 0;
   let imported = 0;
@@ -696,10 +747,9 @@ export async function runBackfillItemRulesFromSourcesCore(
       ? BACKFILL_SCRAPE_CONCURRENCY_WITH_COOKIE
       : ADMIN_PARALLEL_CONCURRENCY;
   const nCategoryThreads = Math.max(1, byCategory.size);
-  const scrapeConcurrency = Math.max(
-    1,
-    Math.min(scrapeConcDesired, Math.floor(BACKFILL_SCRAPE_GLOBAL_MAX / nCategoryThreads)),
-  );
+  const scrapeConcurrency = categoryScope
+    ? Math.min(scrapeConcDesired, BACKFILL_SCRAPE_GLOBAL_MAX)
+    : Math.max(1, Math.min(scrapeConcDesired, Math.floor(BACKFILL_SCRAPE_GLOBAL_MAX / nCategoryThreads)));
 
   await backfillLiveLog(
     env,
@@ -708,6 +758,7 @@ export async function runBackfillItemRulesFromSourcesCore(
       picked.length +
       " categories=" +
       byCategory.size +
+      (categoryScope ? " category_scope=" + categoryScope : "") +
       " limit_requested=" +
       limit +
       (sqlLimit < limit ? " limit_effective=" + sqlLimit + " (workflow cap)" : "") +
@@ -741,28 +792,43 @@ export async function runBackfillItemRulesFromSourcesCore(
     await backfillLiveLog(env, wid, "shop session ready (shared across category threads)");
   }
 
-  // One parallel thread per category; all reuse `sharedAuthedCookie` when authed.
-  const settled = await Promise.allSettled(
-    [...byCategory.entries()].map(async ([category, catRows]) => {
-      const threadCookie =
-        cookieSource === "provided" ? (cookieIn || undefined) : sharedAuthedCookie;
-      return runBackfillCategoryThread(
-        env,
-        category,
-        catRows,
-        threadCookie,
-        scrapeConcurrency,
-        scrapeShopItemRule,
-        wid,
+  const threadCookieBase = cookieSource === "provided" ? (cookieIn || undefined) : sharedAuthedCookie;
+
+  // Workflow + `_category`: one category per Worker invocation (Workflow step). Otherwise parallel per category.
+  const settled = categoryScope
+    ? await Promise.allSettled([
+        (async () => {
+          const catRows = byCategory.get(categoryScope) ?? [];
+          return runBackfillCategoryThread(
+            env,
+            categoryScope,
+            catRows,
+            threadCookieBase,
+            scrapeConcurrency,
+            scrapeShopItemRule,
+            wid,
+          );
+        })(),
+      ])
+    : await Promise.allSettled(
+        [...byCategory.entries()].map(async ([category, catRows]) => {
+          return runBackfillCategoryThread(
+            env,
+            category,
+            catRows,
+            threadCookieBase,
+            scrapeConcurrency,
+            scrapeShopItemRule,
+            wid,
+          );
+        }),
       );
-    }),
-  );
 
   let batches = 0;
   for (let ti = 0; ti < settled.length; ti++) {
     const s = settled[ti]!;
     if (s.status === "rejected") {
-      const cat = [...byCategory.keys()][ti] ?? "?";
+      const cat = categoryScope || [...byCategory.keys()][ti] || "?";
       const line = "[" + cat + "] thread: " + String((s.reason as Error)?.message ?? s.reason);
       errors.push(line);
       continue;
