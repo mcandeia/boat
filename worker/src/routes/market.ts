@@ -399,6 +399,7 @@ async function loadListings(
   binds: (string | number)[],
   orderClause: string,
   orderBinds: (string | number)[],
+  offset: number,
   limit: number,
 ): Promise<ListingDTO[]> {
   // Status comes from the listing's linked "contact char" — picked
@@ -417,7 +418,7 @@ async function loadListings(
     "LEFT JOIN characters c ON c.id = l.char_id " +
     "LEFT JOIN (SELECT listing_id, COUNT(*) cnt FROM listing_reactions GROUP BY listing_id) rc ON rc.listing_id = l.id " +
     "LEFT JOIN (SELECT listing_id, COUNT(*) cnt FROM listing_comments GROUP BY listing_id) cc ON cc.listing_id = l.id " +
-    where + " " + orderClause + " LIMIT ?";
+    where + " " + orderClause + " LIMIT ? OFFSET ?";
 
   type Row = ListingRow & {
     nickname: string | null;
@@ -431,7 +432,7 @@ async function loadListings(
     comment_count: number;
   };
   const rs = await env.DB.prepare(sql)
-    .bind(...binds, ...orderBinds, limit)
+    .bind(...binds, ...orderBinds, limit, offset)
     .all<Row>();
   const rows = rs.results ?? [];
   if (rows.length === 0) return [];
@@ -475,7 +476,10 @@ export async function listListings(env: Env, userId: number | null, url: URL): P
   const side = url.searchParams.get("side");
   const currency = url.searchParams.get("currency");
   const q = (url.searchParams.get("q") ?? "").trim();
-  const limit = Math.min(Math.max(Number(url.searchParams.get("limit") ?? 50), 1), 100);
+  const limit = Math.min(Math.max(Number(url.searchParams.get("limit") ?? 40), 1), 100);
+  const pageRaw = Number(url.searchParams.get("page") ?? 1);
+  const page = Number.isFinite(pageRaw) ? Math.min(Math.max(Math.floor(pageRaw), 1), 1000) : 1;
+  const offset = (page - 1) * limit;
 
   const wheres: string[] = ["1=1"];
   const binds: (string | number)[] = [];
@@ -499,20 +503,24 @@ export async function listListings(env: Env, userId: number | null, url: URL): P
     : "ORDER BY CASE l.status WHEN 'open' THEN 1 WHEN 'held' THEN 0 ELSE -1 END DESC, l.created_at DESC";
   const orderBinds = sort === "hot" ? orderHot.binds : [];
 
-  const listings = await loadListings(
+  // Fetch one extra row to decide has_more.
+  const fetched = await loadListings(
     env,
     userId,
     "WHERE " + wheres.join(" AND "),
     binds,
     orderClause,
     orderBinds,
-    limit,
+    offset,
+    limit + 1,
   );
-  return json({ listings });
+  const has_more = fetched.length > limit;
+  const listings = has_more ? fetched.slice(0, limit) : fetched;
+  return json({ listings, page, limit, has_more });
 }
 
 export async function getListing(env: Env, userId: number | null, listingId: number): Promise<Response> {
-  const list = await loadListings(env, userId, "WHERE l.id = ?", [listingId], "", [], 1);
+  const list = await loadListings(env, userId, "WHERE l.id = ?", [listingId], "", [], 0, 1);
   if (list.length === 0) return bad(404, "anúncio não encontrado");
   const listing = list[0];
 
