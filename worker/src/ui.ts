@@ -378,6 +378,7 @@ export const INDEX_HTML = /* html */ `<!doctype html>
 
                 <div class="px-3 py-2 text-[10px] uppercase tracking-widest text-muted border-t border-border/60 border-b border-border/60">Watchers / cron</div>
                 <button data-admin-action="spawn-watchers" class="w-full text-left px-3 py-2 text-xs hover:bg-bg/60">🤖 Spawn watchers</button>
+                <button data-admin-action="ping-test" class="w-full text-left px-3 py-2 text-xs hover:bg-bg/60">🛰️ Ping-test DO</button>
                 <button data-admin-action="poll" class="w-full text-left px-3 py-2 text-xs hover:bg-bg/60 font-semibold text-goldsoft">⏱️ Rodar cron agora</button>
 
                 <div class="px-3 py-2 text-[10px] uppercase tracking-widest text-muted border-t border-border/60 border-b border-border/60">Ferramentas</div>
@@ -3280,6 +3281,7 @@ if ($("admin-actions-btn")) {
     "import-shop": "admin-scrape-shop-item",
     backfill: "admin-backfill-item-rules",
     "spawn-watchers": "admin-spawn-watchers",
+    "ping-test": "admin-ping-test",
     poll: "admin-poll",
   };
   menu.querySelectorAll("[data-admin-action]").forEach((el) => {
