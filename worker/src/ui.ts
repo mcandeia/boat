@@ -412,10 +412,18 @@ export const INDEX_HTML = /* html */ `<!doctype html>
               <h3 class="text-xs uppercase tracking-widest text-goldsoft">Backfill (Workflow)</h3>
               <button type="button" id="admin-backfill-workflow-close" class="px-2 py-1 rounded border border-border text-[11px] hover:bg-bg">fechar</button>
             </div>
+            <div class="flex flex-wrap items-center justify-between gap-2 mb-2">
+              <div class="text-[10px] uppercase tracking-wide text-muted">Instância</div>
+              <select id="admin-backfill-workflow-select" class="max-w-full bg-bg border border-border rounded px-2 py-1 text-[11px] text-slate-200">
+                <option value="">—</option>
+              </select>
+            </div>
+            <p id="admin-backfill-workflow-overall" class="text-[11px] text-muted leading-snug mb-2"></p>
             <p id="admin-backfill-workflow-summary" class="text-[11px] text-muted leading-snug mb-2"></p>
             <div id="admin-backfill-workflow-progressbar" class="h-1.5 w-full rounded-full bg-border overflow-hidden mb-2 hidden">
-              <div class="h-full w-1/3 rounded-full bg-gold/60 animate-pulse"></div>
+              <div id="admin-backfill-workflow-progressbar-inner" class="h-full w-0 rounded-full bg-gold/70 transition-[width] duration-300"></div>
             </div>
+            <div id="admin-backfill-workflow-list" class="mb-2 max-h-32 overflow-auto rounded border border-border bg-bg/50 p-2 text-[11px] leading-snug"></div>
             <div class="mb-2">
               <div class="text-[10px] uppercase tracking-wide text-muted mb-1">Saída ao vivo</div>
               <pre id="admin-backfill-workflow-lines" class="max-h-44 overflow-auto rounded border border-border bg-bg p-2 text-[10px] leading-snug whitespace-pre-wrap break-words font-mono text-slate-300"></pre>
@@ -579,6 +587,18 @@ const fetchJSONQuiet = async (url, opts = {}) => {
 };
 
 let adminBackfillWorkflowPollTimer = null;
+let adminBackfillWorkflowInstances = [];
+let adminBackfillWorkflowSelectedId = "";
+let adminBackfillWorkflowStatusById = new Map();
+let adminBackfillWorkflowPollIndex = 0;
+
+function adminBackfillWorkflowSelectLabel(pair) {
+  if (!pair || typeof pair !== "object") return "";
+  const cat = String(pair.category || "").trim();
+  const id = String(pair.instance_id || pair.id || "").trim();
+  const idShort = id.length > 18 ? (id.slice(0, 10) + "…" + id.slice(-6)) : id;
+  return (cat ? (cat + " · ") : "") + idShort;
+}
 
 function adminBackfillWorkflowStateString(statusRoot) {
   if (!statusRoot || typeof statusRoot !== "object") return "";
@@ -595,6 +615,12 @@ function adminBackfillWorkflowIsTerminal(statusRoot) {
   const st = adminBackfillWorkflowStateString(statusRoot).toLowerCase();
   if (!st) return false;
   return /complete|completed|success|errored|failed|terminated|canceled|cancelled|error/.test(st);
+}
+
+function adminBackfillWorkflowIsBadTerminal(statusRoot) {
+  if (!adminBackfillWorkflowIsTerminal(statusRoot)) return false;
+  const st = adminBackfillWorkflowStateString(statusRoot).toLowerCase();
+  return /error|errored|fail|failed|terminated|cancel|canceled|cancelled/.test(st);
 }
 
 function adminBackfillWorkflowFormatSummary(statusRoot) {
@@ -614,13 +640,116 @@ function adminBackfillWorkflowFormatSummary(statusRoot) {
   return "Estado: " + st;
 }
 
+function adminBackfillWorkflowRenderOverall() {
+  const overall = $("admin-backfill-workflow-overall");
+  const listEl = $("admin-backfill-workflow-list");
+  const bar = $("admin-backfill-workflow-progressbar");
+  const barInner = $("admin-backfill-workflow-progressbar-inner");
+  if (!overall || !listEl) return;
+
+  const total = adminBackfillWorkflowInstances.length;
+  if (!total) {
+    overall.textContent = "";
+    listEl.innerHTML = "";
+    if (bar) bar.classList.add("hidden");
+    return;
+  }
+
+  let known = 0;
+  let done = 0;
+  let bad = 0;
+  let running = 0;
+  let sumImported = 0;
+  let sumAttempted = 0;
+
+  const rows = [];
+  for (const pair of adminBackfillWorkflowInstances) {
+    const id = pair.instance_id;
+    const stRoot = adminBackfillWorkflowStatusById.get(id);
+    const label = escapeHtml(adminBackfillWorkflowSelectLabel(pair) || id);
+    if (!stRoot) {
+      rows.push('<div class="flex items-center justify-between gap-2"><span class="text-muted">• ' + label + '</span><span class="text-muted">—</span></div>');
+      continue;
+    }
+    known++;
+    const state = adminBackfillWorkflowStateString(stRoot) || "—";
+    const isTerm = adminBackfillWorkflowIsTerminal(stRoot);
+    if (isTerm) done++;
+    if (adminBackfillWorkflowIsBadTerminal(stRoot)) bad++;
+    if (!isTerm) running++;
+    const out = stRoot.output;
+    if (out && typeof out === "object" && out.ok === true) {
+      sumImported += Number(out.imported || 0);
+      sumAttempted += Number(out.attempted || 0);
+    }
+    const right = escapeHtml(String(state));
+    const dotCls = isTerm
+      ? (adminBackfillWorkflowIsBadTerminal(stRoot) ? "text-danger" : "text-green-400")
+      : "text-goldsoft";
+    rows.push(
+      '<div class="flex items-center justify-between gap-2">' +
+        '<span class="' + dotCls + '">•</span>' +
+        '<span class="flex-1 min-w-0 truncate">' + label + '</span>' +
+        '<span class="text-muted">' + right + '</span>' +
+      '</div>'
+    );
+  }
+
+  const pct = total ? Math.round((done / total) * 100) : 0;
+  overall.textContent =
+    "Progresso: " + done + "/" + total + " (" + pct + "%)" +
+    (running ? (" · em execução: " + running) : "") +
+    (bad ? (" · com erro: " + bad) : "") +
+    (sumAttempted ? (" · total imported " + sumImported + "/" + sumAttempted) : "");
+
+  listEl.innerHTML = rows.join("");
+  if (bar && barInner) {
+    bar.classList.remove("hidden");
+    barInner.style.width = Math.max(0, Math.min(100, pct)) + "%";
+  }
+}
+
+function adminBackfillWorkflowAllTerminal() {
+  if (!adminBackfillWorkflowInstances.length) return true;
+  for (const pair of adminBackfillWorkflowInstances) {
+    const id = pair.instance_id;
+    const st = adminBackfillWorkflowStatusById.get(id);
+    if (!st) return false;
+    if (!adminBackfillWorkflowIsTerminal(st)) return false;
+  }
+  return true;
+}
+
 function stopAdminBackfillWorkflowMonitor() {
   if (adminBackfillWorkflowPollTimer) {
     clearInterval(adminBackfillWorkflowPollTimer);
     adminBackfillWorkflowPollTimer = null;
   }
+  adminBackfillWorkflowInstances = [];
+  adminBackfillWorkflowSelectedId = "";
+  adminBackfillWorkflowStatusById = new Map();
+  adminBackfillWorkflowPollIndex = 0;
   const bar = $("admin-backfill-workflow-progressbar");
   if (bar) bar.classList.add("hidden");
+}
+
+async function pollAdminBackfillWorkflowStatusOnly(instanceId) {
+  try {
+    const data = await fetchJSONQuiet("/api/admin/item-rules/backfill/status?id=" + encodeURIComponent(instanceId));
+    adminBackfillWorkflowStatusById.set(instanceId, data.status);
+  } catch (e) {
+    // Mark not-found as terminal so overall progress doesn't get stuck.
+    try {
+      const msg = String(e && e.message ? e.message : e);
+      if (/instance\.not_found|inst[âa]ncia n[ãa]o encontrada/i.test(msg)) {
+        adminBackfillWorkflowStatusById.set(instanceId, { status: "not_found", done: true, error: msg });
+      }
+    } catch {
+      /* ignore */
+    }
+  } finally {
+    adminBackfillWorkflowRenderOverall();
+  }
 }
 
 async function pollAdminBackfillWorkflowOnce(instanceId) {
@@ -635,11 +764,19 @@ async function pollAdminBackfillWorkflowOnce(instanceId) {
       fetchJSONQuiet("/api/admin/item-rules/backfill/output?id=" + encodeURIComponent(instanceId)).catch(() => ({ lines: [] })),
     ]);
     const st = data.status;
+    adminBackfillWorkflowStatusById.set(instanceId, st);
+    adminBackfillWorkflowRenderOverall();
     const idLabel = (data.instance_id || instanceId).length > 28
       ? (data.instance_id || instanceId).slice(0, 14) + "…"
       : (data.instance_id || instanceId);
+    const selectedPair = adminBackfillWorkflowInstances.find((x) => x && x.instance_id === instanceId) || null;
+    const catLabel = selectedPair && selectedPair.category ? (" · cat " + String(selectedPair.category)) : "";
+    const idx = adminBackfillWorkflowInstances.findIndex((x) => x && x.instance_id === instanceId);
+    const posLabel = (adminBackfillWorkflowInstances.length > 1 && idx >= 0)
+      ? (" (" + String(idx + 1) + "/" + String(adminBackfillWorkflowInstances.length) + ")")
+      : "";
     sum.textContent =
-      "instance " + idLabel + " · " + new Date().toLocaleTimeString() + " · " + adminBackfillWorkflowFormatSummary(st);
+      "instance " + idLabel + posLabel + catLabel + " · " + new Date().toLocaleTimeString() + " · " + adminBackfillWorkflowFormatSummary(st);
     if (linesEl) {
       const arr = out && Array.isArray(out.lines) ? out.lines : [];
       linesEl.textContent = arr.length
@@ -652,36 +789,135 @@ async function pollAdminBackfillWorkflowOnce(instanceId) {
       raw.textContent = String(st);
     }
     if (adminBackfillWorkflowIsTerminal(st)) {
-      stopAdminBackfillWorkflowMonitor();
       const stateLo = adminBackfillWorkflowStateString(st).toLowerCase();
       const bad = /error|errored|fail|terminated|cancel/.test(stateLo);
+      const cat = selectedPair && selectedPair.category ? String(selectedPair.category) : "";
       if (st && st.output && st.output.ok === true) {
         toast(
-          "Backfill concluído: " + st.output.imported + "/" + st.output.attempted + " importados",
+          "Backfill concluído" + (cat ? (" (" + cat + ")") : "") + ": " + st.output.imported + "/" + st.output.attempted + " importados",
           st.output.imported ? "ok" : "info",
           5200,
         );
       } else if (bad) {
         toast("Workflow terminou com problema — veja o JSON abaixo.", "err", 6500);
       }
+
+      // If this is a multi-instance monitor, keep it alive until all finish.
+      if (adminBackfillWorkflowInstances.length > 1 && !adminBackfillWorkflowAllTerminal()) {
+        // Auto-advance selection to the next running instance for smoother monitoring.
+        const next = adminBackfillWorkflowInstances.find((p) => {
+          const st2 = adminBackfillWorkflowStatusById.get(p.instance_id);
+          return !st2 || !adminBackfillWorkflowIsTerminal(st2);
+        });
+        if (next && next.instance_id && next.instance_id !== adminBackfillWorkflowSelectedId) {
+          adminBackfillWorkflowSelectedId = next.instance_id;
+          const sel = $("admin-backfill-workflow-select");
+          if (sel) sel.value = adminBackfillWorkflowSelectedId;
+          void pollAdminBackfillWorkflowOnce(adminBackfillWorkflowSelectedId);
+        }
+        return;
+      }
+
+      stopAdminBackfillWorkflowMonitor();
     } else {
       if (bar) bar.classList.remove("hidden");
     }
   } catch (e) {
-    sum.textContent = "Erro ao consultar status: " + e.message;
+    const msg = String(e && e.message ? e.message : e);
+    sum.textContent = "Erro ao consultar status: " + msg;
+    // Treat not-found as terminal error for this instance and auto-advance.
+    if (/instance\.not_found|inst[âa]ncia n[ãa]o encontrada/i.test(msg)) {
+      adminBackfillWorkflowStatusById.set(instanceId, { status: "not_found", done: true, error: msg });
+      adminBackfillWorkflowRenderOverall();
+      if (adminBackfillWorkflowInstances.length > 1) {
+        const next = adminBackfillWorkflowInstances.find((p) => {
+          const st2 = adminBackfillWorkflowStatusById.get(p.instance_id);
+          return !st2 || !adminBackfillWorkflowIsTerminal(st2);
+        });
+        if (next && next.instance_id && next.instance_id !== adminBackfillWorkflowSelectedId) {
+          adminBackfillWorkflowSelectedId = next.instance_id;
+          const sel = $("admin-backfill-workflow-select");
+          if (sel) sel.value = adminBackfillWorkflowSelectedId;
+          void pollAdminBackfillWorkflowOnce(adminBackfillWorkflowSelectedId);
+        }
+      }
+    }
   }
 }
 
-function startAdminBackfillWorkflowMonitor(instanceId) {
+function startAdminBackfillWorkflowMonitor(instanceOrList) {
   const panel = $("admin-backfill-workflow-panel");
-  if (!panel || !instanceId) return;
+  if (!panel) return;
   stopAdminBackfillWorkflowMonitor();
   panel.classList.remove("hidden");
+  const sel = $("admin-backfill-workflow-select");
+  if (sel) {
+    sel.innerHTML = "";
+  }
+
+  if (typeof instanceOrList === "string") {
+    const id = instanceOrList.trim();
+    if (!id) return;
+    adminBackfillWorkflowInstances = [{ category: "", instance_id: id }];
+    adminBackfillWorkflowSelectedId = id;
+    if (sel) {
+      const opt = document.createElement("option");
+      opt.value = id;
+      opt.textContent = adminBackfillWorkflowSelectLabel({ category: "", instance_id: id }) || id;
+      opt.selected = true;
+      sel.appendChild(opt);
+      sel.onchange = null;
+    }
+  } else if (Array.isArray(instanceOrList)) {
+    const list = instanceOrList
+      .map((x) => ({
+        category: x && typeof x === "object" ? String(x.category || "") : "",
+        instance_id: x && typeof x === "object" ? String(x.instance_id || "") : "",
+      }))
+      .filter((x) => x.instance_id && x.instance_id.trim());
+    if (list.length === 0) return;
+    adminBackfillWorkflowInstances = list;
+    adminBackfillWorkflowSelectedId = list[0].instance_id;
+    adminBackfillWorkflowStatusById = new Map();
+    adminBackfillWorkflowPollIndex = 0;
+    if (sel) {
+      for (const pair of list) {
+        const opt = document.createElement("option");
+        opt.value = pair.instance_id;
+        opt.textContent = adminBackfillWorkflowSelectLabel(pair) || pair.instance_id;
+        sel.appendChild(opt);
+      }
+      sel.value = adminBackfillWorkflowSelectedId;
+      sel.onchange = () => {
+        const v = String(sel.value || "").trim();
+        if (!v) return;
+        adminBackfillWorkflowSelectedId = v;
+        void pollAdminBackfillWorkflowOnce(adminBackfillWorkflowSelectedId);
+      };
+    }
+  } else {
+    return;
+  }
+
   const bar = $("admin-backfill-workflow-progressbar");
   if (bar) bar.classList.remove("hidden");
-  void pollAdminBackfillWorkflowOnce(instanceId);
+  void pollAdminBackfillWorkflowOnce(adminBackfillWorkflowSelectedId);
   adminBackfillWorkflowPollTimer = setInterval(() => {
-    void pollAdminBackfillWorkflowOnce(instanceId);
+    if (!adminBackfillWorkflowSelectedId) return;
+    void pollAdminBackfillWorkflowOnce(adminBackfillWorkflowSelectedId);
+    // Background progress: update one extra instance per tick (round-robin)
+    if (adminBackfillWorkflowInstances.length > 1) {
+      const n = adminBackfillWorkflowInstances.length;
+      // Try up to n times to find a non-selected id (avoid infinite loops)
+      for (let k = 0; k < n; k++) {
+        const idx = (adminBackfillWorkflowPollIndex++ % n);
+        const id = adminBackfillWorkflowInstances[idx].instance_id;
+        if (id && id !== adminBackfillWorkflowSelectedId) {
+          void pollAdminBackfillWorkflowStatusOnly(id);
+          break;
+        }
+      }
+    }
   }, 2500);
 }
 
@@ -2920,14 +3156,38 @@ if ($("admin-backfill-item-rules")) $("admin-backfill-item-rules").onclick = asy
   try {
     const body = { limit: 20000 };
     if (cookie && cookie.trim()) body.cookie = cookie.trim();
+    // Workflows aren't reliably introspectable on "wrangler dev" (instance.get/status returns not_found).
+    // On localhost, run inline (sync) so the admin button has deterministic feedback.
+    try {
+      const host = String(location && location.hostname ? location.hostname : "");
+      if (host === "localhost" || host === "127.0.0.1") {
+        body.sync = true;
+        toast("Localhost detectado — rodando backfill em modo sync (sem Workflow).", "info", 4200);
+      }
+    } catch {
+      /* ignore */
+    }
     const r = await withSpinner(btn, () => fetchJSON("/api/admin/item-rules/backfill", { method: "POST", body: JSON.stringify(body) }));
-    if (r && r.workflow && r.instance_id) {
+    if (r && r.workflow && Array.isArray(r.instances) && r.instances.length) {
+      toast("Backfill no Workflow (por categoria) — acompanhamento no painel abaixo.", "info", 4200);
+      startAdminBackfillWorkflowMonitor(r.instances);
+    } else if (r && r.workflow && Array.isArray(r.instances) && r.instances.length === 0) {
+      // No pending categories (or server returned an empty batch).
+      toast(String(r.message || "Nenhuma categoria pendente para backfill."), "info", 4500);
+    } else if (r && r.workflow && r.instance_id) {
       toast("Backfill no Workflow — acompanhamento no painel abaixo.", "info", 3800);
       startAdminBackfillWorkflowMonitor(r.instance_id);
+    } else if (r && r.workflow) {
+      toast(String(r.message || "Workflow iniciado."), "info", 4500);
     } else if (r && r.errors && r.errors.length) {
-      toast("backfill: " + r.imported + "/" + r.attempted + " · " + r.errors[0], "err");
+      const imp = (r.imported ?? "—");
+      const att = (r.attempted ?? "—");
+      toast("backfill: " + imp + "/" + att + " · " + r.errors[0], "err");
     } else {
-      toast("backfill: " + r.imported + "/" + r.attempted, r.imported ? "ok" : "info");
+      const imp = (r && r.imported != null) ? r.imported : "—";
+      const att = (r && r.attempted != null) ? r.attempted : "—";
+      const tone = (r && typeof r.imported === "number" && r.imported > 0) ? "ok" : "info";
+      toast("backfill: " + imp + "/" + att, tone);
     }
   } catch (err) { toast(err.message, "err"); }
 };

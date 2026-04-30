@@ -883,26 +883,47 @@ export async function adminBackfillItemRulesFromSources(env: Env, req: Request):
     return json(out);
   }
 
-  const instance = await env.BACKFILL_ITEM_RULES.create({ params });
-  const instanceId = instance.id;
-  let status: unknown = null;
-  try {
-    try {
-      const st = await instance.status();
-      disposeWorkflowHandle(st);
-      status = st;
-    } catch {
-      /* ignore */
-    }
+  // One workflow per category: spawn one scoped instance for each distinct
+  // `item_sources.category` that still has missing rules.
+  const categories = await listPendingBackfillCategories(env);
+  if (categories.length === 0) {
     return json({
       ok: true,
       workflow: true as const,
-      instance_id: instanceId,
-      status,
-      message: "Backfill em execução como Workflow. Consulte o status ou o dashboard da Cloudflare.",
+      per_category: true as const,
+      category_count: 0,
+      instances: [],
+      message: "Nenhuma categoria pendente para backfill.",
+    });
+  }
+
+  const instancePairs: Array<{ category: string; instance_id: string }> = [];
+  for (const cat of categories) {
+    const instance = await env.BACKFILL_ITEM_RULES.create({
+      params: {
+        ...params,
+        _category: cat,
+      },
+    });
+    try {
+      instancePairs.push({ category: cat, instance_id: instance.id });
+    } finally {
+      disposeWorkflowHandle(instance);
+    }
+  }
+
+  try {
+    return json({
+      ok: true,
+      workflow: true as const,
+      per_category: true as const,
+      category_count: instancePairs.length,
+      instances: instancePairs,
+      message:
+        "Backfill disparado como 1 Workflow por categoria. Consulte o status de cada instância ou o dashboard da Cloudflare.",
     });
   } finally {
-    disposeWorkflowHandle(instance);
+    // instances were disposed in-loop
   }
 }
 

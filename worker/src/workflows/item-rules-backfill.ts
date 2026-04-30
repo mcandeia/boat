@@ -38,6 +38,25 @@ export class ItemRulesBackfillWorkflow extends WorkflowEntrypoint<Env, ItemRules
       _workflow_instance_id: event.instanceId,
     };
 
+    // When a category is provided, this workflow instance is scoped to exactly one
+    // `item_sources.category` (spawned by the admin handler as "one workflow per category").
+    const categoryScope = (event.payload?._category ?? "").trim();
+    if (categoryScope) {
+      return await step.do(
+        "backfill-category",
+        {
+          timeout: "30 minutes",
+          retries: { limit: 2, delay: "20 seconds", backoff: "exponential" },
+        },
+        async () => {
+          return await runBackfillItemRulesFromSourcesCore(this.env, {
+            ...basePayload,
+            _category: categoryScope,
+          });
+        },
+      );
+    }
+
     const categories = await step.do(
       "discover-backfill-categories",
       {
