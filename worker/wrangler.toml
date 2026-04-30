@@ -65,6 +65,10 @@ TELEGRAM_BOT_USERNAME    = "mu_patos_bot"
 # MuPatos shop scrape: per-attempt AbortSignal timeout (first try); retries scale ~1.5× then 2×. Clamp 5000–120000 ms.
 SHOP_FETCH_TIMEOUT_MS    = "30000"
 
+# Item-rules backfill Workflow: external subrequests per instance are capped on Free (~50).
+# Omit → code uses ~45 items per workflow step. On Paid, set e.g. "20000" and/or Worker [limits].subrequests.
+# BACKFILL_WORKFLOW_ITEM_CAP = "20000"
+
 # ---------------------------------------------------------------------------
 # Storage. Top-level fields above must come before any [[section]] in TOML.
 # ---------------------------------------------------------------------------

@@ -33,6 +33,23 @@ export function normalizeBackfillLimit(raw: unknown): number {
   return Math.min(Math.max(n, 1), BACKFILL_MAX_LIMIT);
 }
 
+/** Free-tier Workflow instances: ~50 external `fetch` subrequests per instance (login + shop pages). */
+const WORKFLOW_BACKFILL_DEFAULT_SQL_LIMIT = 45;
+
+function resolveWorkflowBackfillSqlLimit(env: Env, wid: string | undefined, requested: number): number {
+  if (!wid?.trim()) return requested;
+  const raw = env.BACKFILL_WORKFLOW_ITEM_CAP;
+  let cap: number;
+  if (raw != null && String(raw).trim() !== "") {
+    cap = Math.floor(Number(String(raw).trim()));
+    if (!Number.isFinite(cap) || cap < 1) cap = WORKFLOW_BACKFILL_DEFAULT_SQL_LIMIT;
+  } else {
+    cap = WORKFLOW_BACKFILL_DEFAULT_SQL_LIMIT;
+  }
+  cap = Math.min(Math.max(cap, 1), BACKFILL_MAX_LIMIT);
+  return Math.min(requested, cap);
+}
+
 /** Workflow `create` / `get` return RPC stubs; must dispose to avoid runtime warnings. */
 function disposeWorkflowHandle(handle: unknown): void {
   if (handle == null) return;
@@ -144,7 +161,13 @@ type ItemRuleImport = {
     life_values?: number[];
     harmony_values?: string[];
   };
+  excellent_values?: string[];
   ancient_values?: string[];
+  /**
+   * Shop backfill only: when true, empty `excellent_values` / `ancient_values` arrays are stored as JSON `[]`
+   * so the row is not re-queued (imports omitting keys still use COALESCE / no-touch semantics).
+   */
+  persist_empty_excellent_ancient?: boolean;
 };
 
 function normalizeAncientSetName(raw: string): string {
@@ -253,11 +276,23 @@ async function upsertOneImportedItemRule(
     : [];
   const ancientNames = ancientVals.length > 0 ? [...ancientVals] : [];
 
-  // For partial imports/backfills, allow omitting excellent_values/ancient_values
-  // so we don't overwrite existing DB values with [].
-  // Also: if the property exists but the array is empty, treat it as "no update".
-  const excJsonOrNull = (hasExcProp && excVals.length > 0) ? JSON.stringify(excVals) : null;
-  const ancJsonOrNull = (hasAncProp && ancientVals.length > 0) ? JSON.stringify(ancientVals) : null;
+  const persistEmpty = Boolean(r.persist_empty_excellent_ancient);
+  // For partial JSON imports: omit keys or send [] → do not overwrite DB (COALESCE keeps prior).
+  // Shop backfill sets `persist_empty_excellent_ancient` so a successful scrape stores [] and leaves the queue.
+  const excJsonOrNull = !hasExcProp
+    ? null
+    : excVals.length > 0
+      ? JSON.stringify(excVals)
+      : persistEmpty
+        ? JSON.stringify([])
+        : null;
+  const ancJsonOrNull = !hasAncProp
+    ? null
+    : ancientVals.length > 0
+      ? JSON.stringify(ancientVals)
+      : persistEmpty
+        ? JSON.stringify([])
+        : null;
   const baseBinds = [
     name,
     r.kind ?? null,
@@ -416,14 +451,17 @@ export async function adminScrapeShopItemRule(env: Env, req: Request): Promise<R
   const r = await scrapeShopItemRule(env, { url: body.url, html: body.html, name: body.name, cookie: body.cookie } as never);
   if ("error" in r) return bad(409, r.error);
   // Reuse the bulk-import upsert logic shape.
-  const one = {
+  const one: ItemRuleImport = {
     name: r.rule.name,
     item_slug: r.rule.item_slug ?? null,
     kind: r.rule.kind ?? null,
     options: r.rule.options ?? {},
     suggested: r.rule.suggested ?? {},
-    excellent_values: r.rule.excellent_values ?? [],
-    ancient_values: (r.rule as unknown as { ancient_values?: string[] }).ancient_values ?? [],
+    excellent_values: Array.isArray(r.rule.excellent_values) ? r.rule.excellent_values : [],
+    ancient_values: Array.isArray((r.rule as { ancient_values?: string[] }).ancient_values)
+      ? (r.rule as { ancient_values: string[] }).ancient_values
+      : [],
+    persist_empty_excellent_ancient: true,
   };
   // Upsert exactly one.
   const fakeReq = new Request("http://local/import", { method: "POST", body: JSON.stringify({ rules: [one] }) });
@@ -483,24 +521,23 @@ async function runBackfillCategoryThread(
       cookie: cookieForFetch,
     } as never);
     if ("error" in scraped) throw new Error(row.name + ": " + scraped.error);
-    const ancientVals = ((scraped.rule as unknown as { ancient_values?: unknown }).ancient_values);
-    const excellentVals = (scraped.rule.excellent_values ?? null);
-    const one: Record<string, unknown> = {
+    const ancientVals = Array.isArray((scraped.rule as { ancient_values?: unknown }).ancient_values)
+      ? ((scraped.rule as { ancient_values: string[] }).ancient_values)
+      : [];
+    const excellentVals = Array.isArray(scraped.rule.excellent_values) ? scraped.rule.excellent_values : [];
+    const one: ItemRuleImport = {
       name: scraped.rule.name,
       item_slug: row.item_slug,
       kind: scraped.rule.kind ?? null,
       options: scraped.rule.options ?? {},
       suggested: scraped.rule.suggested ?? {},
+      excellent_values: excellentVals,
+      ancient_values: ancientVals,
+      persist_empty_excellent_ancient: true,
     };
-    const hasExcellent = Array.isArray(excellentVals) && excellentVals.length > 0;
-    const hasAncient = Array.isArray(ancientVals) && ancientVals.length > 0;
-    if (Array.isArray(excellentVals) && excellentVals.length > 0) {
-      one.excellent_values = excellentVals;
-    }
-    if (Array.isArray(ancientVals) && ancientVals.length > 0) {
-      one.ancient_values = ancientVals;
-    }
-    return { rule: one as ItemRuleImport, hasAncient, hasExcellent };
+    const hasExcellent = excellentVals.length > 0;
+    const hasAncient = ancientVals.length > 0;
+    return { rule: one, hasAncient, hasExcellent };
   };
 
   for (let i = 0; i < catRows.length; i += BACKFILL_SCRAPE_BATCH_SIZE) {
@@ -577,6 +614,7 @@ export async function runBackfillItemRulesFromSourcesCore(
   input: ItemRulesBackfillParams,
 ): Promise<ItemRulesBackfillCoreResult> {
   const limit = normalizeBackfillLimit(input.limit);
+  const sqlLimit = resolveWorkflowBackfillSqlLimit(env, input._workflow_instance_id, limit);
   const wid = input._workflow_instance_id;
   const cookieIn = (input.cookie ?? "").trim();
   const { scrapeShopItemRule, getShopAuthCookie } = await import("../shop-scrape");
@@ -589,6 +627,7 @@ export async function runBackfillItemRulesFromSourcesCore(
 
   // One row per item_slug: ROW_NUMBER sees *all* matching source rows (no LIMIT*25 truncation),
   // then we cap how many distinct items to scrape this run with outer LIMIT.
+  // Queue = no rule yet, or shop lists never persisted (NULL). JSON [] means "scraped / confirmed empty" — skip.
   const rs = await env.DB.prepare(
     `SELECT picked.item_slug AS item_slug, picked.shop AS shop, picked.category AS category, picked.detail_url AS detail_url, picked.name AS name
        FROM (
@@ -614,8 +653,8 @@ export async function runBackfillItemRulesFromSourcesCore(
          JOIN items i ON i.slug = s.item_slug
          LEFT JOIN item_rules r ON r.item_slug = s.item_slug
         WHERE r.item_slug IS NULL
-           OR r.excellent_values IS NULL OR r.excellent_values = '[]'
-           OR r.ancient_values IS NULL OR r.ancient_values = '[]'
+           OR r.excellent_values IS NULL
+           OR r.ancient_values IS NULL
        ) AS picked
       WHERE picked.rn = 1
       ORDER BY
@@ -628,7 +667,7 @@ export async function runBackfillItemRulesFromSourcesCore(
         picked.shop COLLATE NOCASE,
         picked.item_slug COLLATE NOCASE
       LIMIT ?`,
-  ).bind(limit).all<{ item_slug: string; shop: string; detail_url: string; name: string }>();
+  ).bind(sqlLimit).all<{ item_slug: string; shop: string; detail_url: string; name: string }>();
 
   let attempted = 0;
   let imported = 0;
@@ -665,7 +704,17 @@ export async function runBackfillItemRulesFromSourcesCore(
   await backfillLiveLog(
     env,
     wid,
-    "run start items=" + picked.length + " categories=" + byCategory.size + " limit=" + limit + " cookie_source=" + cookieSource + " scrape_concurrency=" + scrapeConcurrency,
+    "run start items=" +
+      picked.length +
+      " categories=" +
+      byCategory.size +
+      " limit_requested=" +
+      limit +
+      (sqlLimit < limit ? " limit_effective=" + sqlLimit + " (workflow cap)" : "") +
+      " cookie_source=" +
+      cookieSource +
+      " scrape_concurrency=" +
+      scrapeConcurrency,
   );
 
   // One login for the whole run: N× parallel `createShopSessionCookie` blows the Worker subrequest budget (esp. free tier).
