@@ -3220,7 +3220,14 @@ if ($("admin-spawn-watchers")) $("admin-spawn-watchers").onclick = async (e) => 
   const btn = e.currentTarget;
   try {
     const r = await withSpinner(btn, () => fetchJSON("/api/admin/watchers/spawn-all", { method: "POST" }));
-    toast("watchers: " + r.spawned + " ok / " + r.failed + " falhas (" + r.total + " chars)", "ok");
+    let msg = "watchers: " + r.spawned + " ok / " + r.failed + " falhas (" + r.total + " chars)";
+    // Surface the first backend error so the user can see WHY spawns
+    // are failing — the response includes errors[] from the worker.
+    if (r.errors && r.errors.length > 0) {
+      msg += "\nerro: " + r.errors[0].error;
+      console.error("spawn-all errors:", r.errors);
+    }
+    toast(msg, r.failed > 0 ? "err" : "ok", 12000);
   } catch (err) { toast(err.message, "err"); }
 };
 if ($("admin-health-refresh")) $("admin-health-refresh").onclick = () => loadAdminHealth();
