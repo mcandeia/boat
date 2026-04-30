@@ -3734,11 +3734,14 @@ function renderListingCard(l) {
   const date = new Date(l.created_at * 1000);
   const ago = fmtAgo(state.now ? state.now - l.created_at : Math.floor(Date.now() / 1000) - l.created_at);
 
-  const reactionsRow = l.reactions.map((r) =>
-    '<button data-action="react" data-kind="' + escapeHtml(r.kind) + '" class="h-7 inline-flex items-center gap-1 text-xs px-2 rounded border transition tabular-nums shrink-0 ' +
+  const reactionsRow = l.reactions.map((r) => {
+    const names = Array.isArray(r.nicknames) ? r.nicknames : [];
+    const tip = names.length ? r.kind + " · " + names.join(", ") : "";
+    const titleAttr = tip ? ' title="' + escapeHtml(tip) + '"' : "";
+    return '<button data-action="react" data-kind="' + escapeHtml(r.kind) + '"' + titleAttr + ' class="h-7 inline-flex items-center gap-1 text-xs px-2 rounded border transition tabular-nums shrink-0 ' +
     (r.mine ? "border-goldsoft bg-gold/10 text-goldsoft" : "border-border text-muted hover:text-slate-200 hover:bg-bg/70") +
-    '">' + r.kind + (r.count ? ' <span class="tabular-nums">' + r.count + '</span>' : "") + '</button>'
-  ).join("");
+    '">' + r.kind + (r.count ? ' <span class="tabular-nums">' + r.count + '</span>' : "") + '</button>';
+  }).join("");
 
   // MU color rule: Full / Excellent → emerald glow, Ancient → amber
   // glow, Char listing → purple, otherwise default.

@@ -396,7 +396,7 @@ interface ListingDTO extends ListingRow {
   char_resets: number | null;
   react_count: number;
   comment_count: number;
-  reactions: { kind: string; count: number; mine: boolean }[];
+  reactions: { kind: string; count: number; mine: boolean; nicknames: string[] }[];
 }
 
 async function loadListings(
@@ -467,12 +467,34 @@ async function loadListings(
     m.set(r.kind, r.cnt);
   }
 
+  // Per-(listing,kind) reactor nicknames for hover tooltips. Cap to a
+  // sane number so a viral listing doesn't ship a 500-name title attr.
+  const REACTOR_LIMIT = 50;
+  const namesRs = await env.DB
+    .prepare(
+      "SELECT lr.listing_id, lr.kind, COALESCE(u.nickname, '?') AS nickname, lr.ts " +
+      "FROM listing_reactions lr JOIN users u ON u.id = lr.user_id " +
+      "WHERE lr.listing_id IN (" + placeholders + ") " +
+      "ORDER BY lr.ts ASC",
+    )
+    .bind(...ids)
+    .all<{ listing_id: number; kind: string; nickname: string }>();
+  const namesByListing = new Map<number, Map<string, string[]>>();
+  for (const r of namesRs.results ?? []) {
+    let m = namesByListing.get(r.listing_id);
+    if (!m) { m = new Map(); namesByListing.set(r.listing_id, m); }
+    const arr = m.get(r.kind) ?? [];
+    if (arr.length < REACTOR_LIMIT) arr.push(r.nickname);
+    m.set(r.kind, arr);
+  }
+
   return rows.map((r) => ({
     ...r,
     reactions: [...REACTION_KINDS].map((kind) => ({
       kind,
       count: reactsByListing.get(r.id)?.get(kind) ?? 0,
       mine: mineSet.has(r.id + ":" + kind),
+      nicknames: namesByListing.get(r.id)?.get(kind) ?? [],
     })),
   }));
 }
