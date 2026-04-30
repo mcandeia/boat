@@ -1110,6 +1110,8 @@ interface AdminCharRow {
   owner_user_id: number | null;
   owner_first_name: string | null;
   owner_username: string | null;
+  /** JSON array of {id, first_name, username, is_gm, linked_at} — every user linked to this char. */
+  owners_json: string | null;
   sub_count: number;
   avg_reset_time?: number | null;
 }
@@ -1121,25 +1123,38 @@ export async function adminListChars(env: Env): Promise<Response> {
          c.id, c.name, c.blocked, c.class, c.resets, c.last_level,
          c.last_status, c.last_checked_at, c.rank_overall, c.rank_class,
          c.class_code, c.created_at,
-         -- best-effort: show one owner (latest link) for display
+         -- All linked users (chars are global; multiple users can register the same name).
+         -- owner_* fields kept for backward compat — they pick the OLDEST link
+         -- ("first to register"), which is more useful than the newest for
+         -- attribution. owners_json carries the full list for the admin UI.
          (SELECT u.id
             FROM user_characters uc
             JOIN users u ON u.id = uc.user_id
            WHERE uc.character_id = c.id
-           ORDER BY uc.created_at DESC
+           ORDER BY uc.created_at ASC
            LIMIT 1) AS owner_user_id,
          (SELECT u.first_name
             FROM user_characters uc
             JOIN users u ON u.id = uc.user_id
            WHERE uc.character_id = c.id
-           ORDER BY uc.created_at DESC
+           ORDER BY uc.created_at ASC
            LIMIT 1) AS owner_first_name,
          (SELECT u.telegram_username
             FROM user_characters uc
             JOIN users u ON u.id = uc.user_id
            WHERE uc.character_id = c.id
-           ORDER BY uc.created_at DESC
+           ORDER BY uc.created_at ASC
            LIMIT 1) AS owner_username,
+         (SELECT json_group_array(json_object(
+                   'id', u.id,
+                   'first_name', u.first_name,
+                   'username', u.telegram_username,
+                   'is_gm', uc.is_gm,
+                   'linked_at', uc.created_at
+                 ))
+            FROM user_characters uc
+            JOIN users u ON u.id = uc.user_id
+           WHERE uc.character_id = c.id) AS owners_json,
          (SELECT COUNT(*) FROM subscriptions s WHERE s.character_id = c.id AND s.active = 1) AS sub_count,
          (SELECT (MAX(start_ts) - MIN(start_ts)) / NULLIF(MAX(resets) - MIN(resets), 0)
           FROM (SELECT resets, MIN(ts) as start_ts FROM char_snapshots WHERE char_id = c.id GROUP BY resets)

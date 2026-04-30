@@ -2407,8 +2407,32 @@ async function loadAdminHealth() {
   }
 }
 function adminCharRowHtml(c) {
+  // Chars are global since migration 0011 — multiple users can link to the
+  // same name. Show all linkers (oldest first = original registrant).
+  let owners = [];
+  try { owners = c.owners_json ? JSON.parse(c.owners_json) : []; } catch {}
+  owners.sort(function (a, b) { return (a.linked_at || 0) - (b.linked_at || 0); });
+  function ownerLabel(o) {
+    const name = o.first_name || (o.username ? "@" + o.username : "user " + o.id);
+    return escapeHtml(name) + ' <span class="text-muted">#' + o.id + '</span>';
+  }
   const ownerId = (c.owner_user_id != null) ? c.owner_user_id : (c.user_id != null ? c.user_id : null);
-  const owner = c.owner_first_name || (c.owner_username ? "@" + c.owner_username : (ownerId != null ? ("user " + ownerId) : "—"));
+  const ownerCell = owners.length === 0
+    ? '<span class="text-muted">—</span>'
+    : owners.length === 1
+      ? ownerLabel(owners[0])
+      : (
+        '<details class="cursor-pointer">' +
+          '<summary class="hover:underline">' + ownerLabel(owners[0]) +
+            ' <span class="text-muted">+' + (owners.length - 1) + '</span>' +
+          '</summary>' +
+          '<div class="mt-1 space-y-0.5 text-[11px]">' +
+            owners.slice(1).map(function (o) {
+              return '<div>' + ownerLabel(o) + '</div>';
+            }).join('') +
+          '</div>' +
+        '</details>'
+      );
   const status = c.last_status
     ? (c.last_status === "Online"
         ? '<span class="text-ok">Online</span>'
@@ -2427,7 +2451,7 @@ function adminCharRowHtml(c) {
       '<a href="https://mupatos.com.br/site/profile/character/' + encodeURIComponent(c.name) + '" target="_blank" rel="noopener" class="text-goldsoft hover:underline">' + escapeHtml(c.name) + '</a>' +
       blockedBadge + (c.is_gm ? ' <span class="text-[10px] text-gold uppercase">GM</span>' : '') +
     '</td>' +
-    '<td class="py-1.5 pr-2">' + escapeHtml(owner) + (ownerId != null ? (' <span class="text-muted">#' + ownerId + '</span>') : '') + '</td>' +
+    '<td class="py-1.5 pr-2">' + ownerCell + '</td>' +
     '<td class="py-1.5 pr-2">' + classHtml + '</td>' +
     '<td class="py-1.5 pr-2">' + (c.last_level != null ? c.last_level : '<span class="text-muted">—</span>') + ' <span class="text-muted text-[10px]">lvl</span> / ' + (typeof c.resets === "number" ? c.resets : "—") + ' <span class="text-muted text-[10px]">rr</span>' + (c.avg_reset_time ? '<br><span class="text-muted text-[10px]">~' + formatDuration(c.avg_reset_time) + '/rr</span>' : '') + '</td>' +
     '<td class="py-1.5 pr-2">' + status + '</td>' +
