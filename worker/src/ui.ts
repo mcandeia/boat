@@ -393,6 +393,7 @@ export const INDEX_HTML = /* html */ `<!doctype html>
                 <button id="admin-scrape-shop-item">import shop</button>
                 <button id="admin-backfill-item-rules">backfill</button>
                 <button id="admin-spawn-watchers">spawn watchers</button>
+                <button id="admin-ping-test">ping-test DO</button>
                 <button id="admin-poll">poll</button>
               </div>
             </div>
@@ -3216,6 +3217,14 @@ if ($("admin-backfill-workflow-close")) {
     if (p) p.classList.add("hidden");
   };
 }
+if ($("admin-ping-test")) $("admin-ping-test").onclick = async (e) => {
+  const btn = e.currentTarget;
+  try {
+    const r = await withSpinner(btn, () => fetchJSON("/api/admin/ping-test", { method: "POST" }));
+    console.log("ping-test result:", r);
+    toast("ping-test: " + JSON.stringify(r), r.ok ? "ok" : "err", 12000);
+  } catch (err) { toast("ping-test: " + err.message, "err", 12000); }
+};
 if ($("admin-spawn-watchers")) $("admin-spawn-watchers").onclick = async (e) => {
   const btn = e.currentTarget;
   try {

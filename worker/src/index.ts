@@ -83,6 +83,7 @@ import { INDEX_HTML } from "./ui";
 // Re-exported so wrangler can register the DO class. The class itself
 // lives in char-watcher.ts; this is just the public binding.
 export { CharWatcher } from "./char-watcher";
+export { PingTest } from "./ping-test-do";
 
 export { ItemRulesBackfillWorkflow } from "./workflows/item-rules-backfill";
 
@@ -357,6 +358,20 @@ export default {
           return await adminBackfillWorkflowOutput(env, req);
         }
         if (pathname === "/api/admin/watchers/spawn-all" && method === "POST") return await adminSpawnAllWatchers(env);
+        // Diagnostic: instantiate a fresh PING_TEST DO. If this works
+        // while CHAR_WATCHERS is "exceeded", the throttle is per-class
+        // (CharWatcher specifically). If both fail, account-wide.
+        if (pathname === "/api/admin/ping-test" && method === "POST") {
+          if (!env.PING_TEST) return bad(503, "PING_TEST binding not deployed yet");
+          try {
+            const stub = env.PING_TEST.get(env.PING_TEST.idFromName("diag"));
+            const r = await stub.fetch("https://do/ping");
+            const body = await r.text();
+            return json({ ok: r.ok, status: r.status, body });
+          } catch (e) {
+            return json({ ok: false, error: (e as Error).message });
+          }
+        }
         if (pathname === "/api/admin/custom-events" && method === "POST") return await adminCreateCustomEvent(env, userId, req);
         const customEvAdminMatch = pathname.match(/^\/api\/admin\/custom-events\/(\d+)$/);
         if (customEvAdminMatch && method === "PATCH") return await adminUpdateCustomEvent(env, Number(customEvAdminMatch[1]), req);

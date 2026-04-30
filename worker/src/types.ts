@@ -12,6 +12,7 @@ export type ItemRulesBackfillParams = {
 export interface Env {
   DB: D1Database;
   CHAR_WATCHERS: DurableObjectNamespace;  // one DO per character (timer + per-char tick)
+  PING_TEST?: DurableObjectNamespace;     // diagnostic-only — see ping-test-do.ts
 
   /** Shop → item_rules backfill; optional when wrangler has no [[workflows]] binding. */
   BACKFILL_ITEM_RULES?: Workflow<ItemRulesBackfillParams>;
