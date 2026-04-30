@@ -1,6 +1,18 @@
+/** Payload for Workflow `item-rules-backfill` / internal backfill runner. */
+export type ItemRulesBackfillParams = {
+  /** 1–50000; omit → 10000. Legacy UI sent 40 → server maps to default. */
+  limit?: number;
+  cookie?: string;
+  /** Set only by `ItemRulesBackfillWorkflow` for live log lines in D1; never send from clients. */
+  _workflow_instance_id?: string;
+};
+
 export interface Env {
   DB: D1Database;
   CHAR_WATCHERS: DurableObjectNamespace;  // one DO per character (timer + per-char tick)
+
+  /** Shop → item_rules backfill; optional when wrangler has no [[workflows]] binding. */
+  BACKFILL_ITEM_RULES?: Workflow<ItemRulesBackfillParams>;
 
   PROFILE_BASE_URL: string;
   LOGIN_TOKEN_TTL_SECONDS: string;  // pending_logins TTL (deep-link auth)
@@ -18,6 +30,8 @@ export interface Env {
   // Prefer setting as secrets (wrangler secret put ...).
   SHOP_SCRAPER_USERNAME?: string;   // mupatos shop login (for options-page scraping)
   SHOP_SCRAPER_PASSWORD?: string;
+  /** First shop `fetch()` attempt timeout (ms); retries use ~1.5× and 2×. Plain var, default 30000; clamp 5000–120000. */
+  SHOP_FETCH_TIMEOUT_MS?: string;
 }
 
 export type EventType =
