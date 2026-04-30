@@ -354,6 +354,7 @@ export const INDEX_HTML = /* html */ `<!doctype html>
             <div id="market-offers-list" class="grid gap-2 text-xs md:grid-cols-2"></div>
           </div>
           <div id="market-list" class="grid grid-cols-1 lg:grid-cols-2 gap-3"></div>
+          <div id="market-pager" class="mt-4 hidden"></div>
         </div>
       </div>
 
@@ -1379,14 +1380,31 @@ function renderDash() {
   if (!window.__viewInitialized) {
     window.__viewInitialized = true;
     const params = new URLSearchParams(location.search);
+    // Public listing deep link: /m/:id (served by the Worker as the same SPA).
+    // The JS doesn't rely on server-side routing; we map the path to the same
+    // "open listing detail" behaviour used by ?market=.
+    try {
+      const path = String(location && location.pathname ? location.pathname : "");
+      const segs = path.split("/").filter(Boolean);
+      if (segs.length === 2 && segs[0] === "m" && /^[0-9]+$/.test(segs[1])) {
+        window.__marketDeepId = segs[1];
+      }
+    } catch {}
     let initial = "dashboard";
-    if (params.get("market")) initial = "market";
+    if (params.get("market") || window.__marketDeepId) initial = "market";
     else {
       try {
         const saved = localStorage.getItem("mlw.tab");
         if (saved === "market" || (saved === "admin" && u.is_admin) || saved === "dashboard") initial = saved;
       } catch {}
     }
+    // Deep link can also pin Market paging/sort.
+    try {
+      const sort = (params.get("sort") || "").toLowerCase();
+      if (sort === "hot" || sort === "new") marketState.sort = sort;
+      const pageRaw = Number(params.get("page") || 1);
+      if (Number.isFinite(pageRaw) && pageRaw >= 1) marketState.page = Math.min(Math.floor(pageRaw), 1000);
+    } catch {}
     setDashView(initial);
   }
 
@@ -3302,21 +3320,22 @@ function wireAdminEventRow(ev) {
 }
 
 // ---- Market ----
-const marketState = { sort: "hot", side: "", q: "", listings: [], offers: [] };
+const marketState = { sort: "hot", side: "", q: "", page: 1, limit: 40, has_more: false, listings: [], offers: [] };
 let marketSearchTimer = null;
 
 function wireMarket() {
   if (!$("market-card")) return;
   document.querySelectorAll(".market-sort").forEach((b) => {
-    b.onclick = () => { marketState.sort = b.getAttribute("data-sort"); refreshSortChips(); loadMarket(); };
+    b.onclick = () => { marketState.sort = b.getAttribute("data-sort"); marketState.page = 1; refreshSortChips(); loadMarket(); };
   });
   document.querySelectorAll(".market-side").forEach((b) => {
-    b.onclick = () => { marketState.side = b.getAttribute("data-side") || ""; refreshSideChips(); loadMarket(); };
+    b.onclick = () => { marketState.side = b.getAttribute("data-side") || ""; marketState.page = 1; refreshSideChips(); loadMarket(); };
   });
   $("market-search").addEventListener("input", () => {
     if (marketSearchTimer) clearTimeout(marketSearchTimer);
     marketSearchTimer = setTimeout(() => {
       marketState.q = $("market-search").value.trim();
+      marketState.page = 1;
       loadMarket();
     }, 250);
   });
@@ -3341,6 +3360,8 @@ let marketWarmupFired = false;
 async function loadMarket() {
   const list = $("market-list");
   list.innerHTML = '<div class="text-xs text-muted">carregando...</div>';
+  const pager = $("market-pager");
+  if (pager) { pager.className = "mt-4 hidden"; pager.innerHTML = ""; }
   // Fire-and-forget catalog warmup the first time the user opens Market.
   // Idempotent server-side: re-runs only when the items table is sparse.
   if (!marketWarmupFired) {
@@ -3352,13 +3373,39 @@ async function loadMarket() {
     params.set("sort", marketState.sort);
     if (marketState.side) params.set("side", marketState.side);
     if (marketState.q) params.set("q", marketState.q);
+    params.set("page", String(marketState.page));
+    params.set("limit", String(marketState.limit));
     const data = await fetchJSON("/api/market/listings?" + params.toString());
     marketState.listings = data.listings || [];
+    marketState.has_more = !!data.has_more;
+    marketState.limit = typeof data.limit === "number" ? data.limit : marketState.limit;
+    marketState.page = typeof data.page === "number" ? data.page : marketState.page;
     await loadMarketOffers();
     renderMarket();
+    renderMarketPager();
   } catch (e) {
     list.innerHTML = '<div class="text-xs text-danger">erro: ' + escapeHtml(e.message) + '</div>';
   }
+}
+
+function renderMarketPager() {
+  const pager = $("market-pager");
+  if (!pager) return;
+  const hasPrev = marketState.page > 1;
+  const hasNext = !!marketState.has_more;
+  pager.className = "mt-4 flex items-center justify-between gap-3";
+  pager.innerHTML =
+    '<button id="market-prev" class="h-9 px-3 rounded border border-border text-xs transition ' +
+      (hasPrev ? "text-muted hover:text-slate-200 hover:bg-bg/70" : "text-muted/40 opacity-60 cursor-not-allowed") +
+    '" ' + (hasPrev ? "" : "disabled") + '>← anterior</button>' +
+    '<div class="text-[11px] text-muted tabular-nums">página <b class="text-goldsoft">' + marketState.page + "</b></div>" +
+    '<button id="market-next" class="h-9 px-3 rounded border border-border text-xs transition ' +
+      (hasNext ? "text-muted hover:text-slate-200 hover:bg-bg/70" : "text-muted/40 opacity-60 cursor-not-allowed") +
+    '" ' + (hasNext ? "" : "disabled") + '>próxima →</button>';
+  const prev = $("market-prev");
+  const next = $("market-next");
+  if (prev) prev.onclick = () => { if (marketState.page > 1) { marketState.page--; loadMarket(); } };
+  if (next) next.onclick = () => { if (marketState.has_more) { marketState.page++; loadMarket(); } };
 }
 
 async function loadMarketOffers() {
@@ -3598,14 +3645,27 @@ function renderMarket() {
   }
   for (const l of marketState.listings) list.appendChild(renderListingCard(l));
   // Auto-open if URL has ?market=ID
-  const urlId = new URLSearchParams(location.search).get("market");
+  const params = new URLSearchParams(location.search);
+  const urlId = params.get("market") || window.__marketDeepId;
+  const openMode = (params.get("open") || "").toLowerCase(); // e.g. "comments"
   if (urlId) {
     const card = list.querySelector('[data-listing-id="' + urlId + '"]');
     if (card) {
       card.scrollIntoView({ behavior: "smooth", block: "center" });
-      const detailBtn = card.querySelector('[data-action="toggle-detail"]');
-      if (detailBtn) detailBtn.click();
+      // By default, just focus the listing. Only open the comments modal when
+      // explicitly requested via &open=comments (used by deep links).
+      if (openMode === "comments") {
+        const detailBtn = card.querySelector('[data-action="toggle-detail"]');
+        if (detailBtn) detailBtn.click();
+      } else {
+        try {
+          card.classList.add("ring-1", "ring-gold/50");
+          setTimeout(() => card.classList.remove("ring-1", "ring-gold/50"), 1800);
+        } catch {}
+      }
     }
+    // One-shot: don't keep auto-opening on re-renders.
+    try { window.__marketDeepId = null; } catch {}
   }
 }
 
@@ -3675,6 +3735,8 @@ function renderListingCard(l) {
     return bits.length ? '<div class="text-xs text-purple-200/80 mt-0.5">' + bits.join(" · ") + '</div>' : "";
   })() : "";
 
+  const shareHref = "/s/" + encodeURIComponent(String(l.id));
+
   card.innerHTML =
     '<div class="flex flex-wrap items-center gap-2 text-xs mb-2">' +
       sideBadge + kindBadge + statusBadge +
@@ -3691,8 +3753,8 @@ function renderListingCard(l) {
       '<div class="min-w-0 flex-1">' +
         '<div class="font-semibold text-base leading-tight ' + titleClass + ' whitespace-pre-wrap">' +
           (l.kind !== "char"
-            ? ('<span data-item-tip class="cursor-help">' + escapeHtml(l.item_name) + "</span>" + refineSuffix)
-            : escapeHtml(l.item_name)) +
+            ? ('<a href="' + shareHref + '" data-item-tip class="hover:underline underline-offset-4">' + escapeHtml(l.item_name) + "</a>" + refineSuffix)
+            : ('<a href="' + shareHref + '" class="hover:underline underline-offset-4">' + escapeHtml(l.item_name) + "</a>")) +
         "</div>" +
         charSummary +
         (l.kind !== "char" && attrs ? '<div class="text-xs text-muted mt-0.5">' + escapeHtml(attrs) + '</div>' : "") +
@@ -3714,6 +3776,7 @@ function renderListingCard(l) {
             '<button data-action="offer" class="h-8 inline-flex items-center text-xs px-2 rounded border border-gold/40 text-goldsoft hover:bg-gold/10">💸 fazer oferta</button>'
           )
         ) +
+        '<button data-action="share" class="h-8 inline-flex items-center gap-1 text-xs px-2 rounded border border-border text-muted hover:text-slate-200 hover:bg-bg/70">🔗 compartilhar</button>' +
         '<button data-action="toggle-detail" class="h-8 inline-flex items-center gap-1 text-xs px-2 rounded border border-border text-muted hover:text-slate-200 hover:bg-bg/70">💬 <span data-comment-count class="tabular-nums">' + (l.comment_count || 0) + '</span></button>' +
       "</div>" +
     "</div>" +
@@ -3774,7 +3837,54 @@ async function handleListingAction(action, l, card, e) {
     openOfferModal(l);
     return;
   }
+  if (action === "share") {
+    const url = buildMarketShareUrl(l.id);
+    const title = (l.item_name ? ("Mercado: " + String(l.item_name)) : ("Mercado #" + l.id));
+    const text = l.notes ? String(l.notes).slice(0, 120) : "";
+    try {
+      if (navigator && navigator.share) {
+        await navigator.share({ title, text, url });
+        toast("link compartilhado", "ok");
+        return;
+      }
+    } catch {
+      // Fall through to clipboard copy.
+    }
+    try {
+      await copyToClipboard(url);
+      toast("link copiado", "ok");
+    } catch {
+      toast("não consegui copiar o link", "err");
+    }
+    return;
+  }
   if (action === "toggle-detail") { openCommentsModal(l, card); return; }
+}
+
+function buildMarketShareUrl(listingId) {
+  const origin = (location && location.origin) ? location.origin : "";
+  return origin + "/s/" + encodeURIComponent(String(listingId));
+}
+
+async function copyToClipboard(text) {
+  const t = String(text || "");
+  if (!t) throw new Error("texto vazio");
+  if (navigator && navigator.clipboard && navigator.clipboard.writeText) {
+    await navigator.clipboard.writeText(t);
+    return;
+  }
+  // Fallback for older browsers / non-secure contexts.
+  const ta = document.createElement("textarea");
+  ta.value = t;
+  ta.setAttribute("readonly", "");
+  ta.style.position = "fixed";
+  ta.style.left = "-9999px";
+  ta.style.top = "0";
+  document.body.appendChild(ta);
+  ta.select();
+  const ok = document.execCommand && document.execCommand("copy");
+  document.body.removeChild(ta);
+  if (!ok) throw new Error("copy failed");
 }
 
 async function openCommentsModal(l, card) {

@@ -37,6 +37,8 @@ import {
   warmupCatalog,
   getItemRules,
 } from "./routes/market";
+import { renderMarketListingSharePage } from "./routes/market-share";
+import { publicListingOffer, publicListingPing } from "./routes/market-public";
 import {
   adminHealth,
   adminCharHistory,
@@ -103,6 +105,18 @@ export default {
           },
         });
       }
+
+      // Public share page for Mercado listings — lightweight HTML with OG tags.
+      const shareMatch = pathname.match(/^\/s\/(\d+)$/);
+      if (shareMatch && method === "GET") {
+        return await renderMarketListingSharePage(env, url.origin, Number(shareMatch[1]));
+      }
+
+      // Public anonymous actions from share pages.
+      const pubPing = pathname.match(/^\/api\/public\/market\/listings\/(\d+)\/ping$/);
+      if (pubPing && method === "POST") return await publicListingPing(env, req, url.origin, Number(pubPing[1]));
+      const pubOffer = pathname.match(/^\/api\/public\/market\/listings\/(\d+)\/offer$/);
+      if (pubOffer && method === "POST") return await publicListingOffer(env, req, url.origin, Number(pubOffer[1]));
 
       // ---- public auth routes ----
       if (pathname === "/api/auth/telegram/start" && method === "POST") {
