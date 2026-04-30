@@ -1328,16 +1328,32 @@ export async function adminSpawnAllWatchers(env: Env): Promise<Response> {
 
   let spawned = 0;
   let failed = 0;
+  // Capture the FIRST few error messages so the response surfaces what
+  // went wrong (was: silent swallow → "{spawned:0,failed:20}" with no
+  // diagnostic).
+  const errors: Array<{ char_id: number; error: string }> = [];
   // Modest concurrency — each spawn is one DO RPC call.
   const CONC = 10;
   for (let i = 0; i < ids.length; i += CONC) {
     const batch = ids.slice(i, i + CONC);
     const out = await Promise.all(
-      batch.map((id) => spawnWatcher(env, id).then(() => true).catch(() => false)),
+      batch.map(async (id) => {
+        try {
+          await spawnWatcher(env, id);
+          return { ok: true as const };
+        } catch (e) {
+          const msg = (e as Error)?.message || String(e);
+          console.log(`spawnWatcher failed char=${id}: ${msg}`);
+          return { ok: false as const, char_id: id, error: msg };
+        }
+      }),
     );
-    for (const ok of out) (ok ? spawned++ : failed++);
+    for (const r of out) {
+      if (r.ok) spawned++;
+      else { failed++; if (errors.length < 5) errors.push({ char_id: r.char_id, error: r.error }); }
+    }
   }
-  return json({ ok: true, total: ids.length, spawned, failed });
+  return json({ ok: true, total: ids.length, spawned, failed, errors });
 }
 
 // Trigger one immediate alarm run on a specific char's DO — handy for
