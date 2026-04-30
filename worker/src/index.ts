@@ -38,6 +38,7 @@ import {
   getItemRules,
 } from "./routes/market";
 import { renderMarketListingSharePage } from "./routes/market-share";
+import { renderMarketListingOgPng } from "./routes/market-og";
 import { publicListingOffer, publicListingPing } from "./routes/market-public";
 import {
   adminHealth,
@@ -110,6 +111,12 @@ export default {
       const shareMatch = pathname.match(/^\/s\/(\d+)$/);
       if (shareMatch && method === "GET") {
         return await renderMarketListingSharePage(env, url.origin, Number(shareMatch[1]));
+      }
+
+      // OpenGraph image (PNG) for Mercado listing shares.
+      const ogMatch = pathname.match(/^\/og\/market\/(\d+)\.png$/);
+      if (ogMatch && method === "GET") {
+        return await renderMarketListingOgPng(env, url.origin, Number(ogMatch[1]));
       }
 
       // Public anonymous actions from share pages.

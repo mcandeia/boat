@@ -369,6 +369,13 @@ const PING_MSG_MAX = 280;
 const OFFER_MSG_MAX = 280;
 const OFFER_TTL_SEC = 3600;
 
+function isJewelryCategory(category: string | null): boolean {
+  if (!category) return false;
+  const c = String(category).toLowerCase();
+  // "jewels" = upgrade gems (Bless/Soul/etc). "rings-pendants-*" = accessories shop.
+  return c === "jewels" || c.startsWith("rings-pendants") || c.startsWith("rings-pendants-");
+}
+
 // Hot ranking — engagement scaled by recency. Open listings always rank
 // above held/closed; tie-break by created_at desc.
 //   score = (reactions + 2*comments) / ((age_days) + 2)
@@ -635,7 +642,7 @@ export async function createListing(env: Env, userId: number, req: Request): Pro
   const notes = body.notes ? String(body.notes).slice(0, NOTES_MAX) : null;
   // Char listings carry resets/class/level instead of refinement/option.
   // Same sanitizer — keys not relevant to a kind are simply absent.
-  const attrs = sanitizeAttrs(body.item_attrs);
+  let attrs = sanitizeAttrs(body.item_attrs);
 
   let charId: number | null = body.char_id ?? null;
   if (charId != null) {
@@ -650,13 +657,21 @@ export async function createListing(env: Env, userId: number, req: Request): Pro
   // hint; we don't fail when it's stale. Char listings never use a slug.
   let itemSlug: string | null = kind === "char" ? null : (body.item_slug ?? null);
   let itemImageUrl: string | null = null;
+  let itemCategory: string | null = null;
   if (itemSlug) {
     const it = await env.DB
-      .prepare("SELECT image_url FROM items WHERE slug = ?")
+      .prepare("SELECT image_url, category FROM items WHERE slug = ?")
       .bind(itemSlug)
-      .first<{ image_url: string | null }>();
-    if (it) itemImageUrl = it.image_url;
+      .first<{ image_url: string | null; category: string | null }>();
+    if (it) {
+      itemImageUrl = it.image_url;
+      itemCategory = it.category ?? null;
+    }
     else itemSlug = null;
+  }
+  // Jewelry/accessories don't carry refinement/options/attributes in our marketplace.
+  if (kind === "item" && itemSlug && isJewelryCategory(itemCategory)) {
+    attrs = null;
   }
 
   const allowMessage = body.allow_message === false ? 0 : 1;
@@ -682,9 +697,9 @@ export async function updateListing(env: Env, userId: number, listingId: number,
     allow_message?: boolean;
   };
   const own = await env.DB
-    .prepare("SELECT id FROM listings WHERE id = ? AND user_id = ?")
+    .prepare("SELECT id, kind, item_slug FROM listings WHERE id = ? AND user_id = ?")
     .bind(listingId, userId)
-    .first<{ id: number }>();
+    .first<{ id: number; kind: string | null; item_slug: string | null }>();
   if (!own) return bad(404, "anúncio não encontrado");
 
   const sets: string[] = [];
@@ -702,7 +717,20 @@ export async function updateListing(env: Env, userId: number, listingId: number,
     sets.push("item_name = ?"); binds.push(name);
   }
   if (body.item_attrs !== undefined) {
-    sets.push("item_attrs = ?"); binds.push(sanitizeAttrs(body.item_attrs));
+    // For jewelry/accessories, ignore any attrs sent by the client.
+    if (own.kind === "item" && own.item_slug) {
+      const it = await env.DB
+        .prepare("SELECT category FROM items WHERE slug = ?")
+        .bind(own.item_slug)
+        .first<{ category: string | null }>();
+      if (isJewelryCategory(it?.category ?? null)) {
+        sets.push("item_attrs = ?"); binds.push(null);
+      } else {
+        sets.push("item_attrs = ?"); binds.push(sanitizeAttrs(body.item_attrs));
+      }
+    } else {
+      sets.push("item_attrs = ?"); binds.push(sanitizeAttrs(body.item_attrs));
+    }
   }
   if ((body as { item_slug?: string | null }).item_slug !== undefined) {
     let slug: string | null = (body as { item_slug?: string | null }).item_slug ?? null;
