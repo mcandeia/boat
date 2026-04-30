@@ -213,8 +213,14 @@ export async function renderMarketListingSharePage(env: Env, origin: string, lis
   ].filter(Boolean);
   const description = (descParts.join(" · ") || "Anúncio no Mercado do Mu Patos") + (statusLabel ? (" · " + statusLabel) : "");
 
-  const img = row.item_image_url
-    ? (origin + "/img-proxy?u=" + encodeURIComponent(row.item_image_url))
+  const ogPng = origin + "/og/market/" + String(row.id) + ".png";
+
+  // Inline thumbnail used by the share page itself (not the OG image).
+  const rawImg = (row.item_image_url ?? "").trim();
+  const isMupatosSprite = /^https:\/\/mupatos\.com\.br\/site\/resources\/images\//i.test(rawImg);
+  // Only proxy mupatos sprites. Other hosts (e.g. wiki/CDNs) should be used directly.
+  const img = rawImg
+    ? (isMupatosSprite ? (origin + "/img-proxy?u=" + encodeURIComponent(rawImg)) : rawImg)
     : "";
 
   const shareUrl = origin + "/s/" + String(row.id);
@@ -266,8 +272,12 @@ export async function renderMarketListingSharePage(env: Env, origin: string, lis
     '<meta property="og:title" content="' + esc(title).slice(0, 120) + '" />' +
     '<meta property="og:description" content="' + esc(description).slice(0, 300) + '" />' +
     '<meta property="og:url" content="' + esc(shareUrl) + '" />' +
-    (img ? ('<meta property="og:image" content="' + esc(img) + '" />') : "") +
-    '<meta name="twitter:card" content="' + (img ? "summary_large_image" : "summary") + '" />' +
+    '<meta property="og:image" content="' + esc(ogPng) + '" />' +
+    '<meta property="og:image:type" content="image/png" />' +
+    '<meta property="og:image:width" content="1200" />' +
+    '<meta property="og:image:height" content="630" />' +
+    '<meta name="twitter:image" content="' + esc(ogPng) + '" />' +
+    '<meta name="twitter:card" content="summary_large_image" />' +
     '<meta name="theme-color" content="#0b0f16" />' +
     "<style>" +
     "html,body{margin:0;padding:0;background:#0b0f16;color:#e5e7eb;font-family:ui-sans-serif,system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial}" +

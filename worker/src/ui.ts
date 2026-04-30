@@ -4095,9 +4095,10 @@ function openListingForm(existing) {
                 '<div data-item-results class="hidden absolute z-10 mt-1 w-full max-h-60 overflow-y-auto bg-panel border border-border rounded-md shadow-lg"></div>' +
               '</div>' +
               '<div class="text-[11px] text-muted mt-2">Dica: escolhendo pelo catálogo, o form mostra só as opções permitidas pra esse item.</div>' +
+              '<div data-jewelry-note class="hidden text-[11px] text-muted mt-2">Joia/acessório: sem refinamento, sem opções e sem atributos no Mercado.</div>' +
             '</div>' +
 
-            '<div class="rounded-lg border border-border/70 bg-bg/30 p-3 space-y-3" data-step-item="2">' +
+            '<div data-jewelry-hide class="rounded-lg border border-border/70 bg-bg/30 p-3 space-y-3" data-step-item="2">' +
               '<div class="text-[11px] text-muted uppercase tracking-widest">Opções rápidas</div>' +
               '<div class="grid grid-cols-1 sm:grid-cols-2 gap-3">' +
                 '<div data-attr-wrap="refinement" class="rounded-md border border-border/60 bg-bg/20 p-2.5">' +
@@ -4131,7 +4132,7 @@ function openListingForm(existing) {
               '<div data-attr-wrap="fullHint" class="text-[11px] text-muted">Full = Excellent + Life+28 + Luck + Skill (se o item suportar).</div>' +
             '</div>' +
 
-            '<div class="rounded-lg border border-border/70 bg-bg/30 p-3 space-y-2" data-step-item="3">' +
+            '<div data-jewelry-hide class="rounded-lg border border-border/70 bg-bg/30 p-3 space-y-2" data-step-item="3">' +
               '<div class="text-[11px] text-muted uppercase tracking-widest">Excellent (selecione as opções)</div>' +
               '<div class="text-[11px] text-muted">As opções Excellent não têm valor — é só adicionar as que o item pode ter.</div>' +
               '<input data-f="extras" type="hidden" value="' + (a.extras ? escapeHtml(a.extras) : "") + '" />' +
@@ -4145,7 +4146,7 @@ function openListingForm(existing) {
               '</div>' +
             '</div>' +
 
-            '<details class="rounded-lg border border-border/70 bg-bg/30 p-3" data-step-item="3">' +
+            '<details data-jewelry-hide class="rounded-lg border border-border/70 bg-bg/30 p-3" data-step-item="3">' +
               '<summary class="cursor-pointer text-[11px] text-muted uppercase tracking-widest">Avançado</summary>' +
               '<div class="space-y-3 mt-3">' +
                 '<div data-attr-wrap="ancient"><label class="text-[11px] text-muted block mb-1">Conjunto ancient</label>' +
@@ -4403,6 +4404,29 @@ function openListingForm(existing) {
       clearIfHidden('[data-f="full"]');
       clearIfHidden('[data-f="harmony"]');
       clearIfHidden('[data-f="ancient"]');
+    };
+
+    let jewelryMode = false;
+    const isJewelryItem = (it) => {
+      const c = String((it && it.category) || "").trim().toLowerCase();
+      return c === "jewels" || c.indexOf("rings-pendants") === 0;
+    };
+    const setJewelryMode = (on) => {
+      jewelryMode = !!on;
+      overlay.querySelectorAll("[data-jewelry-hide]").forEach((el) => el.classList.toggle("hidden", jewelryMode));
+      const note = overlay.querySelector("[data-jewelry-note]");
+      if (note) note.classList.toggle("hidden", !jewelryMode);
+      if (!jewelryMode) return;
+      // Clear any existing item attrs (server also enforces).
+      ["refinement", "option", "harmony", "ancient", "extras"].forEach((k) => {
+        const el = overlay.querySelector('[data-f="' + k + '"]');
+        if (el) el.value = "";
+      });
+      ["full", "excellent", "luck", "skill"].forEach((k) => {
+        const el = overlay.querySelector('[data-f="' + k + '"]');
+        if (el) el.checked = false;
+      });
+      try { syncFull(); } catch {}
     };
 
     const applyAncientOptions = (info) => {
@@ -4702,6 +4726,17 @@ function openListingForm(existing) {
     // the attribute controls to only the allowed ones for that item.
     overlay.addEventListener("item-picked", async (ev) => {
       const it = (ev && ev.detail) ? ev.detail : null;
+      if (isJewelryItem(it)) {
+        setJewelryMode(true);
+        lastItemInfo = null;
+        applyAllowedAttrs(null);
+        applyAncientOptions(null);
+        renderAncientAttrs(null);
+        const wrap = overlay.querySelector("[data-extra-wrap]");
+        if (wrap && wrap.__setExtraOptions) wrap.__setExtraOptions(null);
+        return;
+      }
+      setJewelryMode(false);
       const name = it && it.name ? it.name : (overlay.querySelector('[data-f="item_name"]').value || "");
       const info = await getItemDbInfo(name, it && it.slug ? it.slug : "");
       lastItemInfo = info || null;
@@ -4718,6 +4753,7 @@ function openListingForm(existing) {
 
     // If the item is cleared or is free-text (no catalog slug), allow attrs freely.
     overlay.addEventListener("item-cleared", () => {
+      setJewelryMode(false);
       lastItemInfo = null;
       applyAllowedAttrs(null);
       applyAncientOptions(null);
@@ -4732,6 +4768,7 @@ function openListingForm(existing) {
     if (itemNameInput && itemSlugInput) {
       itemNameInput.addEventListener("input", () => {
         if (!String(itemSlugInput.value || "").trim()) {
+          setJewelryMode(false);
           lastItemInfo = null;
           applyAllowedAttrs(null);
           applyAncientOptions(null);
@@ -4942,19 +4979,21 @@ function openListingForm(existing) {
       }
       const attrs = {};
       if (kindVal === "item") {
-        const refn = Number(get("refinement").value); if (Number.isInteger(refn) && refn >= 0) attrs.refinement = refn;
-        if (get("full").checked) {
-          attrs.full = true;
-        } else {
-          const opt = Number(get("option").value); if (Number.isInteger(opt) && opt >= 0) attrs.option = opt;
-          if (get("excellent").checked) attrs.excellent = true;
-          if (get("luck").checked) attrs.luck = true;
-          if (get("skill").checked) attrs.skill = true;
+        if (!jewelryMode) {
+          const refn = Number(get("refinement").value); if (Number.isInteger(refn) && refn >= 0) attrs.refinement = refn;
+          if (get("full").checked) {
+            attrs.full = true;
+          } else {
+            const opt = Number(get("option").value); if (Number.isInteger(opt) && opt >= 0) attrs.option = opt;
+            if (get("excellent").checked) attrs.excellent = true;
+            if (get("luck").checked) attrs.luck = true;
+            if (get("skill").checked) attrs.skill = true;
+          }
+          const h = (get("harmony") ? get("harmony").value.trim() : "");
+          if (h) attrs.harmony = h;
+          const anc = get("ancient").value.trim(); if (anc) attrs.ancient = anc;
+          const ext = get("extras").value.trim(); if (ext) attrs.extras = ext;
         }
-        const h = (get("harmony") ? get("harmony").value.trim() : "");
-        if (h) attrs.harmony = h;
-        const anc = get("ancient").value.trim(); if (anc) attrs.ancient = anc;
-        const ext = get("extras").value.trim(); if (ext) attrs.extras = ext;
       } else {
         // Char listings carry resets/level/class as first-class fields.
         const r = Number(get("char_resets").value); if (Number.isInteger(r) && r >= 0) attrs.resets = r;
@@ -4973,7 +5012,7 @@ function openListingForm(existing) {
         char_id: charIdVal,
         item_name,
         item_slug: slugVal,
-        item_attrs: kindVal === "item" ? attrs : null,
+        item_attrs: kindVal === "item" ? (jewelryMode ? null : attrs) : null,
         currency: currencyVal || null,
         price: isDonate || currencyVal === "free" ? null : priceVal,
         notes: get("notes").value.trim() || null,

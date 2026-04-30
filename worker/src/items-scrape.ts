@@ -43,13 +43,14 @@ function setPieces(
 }
 
 const STATIC_ITEMS: Array<{ slug: string; name: string; category: string; image_url: string | null }> = [
+  // Public images (stable direct file URLs from an MU wiki CDN).
   { slug: "jewel-of-soul",     name: "Jewel of Soul",       category: "jewels", image_url: null },
   { slug: "jewel-of-life",     name: "Jewel of Life",       category: "jewels", image_url: null },
-  { slug: "jewel-of-bless",    name: "Jewel of Bless",      category: "jewels", image_url: null },
-  { slug: "jewel-of-chaos",    name: "Jewel of Chaos",      category: "jewels", image_url: null },
-  { slug: "jewel-of-creation", name: "Jewel of Creation",   category: "jewels", image_url: null },
+  { slug: "jewel-of-bless",    name: "Jewel of Bless",      category: "jewels", image_url: "https://wiki.infinitymu.net/images/c/c8/Bless.jpg" },
+  { slug: "jewel-of-chaos",    name: "Jewel of Chaos",      category: "jewels", image_url: "https://wiki.infinitymu.net/images/e/ed/StatFruitChaos.png" },
+  { slug: "jewel-of-creation", name: "Jewel of Creation",   category: "jewels", image_url: "https://wiki.infinitymu.net/images/9/9d/StatFruitCreation.png" },
   { slug: "jewel-of-harmony",  name: "Jewel of Harmony",    category: "jewels", image_url: null },
-  { slug: "jewel-of-guardian", name: "Jewel of Guardian",   category: "jewels", image_url: null },
+  { slug: "jewel-of-guardian", name: "Jewel of Guardian",   category: "jewels", image_url: "https://wiki.infinitymu.net/images/f/fe/Jogb.jpg" },
   { slug: "armor-of-guardsman",name: "Armor of Guardsman",  category: "event-tickets", image_url: null },
   { slug: "invisibility-cloak",name: "Invisibility Cloak",  category: "event-tickets", image_url: null },
   { slug: "devils-invitation", name: "Devil's Invitation",  category: "event-tickets", image_url: null },
