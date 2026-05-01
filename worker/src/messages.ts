@@ -143,22 +143,27 @@ const TIER_RANGES_BC_MG_DL: TierRange[] = [
   { tier: 6, min: 251, max: 300 },
   { tier: 7, min: 301, max: 9999 },
 ];
+// Source of truth: the in-game DS NPC (Charon) lists these ranges.
+// DS only goes up to 6 on mupatos; the "tier 7" entry is a sentinel
+// for chars past the cap so they still resolve to a row instead of null.
 const TIER_RANGES_DS: TierRange[] = [
-  { tier: 1, min: 15,  max: 130 },
-  { tier: 2, min: 131, max: 180 },
-  { tier: 3, min: 181, max: 230 },
-  { tier: 4, min: 231, max: 280 },
-  { tier: 5, min: 281, max: 330 },
-  { tier: 6, min: 331, max: 400 },
+  { tier: 1, min: 15,  max: 110 },
+  { tier: 2, min: 111, max: 160 },
+  { tier: 3, min: 161, max: 210 },
+  { tier: 4, min: 211, max: 260 },
+  { tier: 5, min: 261, max: 310 },
+  { tier: 6, min: 311, max: 400 },
   { tier: 7, min: 401, max: 9999 },
 ];
+// MG/DL are -30 across the board (same magnitude as the BC shift),
+// so a level 280 MG sits in the same tier as a level 310 BK.
 const TIER_RANGES_DS_MG_DL: TierRange[] = [
-  { tier: 1, min: 15,  max: 100 },
-  { tier: 2, min: 101, max: 150 },
-  { tier: 3, min: 151, max: 200 },
-  { tier: 4, min: 201, max: 250 },
-  { tier: 5, min: 251, max: 300 },
-  { tier: 6, min: 301, max: 370 },
+  { tier: 1, min: 15,  max: 80 },
+  { tier: 2, min: 81,  max: 130 },
+  { tier: 3, min: 131, max: 180 },
+  { tier: 4, min: 181, max: 230 },
+  { tier: 5, min: 231, max: 280 },
+  { tier: 6, min: 281, max: 370 },
   { tier: 7, min: 371, max: 9999 },
 ];
 
