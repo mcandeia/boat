@@ -64,6 +64,7 @@ import {
   adminSpawnAllWatchers,
   adminUpdateEvent,
 } from "./routes/admin";
+import { apiRankings } from "./routes/rankings";
 import { telegramWebhook } from "./routes/telegram-webhook";
 import {
   adminCreateCustomEvent,
@@ -144,6 +145,11 @@ export default {
       // mupatos.com.br/site/resources/images/* — fixes inconsistent
       // cross-origin image loads in some browsers.
       if (pathname === "/img-proxy" && method === "GET") return await imgProxy(env, url);
+
+      // Public ranking lookup (overall + per-class). Used by the
+      // dashboard's "Próximo alvo" modal. Cached at the edge for ~5
+      // min so multiple opens don't hammer mupatos.
+      if (pathname === "/api/rankings" && method === "GET") return await apiRankings(url);
 
       // Public schedule list (used by the alert form to populate the
       // event-name dropdown). Read-only.

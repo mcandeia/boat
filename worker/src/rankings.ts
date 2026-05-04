@@ -73,6 +73,14 @@ export async function fetchRankings(): Promise<RankingMap> {
   return { overall: lists[0], byClass };
 }
 
+// Single-scope fetcher exposed for the dashboard's ranking modal. Saves us
+// pulling all 6 lists when the user just wants to look at one.
+export async function fetchRankingList(
+  scope: "overall" | ClassCode,
+): Promise<RankEntry[]> {
+  return fetchOne(scope === "overall" ? null : scope);
+}
+
 async function fetchOne(code: ClassCode | null): Promise<RankEntry[]> {
   const base = "https://mupatos.com.br/site/rankings/resets";
   const url = code ? `${base}?class=${code}` : base;

@@ -1302,21 +1302,27 @@ function renderCharLeft(container, c) {
   cards.push(statCard("🟢", "Situação", statusBadge));
 
   // Rankings (rank in the resets ladder + next target one slot above).
-  // Both are null for chars not in the top 99 — show — instead.
-  const rankOverall = c.rank_overall ? '#' + c.rank_overall : dash;
+  // Both are null for chars not in the top 99 — show — instead. Each
+  // rank/next-target value is wrapped in a button so the user can open
+  // the leaderboard modal scoped to overall or to this char's class.
+  const overallBtn = (label) => '<button data-action="open-rank" data-rank-scope="overall" data-rank-focus="' + escapeHtml(c.name) + '" class="text-left hover:underline cursor-pointer">' + label + '</button>';
+  const classBtn = (label) => c.class_code
+    ? '<button data-action="open-rank" data-rank-scope="' + escapeHtml(c.class_code.toLowerCase()) + '" data-rank-focus="' + escapeHtml(c.name) + '" class="text-left hover:underline cursor-pointer">' + label + '</button>'
+    : label;
+  const rankOverall = c.rank_overall ? overallBtn('#' + c.rank_overall) : dash;
   const classBadge = c.class_code ? ' <span class="text-muted">(' + escapeHtml(c.class_code.toUpperCase()) + ')</span>' : '';
-  const rankClass = c.rank_class ? '#' + c.rank_class + classBadge : dash;
+  const rankClass = c.rank_class ? classBtn('#' + c.rank_class) + classBadge : dash;
   cards.push(statCard("🏆", "Rank geral", rankOverall));
   cards.push(statCard("🥇", "Rank classe", rankClass));
   if (c.next_target_name && c.next_target_resets != null) {
     const gap = (c.next_target_resets - (c.resets ?? 0));
     const gapTxt = gap > 0 ? ' <span class="text-muted">(+' + gap + ' resets)</span>' : '';
-    cards.push(statCard("🎯", "Próximo alvo (classe)", '<span class="text-goldsoft">' + escapeHtml(c.next_target_name) + '</span>' + gapTxt, c.next_target_name));
+    cards.push(statCard("🎯", "Próximo alvo (classe)", classBtn('<span class="text-goldsoft">' + escapeHtml(c.next_target_name) + '</span>') + gapTxt, c.next_target_name));
   }
   if (c.global_next_target_name && c.global_next_target_resets != null) {
     const gap = (c.global_next_target_resets - (c.resets ?? 0));
     const gapTxt = gap > 0 ? ' <span class="text-muted">(+' + gap + ' resets)</span>' : '';
-    cards.push(statCard("🌐", "Próximo alvo (geral)", '<span class="text-goldsoft">' + escapeHtml(c.global_next_target_name) + '</span>' + gapTxt, c.global_next_target_name));
+    cards.push(statCard("🌐", "Próximo alvo (geral)", overallBtn('<span class="text-goldsoft">' + escapeHtml(c.global_next_target_name) + '</span>') + gapTxt, c.global_next_target_name));
   }
 
   const checked = relativeTime(c.last_checked_at);
@@ -1336,6 +1342,90 @@ function renderCharLeft(container, c) {
     '<div class="grid grid-cols-[repeat(auto-fit,minmax(140px,1fr))] gap-2.5">' + cards.join("") + '</div>' +
     checkedLine;
 }
+
+// Leaderboard modal — fetched lazily from /api/rankings (edge-cached for
+// ~5 min). focusName is the user's char; the row gets a gold highlight
+// and we auto-scroll to it so the user lands looking at their position.
+async function openRankingsModal(scope, focusName) {
+  const overlay = document.createElement("div");
+  overlay.className = "fixed inset-0 bg-black/70 flex items-start sm:items-center justify-center z-50 p-3";
+  const scopeLabel = scope === "overall" ? "geral" : String(scope).toUpperCase();
+  overlay.innerHTML =
+    '<div class="bg-panel border border-border rounded-xl w-full max-w-lg my-4 overflow-hidden flex flex-col max-h-[calc(100vh-2rem)]">' +
+      '<div class="px-4 py-3 border-b border-border/60 flex items-center gap-2">' +
+        '<div class="text-xs uppercase tracking-widest text-muted">Ranking</div>' +
+        '<div class="text-sm font-semibold text-slate-100">' + escapeHtml(scopeLabel) + '</div>' +
+        (focusName ? '<div class="text-xs text-muted truncate">· ' + escapeHtml(focusName) + '</div>' : '') +
+        '<button type="button" data-close class="ml-auto h-8 w-8 rounded-md border border-border text-muted hover:text-slate-200 hover:bg-bg/70">×</button>' +
+      "</div>" +
+      '<div class="px-2 py-2 overflow-y-auto flex-1 min-h-0" data-body>' +
+        '<div class="text-xs text-muted px-2 py-3">carregando...</div>' +
+      "</div>" +
+      '<div class="px-4 py-2 border-t border-border/60 text-[11px] text-muted" data-footer></div>' +
+    "</div>";
+  document.body.appendChild(overlay);
+
+  const close = () => overlay.remove();
+  overlay.querySelector("[data-close]").onclick = close;
+  overlay.addEventListener("click", (e) => { if (e.target === overlay) close(); });
+  window.addEventListener("keydown", function onKey(ev) {
+    if (ev.key === "Escape") { window.removeEventListener("keydown", onKey); close(); }
+  });
+
+  const body = overlay.querySelector("[data-body]");
+  const footer = overlay.querySelector("[data-footer]");
+  try {
+    const params = new URLSearchParams();
+    params.set("scope", scope || "overall");
+    if (focusName) params.set("focus", focusName);
+    const r = await fetch("/api/rankings?" + params.toString());
+    if (!r.ok) throw new Error("HTTP " + r.status);
+    const data = await r.json();
+    const entries = Array.isArray(data.entries) ? data.entries : [];
+    if (entries.length === 0) {
+      body.innerHTML = '<div class="text-xs text-muted px-2 py-3">ranking indisponível</div>';
+      return;
+    }
+    const focusLower = (focusName || "").toLowerCase();
+    let focusIdx = -1;
+    const rows = entries.map((e, i) => {
+      const isMine = focusLower && e.name && e.name.toLowerCase() === focusLower;
+      if (isMine) focusIdx = i;
+      const rowClass = isMine
+        ? "bg-gold/10 border-l-2 border-gold"
+        : "border-l-2 border-transparent hover:bg-bg/40";
+      const profileUrl = "https://mupatos.com.br/site/profile/character/" + encodeURIComponent(e.name || "");
+      return (
+        '<div class="flex items-center gap-2 px-3 py-1.5 ' + rowClass + '" data-row-idx="' + i + '">' +
+          '<span class="text-muted text-xs tabular-nums w-8 text-right">#' + (e.rank || (i + 1)) + '</span>' +
+          '<a href="' + profileUrl + '" target="_blank" rel="noopener" class="' + (isMine ? "text-goldsoft font-semibold" : "text-slate-100") + ' hover:underline truncate">' + escapeHtml(e.name || "?") + '</a>' +
+          '<span class="text-[11px] text-muted truncate">' + escapeHtml(e.className || "") + '</span>' +
+          '<span class="ml-auto text-goldsoft text-xs tabular-nums">' + (e.resets != null ? e.resets : "—") + ' rr</span>' +
+        '</div>'
+      );
+    }).join("");
+    body.innerHTML = '<div class="divide-y divide-border/40">' + rows + '</div>';
+    if (focusIdx >= 0) {
+      const target = body.querySelector('[data-row-idx="' + focusIdx + '"]');
+      if (target && target.scrollIntoView) target.scrollIntoView({ block: "center" });
+    }
+    if (data.fetched_at) {
+      footer.innerHTML = "atualizado " + escapeHtml(relativeTime(data.fetched_at) || "agora");
+    }
+  } catch (e) {
+    body.innerHTML = '<div class="text-xs text-danger px-2 py-3">erro ao carregar: ' + escapeHtml((e && e.message) || String(e)) + '</div>';
+  }
+}
+
+// Document-level delegate for the rank/next-target buttons rendered by
+// renderCharLeft. Wiring this once globally avoids re-binding on every
+// dashboard refresh.
+document.addEventListener("click", (e) => {
+  const btn = e.target && e.target.closest ? e.target.closest('[data-action="open-rank"]') : null;
+  if (!btn) return;
+  e.preventDefault();
+  openRankingsModal(btn.dataset.rankScope || "overall", btn.dataset.rankFocus || "");
+});
 
 // Per-char on-demand refresh. Called by the ↻ button and by the lazy
 // auto-refresh for chars with no last_checked_at. Updates the row in place
